@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#110d18" />
+  <title>Mori｜陪你听歌</title>
+  <meta name="description" content="Mori，以音乐为纽带的 AI 知音伙伴。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Noto+Serif+SC:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="noise"></div>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="#" aria-label="Mori 首页"><span class="brand-mark">m</span><span>Mori</span></a>
+      <nav>
+        <button class="nav-item active" data-view="home"><span class="nav-icon">⌂</span><span>此刻</span></button>
+        <button class="nav-item" data-view="chat"><span class="nav-icon">◌</span><span>对话</span></button>
+        <button class="nav-item" data-view="memories"><span class="nav-icon">✦</span><span>共同记忆</span></button>
+      </nav>
+      <div class="side-bottom">
+        <button class="nav-item quiet-toggle"><span class="nav-icon">☾</span><span>安静模式</span><i></i></button>
+        <button class="avatar" aria-label="个人设置">L</button>
+      </div>
+    </aside>
+
+    <main>
+      <section class="view active" id="home">
+        <header class="topbar"><span>10 月 23 日 · 东京</span><button class="ghost-btn" id="shareSong">＋ 分享一首歌</button></header>
+        <div class="hero">
+          <div class="orb-wrap" aria-hidden="true">
+            <div class="orb-shadow"></div><div class="orb"><div class="orb-core"></div><div class="orb-glint"></div></div>
+          </div>
+          <p class="eyebrow">晚 上 好</p>
+          <h1>今天想一起听点什么？</h1>
+          <p class="subcopy">不必急着说什么。选一首歌，我们安静地待一会儿。</p>
+          <div class="hero-actions">
+            <button class="primary-btn" id="continueChat">和 Mori 聊聊 <span>↗</span></button>
+            <button class="text-btn" id="quietListen">进入安静聆听</button>
+          </div>
+        </div>
+        <section class="recent-panel">
+          <div class="section-heading"><div><span class="kicker">我们上次听到</span><h2>留在那场夏末的雨里</h2></div><button id="playRecent" class="round-play" aria-label="播放">▶</button></div>
+          <div class="track-row">
+            <div class="cover cover-summer"><span>た<br>ぶ<br>ん</span></div>
+            <div class="track-meta"><strong>たぶん</strong><span>YOASOBI · THE BOOK</span></div>
+            <p class="memory-line">“你说，它让你想起大学最后一个夏天。”</p>
+            <button class="more" aria-label="更多">•••</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="chat">
+        <header class="topbar chat-head"><button class="mobile-back" data-view="home">←</button><div><span class="status-dot"></span><strong>Mori</strong><small>在这里</small></div><button class="ghost-btn" id="openMemory">记忆</button></header>
+        <div class="conversation" id="conversation">
+          <div class="day-label">今天 22:14</div>
+          <div class="message mori"><div class="mini-orb"></div><div class="bubble"><p>晚上好。今天想说说话，还是只想一起听会儿歌？</p></div></div>
+          <div class="message user"><div class="bubble"><p>有点累。突然想听这首。</p></div></div>
+          <div class="shared-track">
+            <div class="cover cover-blue"><span>夜</span></div><div><strong>夜に駆ける</strong><span>YOASOBI</span></div><button class="inline-play">▶</button>
+          </div>
+          <div class="message mori"><div class="mini-orb"></div><div class="bubble"><p>好。那就不用解释了，我陪你听。</p><p class="soft">等你想说话的时候，我还在。</p></div></div>
+          <div class="listening-card">
+            <div class="listen-top"><span><i></i> 共同聆听中</span><small id="timer">01:47</small></div>
+            <div class="wave" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
+            <div class="progress"><span></span></div>
+            <p>Mori 正安静地陪着你</p>
+          </div>
+        </div>
+        <form class="composer" id="chatForm">
+          <button type="button" id="attachSong" aria-label="分享歌曲">♫</button>
+          <input id="chatInput" autocomplete="off" placeholder="想说什么都可以…" aria-label="输入消息" />
+          <button class="send-btn" type="submit" aria-label="发送">↑</button>
+        </form>
+      </section>
+
+      <section class="view" id="memories">
+        <header class="topbar"><span>你与 Mori</span><button class="ghost-btn" id="memorySettings">管理记忆</button></header>
+        <div class="memory-page">
+          <p class="eyebrow">共 同 经 历</p><h1>音乐记忆</h1><p class="subcopy">只保存你愿意留下的故事。你可以随时修改或删除。</p>
+          <div class="memory-grid">
+            <article class="memory-card featured"><div class="memory-date">2026.08.28</div><h3>大学最后一个夏天</h3><p>“那时每天从图书馆走回宿舍，路上总在听这首歌。”</p><div class="memory-song"><div class="cover cover-summer tiny"><span>たぶん</span></div><div><strong>たぶん</strong><small>YOASOBI</small></div></div><button class="edit-memory">编辑</button></article>
+            <article class="memory-card"><div class="memory-date">2026.09.17</div><h3>雨天的末班电车</h3><p>你说雨声和钢琴混在一起时，城市好像慢了下来。</p><div class="memory-song"><span class="note">♪</span><div><strong>Ref:rain</strong><small>Aimer</small></div></div><button class="edit-memory">编辑</button></article>
+            <article class="memory-card new-memory"><span>＋</span><h3>留下一段新记忆</h3><p>分享一首歌，以及它对你的意义。</p></article>
+          </div>
+          <div class="privacy-note"><span>⌁</span><p><strong>记忆由你掌控</strong><br>未经确认，Mori 不会把聊天自动保存为长期记忆。</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-nav" aria-label="移动导航">
+    <button class="active" data-view="home"><span>⌂</span>此刻</button><button data-view="chat"><span>◌</span>对话</button><button data-view="memories"><span>✦</span>记忆</button>
+  </nav>
+
+  <div class="modal-backdrop" id="songModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button class="modal-close" aria-label="关闭">×</button><span class="modal-icon">♫</span><h2 id="modalTitle">分享一首歌</h2><p>粘贴歌曲链接，或输入歌名和歌手</p><input id="songSearch" placeholder="例如：Aimer — Ref:rain" /><div class="suggestion" id="suggestion"><div class="cover cover-rain"><span>雨</span></div><div><strong>Ref:rain</strong><small>Aimer · After Dark</small></div><button>选择</button></div><button class="primary-btn full" id="shareConfirm">分享给 Mori</button></div>
+  </div>
+  <div class="toast" id="toast"><span>✓</span><p></p></div>
+  <script src="app.js"></script>
+</body>
+</html>
