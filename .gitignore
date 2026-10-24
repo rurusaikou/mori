@@ -6,6 +6,6 @@ dist/
 *.tsbuildinfo
 .DS_Store
 data/*
-docs/*
+docs/
 memo
 
