@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import type { ScreenId } from '@/lib/mori-data'
 import { useMori } from './mori-context'
 import { Cover } from './primitives'
+import { useSpotify } from './spotify-context'
 
 export function StatusBar() {
   return (
@@ -72,36 +73,42 @@ function MoriNavIcon({ active }: { active: boolean }) {
 
 export function MiniPlayer() {
   const { currentTrack, isPlaying, togglePlay, navigate } = useMori()
-  if (!currentTrack) return null
+  const spotify = useSpotify()
+  const spotifyTrack = spotify.nowPlaying
+  if (spotify.fullPlayerOpen) return null
+  if (!spotifyTrack && !currentTrack) return null
+  const title = spotifyTrack?.title ?? currentTrack?.title ?? ''
+  const artist = spotifyTrack?.artist ?? currentTrack?.artist ?? ''
+  const playing = spotifyTrack ? spotify.isPlaying : isPlaying
   return (
-    <div className="relative mx-3 mb-2 flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border border-border bg-secondary/95 p-2 pr-2.5 shadow-lg shadow-black/30 animate-in fade-in slide-in-from-bottom-2">
+    <div className="absolute inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.5rem)] z-40 flex items-center gap-3 overflow-hidden rounded-2xl border border-white/12 bg-linear-to-br from-white/[0.07] via-[#211733]/80 to-primary/[0.10] p-2 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_10px_30px_rgba(8,4,20,0.32)] backdrop-blur-2xl backdrop-saturate-150 animate-in fade-in slide-in-from-bottom-2">
       <button
         type="button"
-        onClick={() => navigate('quiet')}
+        onClick={() => { if (spotifyTrack) spotify.requestFullPlayer(); navigate(spotifyTrack ? 'connect' : 'quiet') }}
         className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg"
-        aria-label={`打开安静陪伴：${currentTrack.title}`}
+        aria-label={spotifyTrack ? `返回 Spotify：${title}` : `打开安静陪伴：${title}`}
       >
-        <Cover src={currentTrack.cover} alt="" size={40} className={cn(isPlaying && 'motion-safe:animate-pulse')} />
+        {spotifyTrack ? <img src={spotifyTrack.artwork || '/placeholder.svg'} alt="" className={cn('size-10 shrink-0 rounded-lg object-cover shadow-md shadow-black/30', playing && 'motion-safe:animate-pulse')} /> : <Cover src={currentTrack!.cover} alt="" size={40} className={cn(playing && 'motion-safe:animate-pulse')} />}
         <span className="min-w-0">
-          <span className="block truncate text-sm font-medium">{currentTrack.title}</span>
+          <span className="block truncate text-sm font-medium">{title}</span>
           <span className="block truncate text-xs text-muted-foreground">
-            {isPlaying ? 'Mori 正在陪你听' : '已暂停'} · {currentTrack.artist}
+            {playing ? 'Mori 正在陪你听' : '已暂停'} · {artist}
           </span>
         </span>
       </button>
       <button
         type="button"
-        onClick={() => togglePlay()}
-        aria-label={isPlaying ? '暂停' : '播放'}
+        onClick={() => spotifyTrack ? void spotify.togglePlayback() : togglePlay()}
+        aria-label={playing ? '暂停' : '播放'}
         className="grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-95"
       >
-        {isPlaying ? <Pause className="size-4 fill-current" /> : <Play className="ml-0.5 size-4 fill-current" />}
+        {playing ? <Pause className="size-4 fill-current" /> : <Play className="ml-0.5 size-4 fill-current" />}
       </button>
       <span
-        key={currentTrack.id}
+        key={spotifyTrack?.uri ?? currentTrack?.id}
         aria-hidden="true"
-        className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-primary motion-safe:animate-[mori-progress_180s_linear_forwards]"
-        style={{ animationPlayState: isPlaying ? 'running' : 'paused' }}
+        className={cn('absolute bottom-0 left-0 h-0.5 bg-primary', spotifyTrack ? 'transition-[width] duration-500' : 'right-0 origin-left motion-safe:animate-[mori-progress_180s_linear_forwards]')}
+        style={{ width: spotifyTrack && spotify.durationMs ? `${Math.min(100, spotify.progressMs / spotify.durationMs * 100)}%` : undefined, animationPlayState: spotifyTrack ? undefined : playing ? 'running' : 'paused' }}
       />
     </div>
   )

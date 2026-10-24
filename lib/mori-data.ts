@@ -1,4 +1,4 @@
-export type ScreenId = 'home' | 'chat' | 'mood' | 'quiet' | 'memories' | 'settings' | 'connect'
+export type ScreenId = 'home' | 'chat' | 'mood' | 'quiet' | 'memories' | 'settings' | 'connect' | 'music-profile'
 
 export type Track = {
   id: string

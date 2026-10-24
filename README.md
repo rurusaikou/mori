@@ -5,7 +5,7 @@ Mori 是一款以音乐为纽带的 AI 陪伴产品。
 > From Music to the World.  
 > 陪你听歌，也陪你走向更广阔的世界。
 
-当前仓库包含 Mori 移动端 MVP 的高保真交互原型。它用于验证产品流程、视觉语言和核心体验；Spotify 账号和歌单已支持真实授权，其余 AI、播放器和持久化服务仍为原型状态。
+当前仓库包含 Mori 移动端 MVP 的高保真交互原型。Spotify 已支持真实授权、歌单读取与 Premium Web Playback SDK 播放；歌曲特征、音乐画像和 Mori 内收听记录使用本地服务端 JSON 持久化。文字 AI、心情与部分陪伴内容仍为原型状态。
 
 ## 产品目标
 
@@ -38,9 +38,9 @@ Mori 坚持以下边界：
 ### 首页
 
 - Mori 伙伴形象与问候
-- 文字聊天、记录心情、安静陪伴三个核心入口
-- 继续播放最近歌曲
-- 进入音乐服务连接页
+- 内嵌文字聊天入口，可把主页消息带入完整聊天页
+- 从首页进入陪伴偏好设置
+- 播放期间显示全局 Spotify Mini Player
 
 ### 文字聊天
 
@@ -75,15 +75,19 @@ Mori 坚持以下边界：
 ### 共同记忆
 
 - 按音乐、心情、对话和生活瞬间筛选
-- 展示歌曲与个人故事的关联
-- 从记忆卡片恢复播放状态
+- 记录 Mori 内真实 Spotify 收听次数、累计时长和最近收听时间
+- 同一歌曲按标准化歌名与歌手聚合，底层会话按 `sessionId` 去重
 
-当前数据来自本地模拟数据，尚未提供真实新增、编辑、删除和跨设备同步。
+音乐收听记忆来自服务端 `data/listening-history.json`；心情、对话和生活瞬间仍包含本地模拟数据。当前尚未提供编辑、删除和跨设备同步。
 
 ### 音乐集与音乐服务连接
 
 - Spotify OAuth PKCE 登录、Token 刷新和真实歌单同步
-- 点击歌单进入 Mori 风格的 Spotify 播放器与曲目列表
+- 连接后后台预取可读取歌单，支持 24 小时可选缓存和手动清理
+- 点击歌单先进入曲目列表，再进入 Mori 风格的 Spotify 播放器
+- 全局同步当前歌曲、播放状态和进度，跨页面使用 Mini Player 返回完整播放页
+- 播放页 Mori 律动使用缓存的 BPM 控制周期，并以 energy、danceability 控制幅度
+- 独立音乐偏好页面，通过 MeloData 分析歌曲特征并生成用户画像
 - 网易云音乐与 QQ 音乐的待合作状态
 - 从歌单进入安静陪听
 
@@ -115,7 +119,13 @@ Mori 坚持以下边界：
 
 ### 当前原型的数据状态
 
-当前版本没有后端数据库，聊天、设置和播放状态主要保存在 React 内存中。Spotify OAuth Token 保存在当前浏览器的 `localStorage`，仅适合 MVP 原型；生产版本应改为受保护的服务端会话或更强的设备安全存储。
+当前版本没有正式数据库。歌曲特征、用户音乐画像和 Mori 内收听历史由 Next.js Route Handler 写入 `data/*.json`，适合单机开发原型，不适合多实例部署或高并发写入。聊天与部分设置仍主要保存在 React 内存中。Spotify OAuth Token 保存在当前浏览器的 `localStorage`，仅适合 MVP 原型；生产版本应改为受保护的服务端会话或更强的设备安全存储。
+
+本地数据文件：
+
+- `data/music-features.json`：按 ISRC 缓存基本稳定的歌曲音频特征。
+- `data/music-profiles.json`：按 Spotify 用户 ID 保存可动态更新的偏好画像。
+- `data/listening-history.json`：按用户和 Spotify URI 保存收听汇总与最近 200 个会话快照。
 
 生产版本仍需补充：
 
@@ -136,6 +146,8 @@ Mori 坚持以下边界：
 - Tailwind CSS 4
 - Lucide React
 - pnpm
+- Spotify Web API / Web Playback SDK
+- MeloData 音乐特征 API
 
 更详细的代码说明见 [docs/CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md)。
 

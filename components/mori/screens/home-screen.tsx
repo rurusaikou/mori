@@ -1,19 +1,20 @@
 'use client'
 
-import { ChevronRight, HeartPulse, MessageCircle, Moon, Music2, Settings2 } from 'lucide-react'
-import { tracks } from '@/lib/mori-data'
+import { useState } from 'react'
+import { ArrowUp, MessageCircle, Settings2 } from 'lucide-react'
 import { Mascot } from '../mascot'
 import { useMori } from '../mori-context'
-import { IconButton, TrackCard } from '../primitives'
-
-const modes = [
-  { id: 'chat', title: '聊聊天', desc: '文字陪伴', icon: MessageCircle },
-  { id: 'mood', title: '记录心情', desc: '留住此刻', icon: HeartPulse },
-  { id: 'quiet', title: '安静陪伴', desc: '一起听歌', icon: Moon },
-] as const
+import { IconButton } from '../primitives'
 
 export function HomeScreen() {
   const { navigate } = useMori()
+  const [message, setMessage] = useState('')
+
+  function openChat() {
+    const value = message.trim()
+    if (value) sessionStorage.setItem('mori.pending-chat', value)
+    navigate('chat')
+  }
 
   return (
     <div className="no-scrollbar relative h-full overflow-y-auto px-5 pb-6">
@@ -32,58 +33,31 @@ export function HomeScreen() {
         </IconButton>
       </header>
 
-      <div className="relative flex justify-center py-8">
-        <Mascot scale={1.05} />
+      <div className="relative flex justify-center pb-10 pt-16">
+        <Mascot scale={1.18} />
       </div>
 
       <div className="relative text-center">
         <h2 className="text-xl font-semibold">晚上好，Luyang</h2>
-        <p className="mt-1.5 text-sm text-muted-foreground">今天想和我一起做什么？</p>
+        <p className="mt-1.5 text-sm text-muted-foreground">我会一直在这里陪着你。</p>
       </div>
 
-      <div className="relative mt-6 grid grid-cols-3 gap-2.5">
-        {modes.map(({ id, title, desc, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => navigate(id)}
-            className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border border-border bg-card/70 px-2 py-4 backdrop-blur transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]"
-          >
-            <span className="mb-1 grid size-10 place-items-center rounded-full bg-primary/15 text-primary">
-              <Icon className="size-5" />
-            </span>
-            <span className="text-sm font-medium">{title}</span>
-            <span className="text-xs text-muted-foreground">{desc}</span>
-          </button>
-        ))}
-      </div>
-
-      <button
-        type="button"
-        onClick={() => navigate('mood')}
-        className="relative mt-4 flex h-12 w-full items-center justify-center gap-1 rounded-full bg-linear-to-r from-primary via-[#f1e6ff] to-primary font-semibold text-primary-foreground shadow-[0_0_28px_rgba(210,160,255,0.35)] transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.99]"
-      >
-        记录此刻心情
-        <ChevronRight className="size-4" />
-      </button>
-
-      <div className="relative mt-6 flex flex-col gap-2.5">
-        <button
-          type="button"
-          onClick={() => navigate('connect')}
-          className="flex items-center gap-3 rounded-2xl border border-border bg-card/80 p-2.5 pr-3 text-left transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-primary/20 text-primary">
-            <Music2 className="size-5" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium">连接我的音乐</span>
-            <span className="block truncate text-xs text-muted-foreground">Spotify · 网易云音乐 · QQ 音乐</span>
-          </span>
-          <ChevronRight className="size-4 text-muted-foreground" />
+      <section className="relative mt-8 rounded-3xl border border-white/10 bg-card/75 p-4 shadow-lg shadow-black/10 backdrop-blur-xl">
+        <button type="button" onClick={() => navigate('chat')} className="flex w-full items-center gap-3 text-left">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/20 text-primary"><MessageCircle className="size-[18px]" /></span>
+          <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">和 Mori 聊聊</span><span className="block text-xs text-muted-foreground">随时都可以告诉我</span></span>
+          <span className="text-xs text-primary">展开</span>
         </button>
-        <TrackCard track={tracks.eveningBreeze} label="上次听到" />
-      </div>
+        <div className="mt-4 flex items-end gap-2">
+          <span aria-hidden="true" className="grid size-7 shrink-0 place-items-center rounded-full bg-linear-to-b from-[#f0d8ff] to-[#9560dd] text-xs font-bold text-[#5a3288]">M</span>
+          <p className="rounded-2xl rounded-bl-md bg-secondary px-3.5 py-2.5 text-sm leading-relaxed">今晚过得怎么样？我在听。</p>
+        </div>
+        <form onSubmit={(event) => { event.preventDefault(); openChat() }} className="mt-4 flex items-center gap-1 rounded-full border border-border bg-background/45 p-1 focus-within:border-primary/60">
+          <label htmlFor="home-chat-input" className="sr-only">给 Mori 发消息</label>
+          <input id="home-chat-input" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="和 Mori 说点什么…" autoComplete="off" className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground" />
+          <button type="submit" disabled={!message.trim()} aria-label="发送给 Mori" className="grid size-10 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-40"><ArrowUp className="size-5" /></button>
+        </form>
+      </section>
     </div>
   )
 }

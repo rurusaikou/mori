@@ -132,13 +132,32 @@
 
 @keyframes mori-equalizer {
   0%, 100% {
-    height: 2px;
-    opacity: 0.55;
+    transform: scaleY(var(--mori-eq-low, 0.18));
+    opacity: 0.5;
   }
-  45% {
-    height: 11px;
+  18% {
+    transform: scaleY(var(--mori-eq-high, 0.5));
     opacity: 1;
   }
+  38% {
+    transform: scaleY(var(--mori-eq-mid, 0.3));
+  }
+  58% {
+    transform: scaleY(var(--mori-eq-high, 0.5));
+    opacity: 0.95;
+  }
+  78% {
+    transform: scaleY(var(--mori-eq-mid, 0.3));
+  }
+}
+
+@keyframes mori-listening-aura {
+  0%, 100% { opacity: 0.25; transform: scale(0.96); }
+  50% { opacity: 0.7; transform: scale(1.06); }
+}
+
+.mori-listening-aura {
+  animation: mori-listening-aura 2.4s ease-in-out infinite;
 }
 
 .mori-equalizer-bar {
@@ -147,27 +166,15 @@
 }
 
 .is-playing .mori-equalizer-bar {
-  animation: mori-equalizer 1.05s ease-in-out infinite;
-  will-change: height;
-}
-
-.is-playing .mori-equalizer-bar:nth-child(1) {
-  animation-delay: -0.32s;
-  animation-duration: 1.12s;
-}
-
-.is-playing .mori-equalizer-bar:nth-child(2) {
-  animation-delay: -0.71s;
-  animation-duration: 0.92s;
-}
-
-.is-playing .mori-equalizer-bar:nth-child(3) {
-  animation-delay: -0.48s;
-  animation-duration: 1.28s;
+  animation: mori-equalizer var(--mori-beat-duration, 0.625s) cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform, opacity;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .mori-equalizer-bar {
+    animation: none;
+  }
+  .mori-listening-aura {
     animation: none;
   }
 }

@@ -18,6 +18,7 @@ function wait(milliseconds: number) {
 async function melodata(path: string, apiKey: string, attempt = 0): Promise<any> {
   const response = await fetch(`${MELODATA_BASE}${path}`, { headers: { Authorization: `Bearer ${apiKey}` }, cache: 'no-store' })
   if (response.status === 202) {
+    // MeloData 可能先接受分析任务再异步产出特征，遵循 Retry-After 做有限轮询。
     if (attempt < 4) {
       const retryAfter = Number(response.headers.get('retry-after'))
       await wait(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 3000)
@@ -87,6 +88,7 @@ export async function POST(request: Request) {
       return !isrc || !cache[isrc]
     })
     const fetched: MusicFeatures[] = []
+    // 小批次加间隔可降低 429；每批立即持久化，后续重试能够复用已完成结果。
     for (let index = 0; index < missing.length; index += 2) {
       const batch = await Promise.all(missing.slice(index, index + 2).map((track) => analyzeTrack(track, apiKey)))
       const completed = batch.filter((item): item is MusicFeatures => item !== null)

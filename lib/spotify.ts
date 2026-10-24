@@ -119,10 +119,20 @@ async function validToken() {
 
 async function spotifyFetch<T>(url: string): Promise<T> {
   const token = await validToken()
-  let response = await fetch(url, { headers: { Authorization: `Bearer ${token.accessToken}` } })
+  const request = (accessToken: string) => fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) })
+  let response: Response
+  try {
+    response = await request(token.accessToken)
+  } catch {
+    throw new Error('Spotify 响应超时，请稍后重试')
+  }
   if (response.status === 401 && token.refreshToken) {
     const refreshed = await refreshSpotifyToken(token)
-    response = await fetch(url, { headers: { Authorization: `Bearer ${refreshed.accessToken}` } })
+    try {
+      response = await request(refreshed.accessToken)
+    } catch {
+      throw new Error('Spotify 响应超时，请稍后重试')
+    }
   }
   if (!response.ok) throw new Error(response.status === 403 ? 'Spotify 仅允许读取本人创建或参与协作的歌单' : 'Spotify 数据读取失败')
   return response.json()

@@ -51,6 +51,13 @@ export function ChatScreen() {
     if (replyTimer.current) clearTimeout(replyTimer.current)
   }, [])
 
+  useEffect(() => {
+    const pending = sessionStorage.getItem('mori.pending-chat')
+    if (!pending) return
+    sessionStorage.removeItem('mori.pending-chat')
+    send(pending)
+  }, [])
+
   function send(text: string) {
     const value = text.trim()
     if (!value || typing) return

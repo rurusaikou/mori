@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronRight, Music2, ShieldCheck } from 'lucide-react'
+import { ChevronRight, Music2, ShieldCheck, Trash2 } from 'lucide-react'
+import { clearSpotifyTrackCache, setKeepSpotifyTrackCache, shouldKeepSpotifyTrackCache } from '@/lib/spotify-track-cache'
 import { useMori } from '../mori-context'
 import { Switch, TopBar } from '../primitives'
 
@@ -16,6 +17,7 @@ export function SettingsScreen() {
   const [responseLength, setResponseLength] = useState(45)
   const [initiative, setInitiative] = useState(50)
   const [toggles, setToggles] = useState({ moodMusic: true, greeting: true, quietHours: true })
+  const [keepMusicCache, setKeepMusicCache] = useState(() => shouldKeepSpotifyTrackCache())
 
   const sliders = [
     { id: 'responseLength', label: '回复长度', value: responseLength, set: setResponseLength, text: levelLabel(responseLength, ['简短', '适中', '详细']) },
@@ -73,6 +75,15 @@ export function SettingsScreen() {
               />
             </div>
           ))}
+        </div>
+
+        <h2 className="mb-2.5 mt-6 px-1 text-xs font-medium text-muted-foreground">缓存管理</h2>
+        <div className="divide-y divide-border overflow-hidden rounded-2xl bg-card">
+          <div className="flex items-center gap-3 px-4 py-3.5">
+            <div className="min-w-0 flex-1"><p className="text-sm font-medium">保留音乐缓存</p><p className="mt-0.5 text-xs text-muted-foreground">减少重复读取 Spotify 歌单</p></div>
+            <Switch label="保留音乐缓存" checked={keepMusicCache} onCheckedChange={(value) => { setKeepMusicCache(value); setKeepSpotifyTrackCache(value); showToast(value ? '将保留音乐缓存' : '已关闭并清理音乐缓存') }} />
+          </div>
+          <SettingsLink icon={Trash2} title="立即清理音乐缓存" desc="不会删除歌单或收听记忆" onClick={() => { clearSpotifyTrackCache(); showToast('音乐缓存已清理') }} />
         </div>
 
         <h2 className="mb-2.5 mt-6 px-1 text-xs font-medium text-muted-foreground">账号与数据</h2>

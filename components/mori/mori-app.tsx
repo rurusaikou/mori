@@ -10,6 +10,7 @@ import { HomeScreen } from './screens/home-screen'
 import { MemoriesScreen } from './screens/memories-screen'
 import { QuietScreen } from './screens/quiet-screen'
 import { SettingsScreen } from './screens/settings-screen'
+import { MusicProfileScreen } from './screens/music-profile-screen'
 import { SpotifyProvider } from './spotify-context'
 
 const screens: Record<ScreenId, () => React.ReactNode> = {
@@ -20,6 +21,7 @@ const screens: Record<ScreenId, () => React.ReactNode> = {
   memories: MemoriesScreen,
   settings: SettingsScreen,
   connect: ConnectScreen,
+  'music-profile': MusicProfileScreen,
 }
 
 const IMMERSIVE: ScreenId[] = ['mood', 'quiet']
