@@ -17,7 +17,7 @@ export function HomeScreen() {
   }
 
   return (
-    <div className="no-scrollbar relative h-full overflow-y-auto px-5 pb-6">
+    <div className="mori-mini-safe-scroll no-scrollbar relative h-full overflow-y-auto px-5">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute left-1/2 top-16 size-72 -translate-x-1/2 rounded-full bg-primary/25 blur-3xl"

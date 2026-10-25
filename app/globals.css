@@ -72,6 +72,10 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+  /* 悬浮 Mini Player 不参与文档流，滚动页用外壳下发的变量预留可滚动安全区。 */
+  .mori-mini-safe-scroll {
+    padding-bottom: max(2rem, calc(0.5rem * 2 + var(--mori-mini-player-height, 0rem)));
+  }
 }
 
 @keyframes mori-float {

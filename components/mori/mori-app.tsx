@@ -11,7 +11,7 @@ import { MemoriesScreen } from './screens/memories-screen'
 import { QuietScreen } from './screens/quiet-screen'
 import { SettingsScreen } from './screens/settings-screen'
 import { MusicProfileScreen } from './screens/music-profile-screen'
-import { SpotifyProvider } from './spotify-context'
+import { SpotifyProvider, useSpotify } from './spotify-context'
 
 const screens: Record<ScreenId, () => React.ReactNode> = {
   home: HomeScreen,
@@ -36,18 +36,20 @@ export function MoriApp() {
 }
 
 function PhoneShell() {
-  const { screen } = useMori()
+  const { screen, currentTrack } = useMori()
+  const spotify = useSpotify()
   const Screen = screens[screen]
+  const showMiniPlayer = WITH_MINI_PLAYER.includes(screen) && !spotify.fullPlayerOpen && Boolean(spotify.nowPlaying || currentTrack)
 
   return (
-    <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-linear-to-b from-[#241d47] via-background to-[#120e24] pt-[env(safe-area-inset-top)] md:h-[min(844px,calc(100dvh-48px))] md:w-[390px] md:rounded-[46px] md:pt-0 md:shadow-[0_40px_100px_rgba(0,0,0,0.7),0_0_0_10px_#0a0814,0_0_0_11px_#4a3d66]">
+    <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-linear-to-b from-[#241d47] via-background to-[#120e24] pt-[env(safe-area-inset-top)] md:h-[min(844px,calc(100dvh-48px))] md:w-[390px] md:rounded-[46px] md:pt-0 md:shadow-[0_40px_100px_rgba(0,0,0,0.7),0_0_0_10px_#0a0814,0_0_0_11px_#4a3d66]" style={{ '--mori-mini-player-height': showMiniPlayer ? '3.5rem' : '0rem' } as React.CSSProperties}>
       <StatusBar />
       <main className="relative min-h-0 flex-1">
         <div key={screen} className="absolute inset-0 animate-in fade-in slide-in-from-right-2 duration-300">
           <Screen />
         </div>
       </main>
-      {WITH_MINI_PLAYER.includes(screen) && <MiniPlayer />}
+      {showMiniPlayer && <MiniPlayer />}
       {!IMMERSIVE.includes(screen) && <BottomNav />}
       <Toast />
     </div>

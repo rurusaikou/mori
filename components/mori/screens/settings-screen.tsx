@@ -39,7 +39,7 @@ export function SettingsScreen() {
   return (
     <div className="flex h-full flex-col">
       <TopBar title="陪伴偏好" />
-      <div className="no-scrollbar flex-1 overflow-y-auto px-4 pb-6 pt-5">
+      <div className="mori-mini-safe-scroll no-scrollbar flex-1 overflow-y-auto px-4 pt-5">
         <h2 className="mb-2.5 px-1 text-xs font-medium text-muted-foreground">相处方式</h2>
         <div className="divide-y divide-border overflow-hidden rounded-2xl bg-card">
           {sliders.map((s) => (

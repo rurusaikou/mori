@@ -37,7 +37,7 @@ export function MemoriesScreen() {
   }, [spotify.user?.id])
 
   return (
-    <div className="no-scrollbar h-full overflow-y-auto pb-6">
+    <div className="mori-mini-safe-scroll no-scrollbar h-full overflow-y-auto">
       <header className="px-5 pb-4 pt-5">
         <h1 className="text-2xl font-semibold">我们的记忆</h1>
         <p className="mt-1 text-sm text-muted-foreground">每一首歌，都有属于你的时刻</p>

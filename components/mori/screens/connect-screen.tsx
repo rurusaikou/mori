@@ -152,7 +152,7 @@ export function ConnectScreen() {
         <div><h1 className="text-2xl font-semibold">我的音乐世界</h1><p className="mt-1 text-sm text-muted-foreground">歌单、收藏，以及我们一起听过的歌</p></div>
         <button type="button" aria-label={spotify.nowPlaying ? `返回正在播放：${spotify.nowPlaying.title}` : '进入喜欢的歌曲'} onClick={openCurrentPlayback} disabled={!spotify.connected} className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-full bg-primary/20 text-primary transition-colors hover:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">{spotify.nowPlaying?.artwork ? <><img src={spotify.nowPlaying.artwork} alt="" className={cn('absolute inset-0 size-full rounded-full object-cover opacity-75', spotify.isPlaying && 'motion-safe:animate-[spin_8s_linear_infinite]')} /><span className="absolute inset-0 bg-black/25" /><Play className="relative ml-0.5 size-4 fill-current text-white" /></> : <Play className="ml-0.5 size-5 fill-current" />}</button>
       </header>
-      <div className="no-scrollbar flex-1 overflow-y-auto px-4 pb-8">
+      <div className="mori-mini-safe-scroll no-scrollbar flex-1 overflow-y-auto px-4">
         <div className="px-1 pb-3 pt-2"><h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">音乐服务</h2></div>
         <ul className="flex flex-col gap-2.5">
           <li className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3">
@@ -235,7 +235,7 @@ function SpotifyCollectionDetail({ collection, onBack, onPlay }: { collection: M
       <div className="min-w-0 flex-1"><p className="text-xs text-white/55">歌单</p><h1 className="truncate text-sm font-semibold">{collection.playlist.name}</h1></div>
       {tracks.length > 0 && <button type="button" onClick={() => onPlay(tracks, 0)} className="rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">播放全部</button>}
     </header>
-    <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-7">
+    <div className="mori-mini-safe-scroll no-scrollbar min-h-0 flex-1 overflow-y-auto px-4">
       <div className="flex items-center gap-4 py-5">
         <span className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-2xl bg-white/10">{collection.playlist.images?.[0]?.url ? <img src={collection.playlist.images[0].url} alt="" className="size-full object-cover" /> : <Music2 className="size-7" />}</span>
         <div className="min-w-0"><h2 className="truncate text-xl font-semibold">{collection.playlist.name}</h2><p className="mt-1 text-sm text-white/55">{loading ? '正在读取曲目…' : `${tracks.length} 首歌曲`}</p></div>
