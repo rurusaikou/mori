@@ -31,7 +31,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="主导航"
-      className="relative z-40 grid shrink-0 grid-cols-3 overflow-visible border-t border-border bg-background/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl"
+      className="relative z-40 grid h-[4.5rem] shrink-0 grid-cols-3 overflow-visible border border-white/10 bg-[#171229]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl"
     >
       {tabs.map(({ id, label, icon: Icon, mori }) => {
         const active = screen === id
@@ -42,7 +42,8 @@ export function BottomNav() {
             onClick={() => navigate(id)}
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'relative flex h-[4.5rem] flex-col items-center justify-center gap-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+              'relative z-10 flex h-full flex-col items-center text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+              mori ? 'justify-end gap-1 pb-5' : 'justify-center gap-1 pb-4',
               active ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
             )}
           >
@@ -51,6 +52,10 @@ export function BottomNav() {
           </button>
         )
       })}
+      <span
+        aria-hidden="true"
+        className="absolute bottom-2 left-1/2 z-10 h-1 w-[108px] -translate-x-1/2 rounded-full bg-white/85"
+      />
     </nav>
   )
 }
@@ -60,13 +65,15 @@ function MoriNavIcon({ active }: { active: boolean }) {
     <span
       aria-hidden="true"
       className={cn(
-        'relative -mt-7 mb-0.5 grid size-14 place-items-center rounded-full border-[3px] border-background bg-[radial-gradient(circle_at_46%_35%,#fff8ff,#d9adff_34%,#9363df_70%)] shadow-[0_0_22px_rgba(180,148,245,0.45)] transition-transform',
-        active && 'scale-105 shadow-[0_0_28px_rgba(180,148,245,0.75)]',
+        'absolute -top-[23px] left-1/2 z-10 grid size-[52px] -translate-x-1/2 place-items-center rounded-full transition-[transform,box-shadow]',
+        active && 'scale-105 shadow-[0_0_0_1px_rgba(226,205,255,0.7),0_0_22px_rgba(180,148,245,0.72)]',
       )}
     >
-      <span className="absolute left-3 top-[22px] size-1.5 rounded-full bg-[#56347f]" />
-      <span className="absolute right-3 top-[22px] size-1.5 rounded-full bg-[#56347f]" />
-      <span className="mt-3 h-1.5 w-3 rounded-b-full border-b-2 border-[#56347f]" />
+      <span className="relative grid size-[52px] place-items-center rounded-full bg-[radial-gradient(circle_at_46%_32%,#fffaff_0%,#e6c2ff_34%,#ad79f3_68%,#7448c5_100%)] shadow-[0_0_0_1px_rgba(210,183,255,0.5),0_0_18px_rgba(180,148,245,0.48)]">
+        <span className="absolute left-[11px] top-[19px] size-1.5 rounded-full bg-[#56347f]" />
+        <span className="absolute right-[11px] top-[19px] size-1.5 rounded-full bg-[#56347f]" />
+        <span className="absolute left-1/2 top-[25px] h-1.5 w-3 -translate-x-1/2 rounded-b-full border-b-2 border-[#56347f]" />
+      </span>
     </span>
   )
 }

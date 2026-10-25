@@ -149,7 +149,12 @@ Mori 坚持以下边界：
 - Spotify Web API / Web Playback SDK
 - MeloData 音乐特征 API
 
-更详细的代码说明见 [docs/CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md)。
+更详细的说明：
+
+- [代码结构](docs/CODE_STRUCTURE.md)
+- [缓存机制](docs/CACHE_MECHANISM.md)
+- [ISRC 学习文档](docs/ISRC_GUIDE.md)
+- [音乐律动方案调研](docs/MUSIC_RHYTHM_RESEARCH.md)
 
 ## 启动项目
 

@@ -25,7 +25,7 @@ const screens: Record<ScreenId, () => React.ReactNode> = {
 }
 
 const IMMERSIVE: ScreenId[] = ['mood', 'quiet']
-const WITH_MINI_PLAYER: ScreenId[] = ['home', 'connect', 'memories', 'settings']
+const WITH_MINI_PLAYER: ScreenId[] = ['connect', 'memories', 'settings']
 
 export function MoriApp() {
   return (
