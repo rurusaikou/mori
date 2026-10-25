@@ -5,6 +5,7 @@ import { HeartPulse, LoaderCircle, MessageCircle, Music2, Sparkles } from 'lucid
 import { cn } from '@/lib/utils'
 import { memories, memoryFilters, type Memory, type MemoryType } from '@/lib/mori-data'
 import { Cover, PlayButton } from '../primitives'
+import { useMori } from '../mori-context'
 import { useSpotify } from '../spotify-context'
 
 type ListeningEvent = { sessionId: string; updatedAt: string; listenedMs: number; positionMs: number; durationMs: number; completed: boolean }
@@ -13,10 +14,11 @@ type ListeningMemory = Pick<ListeningTrackHistory, 'spotifyUri' | 'title' | 'art
 
 export function MemoriesScreen() {
   const spotify = useSpotify()
+  const { savedMemories } = useMori()
   const [filter, setFilter] = useState<'all' | MemoryType>('all')
   const [listeningMemories, setListeningMemories] = useState<ListeningMemory[]>([])
   const [loadingListening, setLoadingListening] = useState(false)
-  const visible = memories.filter((m) => m.type !== 'music' && (filter === 'all' || m.type === filter))
+  const visible = [...savedMemories, ...memories].filter((m) => m.type !== 'music' && (filter === 'all' || m.type === filter))
   const groups = visible.reduce<Record<string, Memory[]>>((acc, m) => {
     ;(acc[m.date] ??= []).push(m)
     return acc

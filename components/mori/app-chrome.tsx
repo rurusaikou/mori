@@ -22,7 +22,7 @@ export function StatusBar() {
 
 const tabs: { id: ScreenId; label: string; icon?: typeof Library; mori?: boolean }[] = [
   { id: 'connect', label: '音乐集', icon: Library },
-  { id: 'chat', label: 'Mori', mori: true },
+  { id: 'home', label: 'Mori', mori: true },
   { id: 'memories', label: '记忆', icon: Heart },
 ]
 

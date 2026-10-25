@@ -32,5 +32,17 @@ interface SpotifyPlaybackState {
   repeat_mode: number
   position: number
   duration: number
-  track_window: { current_track: { id: string; uri: string; name: string; artists: { name: string }[]; album: { images: { url: string }[] } } }
+  track_window: {
+    current_track: SpotifyPlaybackTrack
+    previous_tracks?: SpotifyPlaybackTrack[]
+    next_tracks?: SpotifyPlaybackTrack[]
+  }
+}
+
+interface SpotifyPlaybackTrack {
+  id: string
+  uri: string
+  name: string
+  artists: { name: string }[]
+  album: { images: { url: string }[] }
 }

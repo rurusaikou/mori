@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { BarChart3, Check, ChevronDown, LoaderCircle, Lock, MoreHorizontal, Music2, Pause, Play, RefreshCw, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Unplug } from 'lucide-react'
+import { BarChart3, Check, ChevronDown, LoaderCircle, Lock, MessageCircle, MoreHorizontal, Music2, Pause, Play, RefreshCw, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Sparkles, Unplug, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getSpotifyAccessToken, getSpotifyPlaylistItems, getSpotifySavedTracks, hasSpotifyLibraryScope, hasSpotifyPlaybackScopes, playSpotify, playSpotifyUris, setSpotifyRepeat, setSpotifyShuffle, startSpotifyLogin, transferSpotifyPlayback, type SpotifyPlaylist, type SpotifyTrack } from '@/lib/spotify'
 import { clearSpotifyTrackCache, loadSpotifyTrackCache, readSpotifyTrackCache, shouldKeepSpotifyTrackCache } from '@/lib/spotify-track-cache'
@@ -246,7 +246,7 @@ function SpotifyCollectionDetail({ collection, onBack, onPlay }: { collection: M
 }
 
 function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initialIndex = 0, resumeExisting = false, onBack }: { playlist: SpotifyPlaylist; initialTracks?: SpotifyTrack[]; useUris?: boolean; initialIndex?: number; resumeExisting?: boolean; onBack: () => void }) {
-  const { navigate, showToast } = useMori()
+  const { navigate, showToast, addMemory } = useMori()
   const spotify = useSpotify()
   const spotifyUrl = playlist.external_urls?.spotify
   const [tracks, setTracks] = useState<SpotifyTrack[]>(initialTracks ?? [])
@@ -256,9 +256,11 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
   const [playerState, setPlayerState] = useState<SpotifyPlaybackState | null>(null)
   const [progressMs, setProgressMs] = useState(0)
   const [trackRhythm, setTrackRhythm] = useState<{ bpm: number | null; energy: number | null; danceability: number | null } | null>(null)
-  const [panel, setPanel] = useState<'lyrics' | 'playlist'>('lyrics')
+  const [panel, setPanel] = useState<'together' | 'playlist'>('together')
   const [shuffle, setShuffle] = useState(false)
   const [repeatMode, setRepeatMode] = useState<'off' | 'context' | 'track'>('off')
+  const [momentOpen, setMomentOpen] = useState(false)
+  const [momentNote, setMomentNote] = useState('')
   const [updatingPlaybackMode, setUpdatingPlaybackMode] = useState<'shuffle' | 'repeat' | null>(null)
   const playerRef = useRef<SpotifyPlayer | null>(null)
   const startedRef = useRef(false)
@@ -341,6 +343,11 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
   const paused = playerState?.paused ?? true
   const currentTrack = playerState?.track_window.current_track
   const artwork = currentTrack?.album.images[0]?.url ?? playlist.images?.[0]?.url
+  const listeningCompanion = getListeningCompanion(trackRhythm)
+  const currentTrackIndex = tracks.findIndex((track) => track.uri === currentUri)
+  const upcomingTracks = playerState?.track_window.next_tracks
+    ? playerState.track_window.next_tracks.slice(0, 4)
+    : tracks.slice(currentTrackIndex >= 0 ? currentTrackIndex + 1 : 0, currentTrackIndex >= 0 ? currentTrackIndex + 5 : 4)
   progressRef.current = progressMs
 
   useEffect(() => {
@@ -431,6 +438,15 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
     } catch (cause) { setError(cause instanceof Error ? cause.message : '播放失败') }
   }
 
+  async function playUpcoming(track: { uri: string }) {
+    const followingIndex = tracks.findIndex((item, index) => index > currentTrackIndex && item.uri === track.uri)
+    const trackIndex = followingIndex >= 0 ? followingIndex : tracks.findIndex((item) => item.uri === track.uri)
+    if (trackIndex >= 0) { await playAt(trackIndex); return }
+    if (!deviceId) { setError('Mori 播放器还在连接 Spotify，请稍后再试'); return }
+    try { await playSpotifyUris(deviceId, [track.uri], 0) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '播放失败') }
+  }
+
   useEffect(() => {
     if (resumeExisting) { startedRef.current = true; return }
     if (!deviceId || !tracks.length || startedRef.current) return
@@ -470,6 +486,24 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
     } finally { setUpdatingPlaybackMode(null) }
   }
 
+  function saveListeningMoment() {
+    const track = currentTrack ?? tracks[0]
+    if (!track) return
+    const now = new Date()
+    const artist = track.artists.map((item) => item.name).join('、')
+    addMemory({
+      id: `moment-${now.getTime()}`,
+      date: '今天',
+      type: 'moment',
+      title: `一起听了《${track.name}》`,
+      note: momentNote.trim() || `${artist ? `${artist} · ` : ''}把和 Mori 一起听歌的这一刻记了下来。`,
+      time: new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(now),
+    })
+    setMomentNote('')
+    setMomentOpen(false)
+    showToast('已记录到共同记忆 · 瞬间')
+  }
+
   return <div className="relative flex h-full flex-col overflow-hidden bg-[#17112d] md:-mt-11 md:h-[calc(100%+2.75rem)]">
     {artwork && <><img src={artwork} alt="" className="absolute inset-0 size-full scale-125 object-cover opacity-35 blur-3xl" /><div className="absolute inset-0 bg-linear-to-b from-[#eee9ff]/25 via-[#24193b]/65 to-[#120d24]" /></>}
     <header className="relative z-10 grid h-14 shrink-0 grid-cols-[44px_1fr_44px] items-center px-2 md:h-[6.25rem] md:pt-11">
@@ -500,16 +534,41 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
 
       <section className="mt-5 rounded-3xl border border-white/15 bg-white/10 p-4 backdrop-blur-2xl">
         <div className="grid grid-cols-2 gap-1 rounded-full bg-black/10 p-1">
-          <button type="button" onClick={() => setPanel('lyrics')} className={cn('rounded-full px-3 py-2 text-xs transition-colors', panel === 'lyrics' ? 'bg-white text-[#392556] shadow-sm' : 'text-white/65')}>歌词</button>
+          <button type="button" onClick={() => setPanel('together')} className={cn('rounded-full px-3 py-2 text-xs transition-colors', panel === 'together' ? 'bg-white text-[#392556] shadow-sm' : 'text-white/65')}>一起听</button>
           <button type="button" onClick={() => setPanel('playlist')} className={cn('rounded-full px-3 py-2 text-xs transition-colors', panel === 'playlist' ? 'bg-white text-[#392556] shadow-sm' : 'text-white/65')}>歌单</button>
         </div>
-        {panel === 'lyrics' && <div className="py-7 text-center"><p className="text-sm font-medium">歌词暂未接入</p><p className="mx-auto mt-2 max-w-64 text-xs leading-relaxed text-white/55">Spotify 不向第三方开放歌词正文。接入有版权授权的歌词服务后，这里会显示同步歌词。</p></div>}
+        {panel === 'together' && <div className="px-1 pb-1 pt-5">
+          <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/20"><Mascot scale={0.24} /></span><div className="min-w-0"><p className="text-sm font-medium">Mori 正在陪你听</p><p className="mt-1 text-xs leading-relaxed text-white/65">{listeningCompanion.message}</p></div></div>
+          {listeningCompanion.tags.length > 0 && <div className="mt-4 flex flex-wrap gap-2">{listeningCompanion.tags.map((tag) => <span key={tag} className="rounded-full bg-white/[0.07] px-2.5 py-1 text-[11px] text-white/60">{tag}</span>)}</div>}
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => navigate('chat')} className="flex items-center justify-center gap-1.5 rounded-full border border-white/12 bg-white/[0.06] px-3 py-2.5 text-xs transition-colors hover:bg-white/10"><MessageCircle className="size-3.5" />聊聊这首歌</button>
+            <button type="button" onClick={() => setMomentOpen(true)} className="flex items-center justify-center gap-1.5 rounded-full border border-white/12 bg-white/[0.06] px-3 py-2.5 text-xs transition-colors hover:bg-white/10"><Sparkles className="size-3.5" />记录瞬间</button>
+          </div>
+        </div>}
         {panel === 'playlist' && (loading ? <div className="grid place-items-center py-8"><LoaderCircle className="size-5 animate-spin" /></div> : tracks.length ? <ol className="mt-3 max-h-64 overflow-y-auto">{tracks.map((track,index) => <li key={`${track.uri}-${index}`}><button type="button" disabled={!canPlay} onClick={() => void playAt(index)} className={cn('flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left', currentUri === track.uri && 'bg-white/10')}><span className="w-5 text-center text-xs text-white/50">{index+1}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm">{track.name}</span><span className="block truncate text-xs text-white/50">{track.artists.map((artist) => artist.name).join('、')}</span></span><span className="text-xs text-white/50">{formatDuration(track.duration_ms)}</span></button></li>)}</ol> : <p className="py-7 text-center text-xs text-white/55">暂时无法读取这个歌单的曲目</p>)}
       </section>
 
-      {tracks.length > 1 && <section className="mt-6"><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold">接下来播放</h3><button type="button" onClick={() => setPanel('playlist')} className="text-xs text-white/55">查看全部</button></div><div className="no-scrollbar flex gap-3 overflow-x-auto">{tracks.slice(1,5).map((track,index) => <button key={track.uri} onClick={() => void playAt(index+1)} className="w-24 shrink-0 text-left"><span className="grid aspect-square place-items-center overflow-hidden rounded-2xl bg-white/10">{track.album.images?.[0]?.url ? <img src={track.album.images[0].url} alt="" className="size-full object-cover" /> : <Music2 />}</span><span className="mt-2 block truncate text-xs font-medium">{track.name}</span><span className="block truncate text-[11px] text-white/50">{track.artists.map(a=>a.name).join('、')}</span></button>)}</div></section>}
+      {upcomingTracks.length > 0 && <section className="mt-6"><h3 className="mb-3 text-sm font-semibold">接下来播放</h3><div className="no-scrollbar flex gap-3 overflow-x-auto">{upcomingTracks.map((track,index) => <button key={`${track.uri}-${index}`} onClick={() => void playUpcoming(track)} className="w-24 shrink-0 text-left"><span className="grid aspect-square place-items-center overflow-hidden rounded-2xl bg-white/10">{track.album.images?.[0]?.url ? <img src={track.album.images[0].url} alt="" className="size-full object-cover" /> : <Music2 />}</span><span className="mt-2 block truncate text-xs font-medium">{track.name}</span><span className="block truncate text-[11px] text-white/50">{track.artists.map(a=>a.name).join('、')}</span></button>)}</div></section>}
       <p className="mt-5 text-center text-[10px] text-white/45">播放服务由 Spotify 提供 · Mori 内播放需要 Premium</p>
     </div>
+
+    {momentOpen && <>
+      <button type="button" aria-label="关闭瞬间记录" onClick={() => setMomentOpen(false)} className="absolute inset-0 z-20 bg-[#090613]/55 backdrop-blur-[2px]" />
+      <section role="dialog" aria-modal="true" aria-labelledby="moment-title" className="absolute inset-x-0 bottom-0 z-30 rounded-t-[28px] border border-white/15 bg-linear-to-b from-[#35244f] to-[#17112d] px-5 pb-[max(1.75rem,env(safe-area-inset-bottom))] pt-5 shadow-[0_-20px_60px_rgba(5,2,18,0.5)] animate-in fade-in slide-in-from-bottom-4 duration-200">
+        <button type="button" onClick={() => setMomentOpen(false)} aria-label="关闭" className="absolute right-4 top-4 grid size-9 place-items-center rounded-full text-white/65 hover:bg-white/10"><X className="size-5" /></button>
+        <div className="text-center"><h2 id="moment-title" className="flex items-center justify-center gap-2 text-xl font-semibold"><Sparkles className="size-5 text-[#cf8cff]" />记录这一刻</h2><p className="mt-2 text-sm text-white/60">听到这里，有什么想法吗？</p></div>
+        <div className="mt-5 flex items-center gap-3 rounded-2xl bg-white/[0.07] p-3">
+          <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-xl bg-white/10">{artwork ? <img src={artwork} alt="" className="size-full object-cover" /> : <Music2 className="size-5" />}</span>
+          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{currentTrack?.name ?? tracks[0]?.name ?? playlist.name}</span><span className="mt-0.5 block truncate text-xs text-white/55">{currentTrack?.artists.map((item) => item.name).join('、') ?? tracks[0]?.artists.map((item) => item.name).join('、') ?? 'Spotify'}</span><span className="mt-1 block text-xs text-white/45">{formatDuration(progressMs)} / {formatDuration(playerState?.duration ?? tracks[0]?.duration_ms ?? 0)}</span></span>
+        </div>
+        <div className="relative mt-3">
+          <label htmlFor="moment-note" className="sr-only">写下这一刻</label>
+          <textarea id="moment-note" value={momentNote} onChange={(event) => setMomentNote(event.target.value)} maxLength={200} rows={4} autoFocus placeholder={'写下一句话…\n可以是此刻的心情、回忆，或任何想记住的瞬间。'} className="block w-full resize-none rounded-2xl border border-primary/55 bg-white/[0.05] px-4 pb-8 pt-3 text-sm leading-relaxed outline-none placeholder:text-white/40 focus:border-primary focus:ring-2 focus:ring-primary/15" />
+          <span className="pointer-events-none absolute bottom-3 right-3 text-[11px] text-white/40">{momentNote.length}/200</span>
+        </div>
+        <button type="button" onClick={saveListeningMoment} className="mt-5 h-12 w-full rounded-full border border-white/20 bg-linear-to-b from-[#a86fe0]/60 to-[#7440b8]/55 font-semibold text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_28px_rgba(63,31,110,0.28)] backdrop-blur-xl transition-colors hover:from-[#b47be8]/65 hover:to-[#804cc2]/60">确认</button>
+      </section>
+    </>}
   </div>
 }
 
@@ -531,6 +590,27 @@ function ListeningMori({ listening, rhythm }: { listening: boolean; rhythm: { bp
     </span>
     <Mascot scale={0.38} mood={listening ? 'talking' : 'idle'} className="drop-shadow-[0_0_10px_rgba(190,150,255,.55)]" />
   </span>
+}
+
+function getListeningCompanion(rhythm: { bpm: number | null; energy: number | null; danceability: number | null } | null) {
+  if (!rhythm) {
+    return { message: '不用急着理解这首歌，先和它待一会儿。我会陪你听完。', tags: [] as string[] }
+  }
+  const energy = rhythm.energy ?? 0.5
+  const danceability = rhythm.danceability ?? 0.5
+  const message = energy >= 0.68
+    ? '这首歌的能量比较充足，适合跟着节奏把状态慢慢带起来。'
+    : energy <= 0.35
+      ? '这首歌的能量比较轻，适合放慢一点，让注意力自然沉下来。'
+      : danceability >= 0.65
+        ? '这首歌有比较清晰的律动感，不妨先跟着节奏轻轻晃一会儿。'
+        : '这首歌的节奏比较平稳，适合把当下交给音乐一会儿。'
+  const tags = [
+    rhythm.bpm ? `${Math.round(rhythm.bpm)} BPM` : null,
+    energy >= 0.68 ? '能量充足' : energy <= 0.35 ? '轻柔舒缓' : '能量适中',
+    danceability >= 0.65 ? '律动明显' : '节奏平稳',
+  ].filter((tag): tag is string => Boolean(tag))
+  return { message, tags }
 }
 
 function formatDuration(milliseconds: number) {

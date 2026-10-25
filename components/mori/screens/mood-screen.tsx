@@ -3,10 +3,10 @@
 import { useMemo, useState } from 'react'
 import { Check, ChevronLeft, Music2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { tracks } from '@/lib/mori-data'
 import { Mascot } from '../mascot'
 import { useMori } from '../mori-context'
 import { Cover } from '../primitives'
+import { useSpotify } from '../spotify-context'
 
 const feelings = ['平静', '满足', '轻松', '期待', '有力量', '无所谓', '疲惫', '焦虑', '孤单', '难过']
 const influences = ['工作', '学习', '家人', '朋友', '关系', '健康', '睡眠', '天气', '旅行', '兴趣', '金钱', '当下发生的事']
@@ -19,22 +19,44 @@ const moodCopy = [
 ]
 
 export function MoodScreen() {
-  const { back, navigate, showToast } = useMori()
+  const { back, navigate, showToast, addMemory, currentTrack, isPlaying } = useMori()
+  const spotify = useSpotify()
   const [step, setStep] = useState(0)
   const [score, setScore] = useState(2)
   const [selectedFeelings, setSelectedFeelings] = useState<string[]>([])
   const [selectedInfluences, setSelectedInfluences] = useState<string[]>([])
+  const [detail, setDetail] = useState('')
   const [withMusic, setWithMusic] = useState(true)
   const mood = moodCopy[score]
+  const playbackTrack = spotify.nowPlaying
+    ? { id: spotify.nowPlaying.uri, title: spotify.nowPlaying.title, artist: spotify.nowPlaying.artist, cover: spotify.nowPlaying.artwork || '/placeholder.svg' }
+    : currentTrack
+  const attachMusic = withMusic && Boolean(playbackTrack)
+  const finalStep = playbackTrack ? 3 : 2
 
   const title = useMemo(() => ['记录此刻', '它更像哪种感受？', '是什么影响了你？', '为此刻留一首歌'][step], [step])
   const toggle = (value: string, list: string[], set: (next: string[]) => void) =>
     set(list.includes(value) ? list.filter((item) => item !== value) : [...list, value])
 
   function next() {
-    if (step === 3) {
+    if (step === finalStep) {
+      const now = new Date()
+      const influenceNote = selectedInfluences.length
+        ? `主要受到${selectedInfluences.join('、')}的影响`
+        : '记录了此刻的心情'
+      const detailNote = detail.trim()
+      const musicNote = attachMusic && playbackTrack ? `，也把《${playbackTrack.title}》留在了这段心情里` : ''
+      addMemory({
+        id: `mood-${now.getTime()}`,
+        date: '今天',
+        type: 'mood',
+        title: `${mood.label}${selectedFeelings.length ? ` · ${selectedFeelings.join('、')}` : ''}`,
+        note: `${influenceNote}${musicNote}。${detailNote ? ` ${detailNote}` : ''}`,
+        time: new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(now),
+        track: attachMusic ? playbackTrack ?? undefined : undefined,
+      })
       showToast(`已记录：${mood.label}${selectedFeelings.length ? ` · ${selectedFeelings.join('、')}` : ''}`)
-      navigate('memories')
+      navigate('chat')
       return
     }
     setStep((s) => s + 1)
@@ -48,7 +70,7 @@ export function MoodScreen() {
         </button>
         <div className="text-center">
           <p className="text-[11px] tracking-[0.18em] text-muted-foreground">心 情 记 录</p>
-          <p className="mt-1 text-xs text-primary">{step + 1} / 4</p>
+          <p className="mt-1 text-xs text-primary">{step + 1} / {finalStep + 1}</p>
         </div>
         <button type="button" aria-label="关闭" onClick={() => navigate('home')} className="grid size-11 place-items-center rounded-full bg-white/[0.06]">
           <X className="size-5" />
@@ -82,17 +104,27 @@ export function MoodScreen() {
             <MoodSummary mood={mood.label} color={mood.color} detail={selectedFeelings.join('、')} />
             <p className="mb-3 mt-8 text-sm text-muted-foreground">哪些事情最影响此刻？可以跳过。</p>
             <ChipGrid values={influences} selected={selectedInfluences} onToggle={(v) => toggle(v, selectedInfluences, setSelectedInfluences)} />
+            <label htmlFor="mood-detail" className="sr-only">详细说说此刻的心情</label>
+            <textarea
+              id="mood-detail"
+              value={detail}
+              onChange={(event) => setDetail(event.target.value)}
+              placeholder="详细说说…"
+              rows={3}
+              maxLength={240}
+              className="mt-4 block w-full resize-none rounded-2xl border border-border bg-white/[0.05] px-4 py-3 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/60 focus:bg-white/[0.07] focus:ring-2 focus:ring-primary/15"
+            />
           </div>
         )}
 
-        {step === 3 && (
+        {step === 3 && playbackTrack && (
           <div className="pt-6">
             <MoodSummary mood={mood.label} color={mood.color} detail={[...selectedFeelings, ...selectedInfluences].join(' · ')} />
             <div className="mt-8 rounded-3xl border border-border bg-card/85 p-4">
               <div className="flex items-center gap-2"><Music2 className="size-4 text-primary" /><h2 className="text-sm font-medium">把正在听的歌留在这段心情里</h2></div>
               <button type="button" onClick={() => setWithMusic(!withMusic)} className={cn('mt-4 flex w-full items-center gap-3 rounded-2xl border p-3 text-left', withMusic ? 'border-primary/60 bg-primary/10' : 'border-border')}>
-                <Cover src={tracks.eveningBreeze.cover} alt="晚风封面" size={48} />
-                <span className="min-w-0 flex-1"><span className="block text-sm font-medium">晚风</span><span className="text-xs text-muted-foreground">YOASOBI · 此刻正在播放</span></span>
+                <Cover src={playbackTrack.cover} alt={`${playbackTrack.title}封面`} size={48} />
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{playbackTrack.title}</span><span className="block truncate text-xs text-muted-foreground">{playbackTrack.artist} · {spotify.nowPlaying ? (spotify.isPlaying ? '此刻正在播放' : '当前歌曲已暂停') : (isPlaying ? '此刻正在播放' : '当前歌曲已暂停')}</span></span>
                 <span className={cn('grid size-6 place-items-center rounded-full border', withMusic && 'border-primary bg-primary text-primary-foreground')}>{withMusic && <Check className="size-3.5" />}</span>
               </button>
             </div>
@@ -103,7 +135,7 @@ export function MoodScreen() {
 
       <div className="shrink-0 px-5 pb-7 pt-3">
         <button type="button" onClick={next} className="h-13 w-full rounded-full bg-primary font-semibold text-primary-foreground shadow-[0_0_28px_rgba(180,148,245,0.3)]">
-          {step === 3 ? '保存心情' : '下一步'}
+          {step === finalStep ? '保存心情' : '下一步'}
         </button>
       </div>
     </div>
