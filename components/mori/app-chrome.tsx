@@ -31,8 +31,9 @@ export function BottomNav() {
   return (
     <nav
       aria-label="主导航"
-      className="relative z-40 grid h-[4.5rem] shrink-0 grid-cols-3 overflow-visible border border-white/10 bg-[#171229]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl"
+      className="relative z-40 flex w-44 shrink-0 flex-col border-r border-white/10 bg-[#171229]/90 px-3 pb-4 pt-14 backdrop-blur-2xl"
     >
+      <div className="mb-8 px-3"><p className="text-xl font-semibold tracking-tight">Mori</p><p className="mt-1 text-xs text-muted-foreground">音乐陪伴空间</p></div>
       {tabs.map(({ id, label, icon: Icon, mori }) => {
         const active = screen === id
         return (
@@ -42,20 +43,16 @@ export function BottomNav() {
             onClick={() => navigate(id)}
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'relative z-10 flex h-full flex-col items-center text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-              mori ? 'justify-end gap-1 pb-5' : 'justify-center gap-1 pb-4',
-              active ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+              'relative z-10 mb-1 flex h-11 items-center gap-3 rounded-xl px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+              active ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-white/[0.05] hover:text-foreground',
             )}
           >
             {mori ? <MoriNavIcon active={active} /> : Icon ? <Icon className={cn('size-5', active && 'fill-primary/20')} strokeWidth={active ? 2.25 : 1.75} /> : null}
-            {label}
+            <span>{label}</span>
           </button>
         )
       })}
-      <span
-        aria-hidden="true"
-        className="absolute bottom-2 left-1/2 z-10 h-1 w-[108px] -translate-x-1/2 rounded-full bg-white/85"
-      />
+      <p className="mt-auto px-3 text-[10px] leading-relaxed text-white/35">Spotify 提供音乐服务<br />Mori 提供陪伴与记忆</p>
     </nav>
   )
 }
@@ -65,14 +62,14 @@ function MoriNavIcon({ active }: { active: boolean }) {
     <span
       aria-hidden="true"
       className={cn(
-        'absolute -top-[23px] left-1/2 z-10 grid size-[52px] -translate-x-1/2 place-items-center rounded-full transition-[transform,box-shadow]',
-        active && 'scale-105 shadow-[0_0_0_1px_rgba(226,205,255,0.7),0_0_22px_rgba(180,148,245,0.72)]',
+        'relative grid size-6 shrink-0 place-items-center rounded-full transition-[transform,box-shadow]',
+        active && 'shadow-[0_0_12px_rgba(180,148,245,0.72)]',
       )}
     >
-      <span className="relative grid size-[52px] place-items-center rounded-full bg-[radial-gradient(circle_at_46%_32%,#fffaff_0%,#e6c2ff_34%,#ad79f3_68%,#7448c5_100%)] shadow-[0_0_0_1px_rgba(210,183,255,0.5),0_0_18px_rgba(180,148,245,0.48)]">
-        <span className="absolute left-[11px] top-[19px] size-1.5 rounded-full bg-[#56347f]" />
-        <span className="absolute right-[11px] top-[19px] size-1.5 rounded-full bg-[#56347f]" />
-        <span className="absolute left-1/2 top-[25px] h-1.5 w-3 -translate-x-1/2 rounded-b-full border-b-2 border-[#56347f]" />
+      <span className="relative grid size-6 place-items-center rounded-full bg-[radial-gradient(circle_at_46%_32%,#fffaff_0%,#e6c2ff_34%,#ad79f3_68%,#7448c5_100%)] shadow-[0_0_0_1px_rgba(210,183,255,0.5)]">
+        <span className="absolute left-[5px] top-[9px] size-1 rounded-full bg-[#56347f]" />
+        <span className="absolute right-[5px] top-[9px] size-1 rounded-full bg-[#56347f]" />
+        <span className="absolute left-1/2 top-[12px] h-1 w-2 -translate-x-1/2 rounded-b-full border-b border-[#56347f]" />
       </span>
     </span>
   )
@@ -88,7 +85,7 @@ export function MiniPlayer() {
   const artist = spotifyTrack?.artist ?? currentTrack?.artist ?? ''
   const playing = spotifyTrack ? spotify.isPlaying : isPlaying
   return (
-    <div className="absolute inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.5rem)] z-40 flex items-center gap-3 overflow-hidden rounded-2xl border border-white/12 bg-linear-to-br from-white/[0.07] via-[#211733]/80 to-primary/[0.10] p-2 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_10px_30px_rgba(8,4,20,0.32)] backdrop-blur-2xl backdrop-saturate-150 animate-in fade-in slide-in-from-bottom-2">
+    <div className="absolute inset-x-5 bottom-5 z-40 flex items-center gap-3 overflow-hidden rounded-2xl border border-white/12 bg-linear-to-br from-white/[0.07] via-[#211733]/80 to-primary/[0.10] p-2 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_10px_30px_rgba(8,4,20,0.32)] backdrop-blur-2xl backdrop-saturate-150 animate-in fade-in slide-in-from-bottom-2">
       <button
         type="button"
         onClick={() => {

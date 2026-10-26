@@ -5,6 +5,7 @@
   "packageManager": "pnpm@12.3.4",
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
+    "desktop:dev": "node scripts/desktop-dev.mjs",
     "build": "next build",
     "start": "next start"
   },
@@ -26,6 +27,7 @@
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^45.0.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.3.3",
     "typescript": "5.7.3"
