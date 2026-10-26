@@ -6,5 +6,8 @@ node_modules/
 .DS_Store
 data/
 docs/
+!docs/
+docs/*
+!docs/SPOTIFY_WEB_PLAYBACK_SDK.md
 memo
 

@@ -14,6 +14,7 @@ interface Window {
 interface SpotifyPlayer {
   connect(): Promise<boolean>
   disconnect(): void
+  activateElement(): Promise<void>
   togglePlay(): Promise<void>
   nextTrack(): Promise<void>
   previousTrack(): Promise<void>

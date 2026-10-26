@@ -85,7 +85,7 @@ Mori 坚持以下边界：
 - Spotify OAuth PKCE 登录、Token 刷新和真实歌单同步
 - 连接后后台预取可读取歌单，支持 24 小时可选缓存和手动清理
 - 点击歌单先进入曲目列表，再进入 Mori 风格的 Spotify 播放器
-- 全局同步当前歌曲、播放状态和进度，跨页面使用 Mini Player 返回完整播放页
+- 全局同步当前歌曲、播放状态和进度；从 Mini Player 返回完整播放页时，首屏直接复用全局状态，避免等待 SDK 期间显示错误曲目
 - “接下来播放”优先读取 Spotify Web Playback SDK 的真实待播队列，尚未取得队列时才按当前歌曲在歌单中的位置回退展示
 - 播放页 Mori 律动使用缓存的 BPM 控制周期，并以 energy、danceability 控制幅度
 - 播放页“一起听”基于可用的节奏特征提供克制的陪伴描述，并连接聊天与共同记忆中的瞬间记录
@@ -98,6 +98,8 @@ Mori 坚持以下边界：
 首页与文字对话共享当前播放状态、聊天记录和输入草稿；聊天页是首页陪伴状态的展开，返回首页后会继续显示 Mori 最近一条回复。
 
 点击歌单会进入 Mori 风格的播放器，并保留跳转 Spotify 的入口。播放底层使用 Spotify Web Playback SDK，不代理、修改或下载音乐内容；Mori 内播放需要 Spotify Premium，并需要 `streaming`、读取播放状态和控制播放权限。
+
+从 Mini Player 恢复完整播放器时，会在点击手势内激活浏览器音频，以满足 Safari 等浏览器对 SDK 发声的限制。打开页面本身只读取 Spotify 状态，不自动转移设备或改变播放；播放、暂停和切歌仅由用户在 Mori 中的明确操作触发。
 
 ### 陪伴偏好
 
@@ -159,6 +161,7 @@ Mori 坚持以下边界：
 - [缓存机制](docs/CACHE_MECHANISM.md)
 - [ISRC 学习文档](docs/ISRC_GUIDE.md)
 - [音乐律动方案调研](docs/MUSIC_RHYTHM_RESEARCH.md)
+- [Spotify Web Playback SDK 说明](docs/SPOTIFY_WEB_PLAYBACK_SDK.md)
 
 ## 启动项目
 

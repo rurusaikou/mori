@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BarChart3, Check, ChevronDown, LoaderCircle, Lock, MessageCircle, MoreHorizontal, Music2, Pause, Play, RefreshCw, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Sparkles, Unplug, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getSpotifyAccessToken, getSpotifyPlaylistItems, getSpotifySavedTracks, hasSpotifyLibraryScope, hasSpotifyPlaybackScopes, playSpotify, playSpotifyUris, setSpotifyRepeat, setSpotifyShuffle, startSpotifyLogin, transferSpotifyPlayback, type SpotifyPlaylist, type SpotifyTrack } from '@/lib/spotify'
+import { getSpotifyAccessToken, getSpotifyPlaylistItems, getSpotifySavedTracks, hasSpotifyLibraryScope, hasSpotifyPlaybackScopes, playSpotify, playSpotifyUris, setSpotifyRepeat, setSpotifyShuffle, startSpotifyLogin, type SpotifyPlaylist, type SpotifyTrack } from '@/lib/spotify'
 import { clearSpotifyTrackCache, loadSpotifyTrackCache, readSpotifyTrackCache, shouldKeepSpotifyTrackCache } from '@/lib/spotify-track-cache'
 import { useMori } from '../mori-context'
 import { Mascot } from '../mascot'
@@ -254,7 +254,7 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
   const [error, setError] = useState<string | null>(null)
   const [deviceId, setDeviceId] = useState<string | null>(null)
   const [playerState, setPlayerState] = useState<SpotifyPlaybackState | null>(null)
-  const [progressMs, setProgressMs] = useState(0)
+  const [progressMs, setProgressMs] = useState(resumeExisting ? spotify.progressMs : 0)
   const [trackRhythm, setTrackRhythm] = useState<{ bpm: number | null; energy: number | null; danceability: number | null } | null>(null)
   const [panel, setPanel] = useState<'together' | 'playlist'>('together')
   const [shuffle, setShuffle] = useState(false)
@@ -283,7 +283,6 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
     const onReady = ({ device_id }: { device_id: string }) => {
       window.moriSpotifyDeviceId = device_id
       setDeviceId(device_id)
-      void transferSpotifyPlayback(device_id).catch(() => undefined)
     }
     const onNotReady = () => setDeviceId(null)
     const onStateChanged = (state: SpotifyPlaybackState | null) => {
@@ -301,7 +300,8 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
 
     function observe(player: SpotifyPlayer) {
       playerRef.current = player
-      setDeviceId(window.moriSpotifyDeviceId ?? null)
+      const existingDeviceId = window.moriSpotifyDeviceId ?? null
+      setDeviceId(existingDeviceId)
       player.addListener('ready', onReady)
       player.addListener('not_ready', onNotReady)
       player.addListener('player_state_changed', onStateChanged)
@@ -339,10 +339,17 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
     }
   }, [canPlay, spotify.updatePlayback])
 
-  const currentUri = playerState?.track_window.current_track.uri
-  const paused = playerState?.paused ?? true
+  const currentUri = playerState?.track_window.current_track.uri ?? spotify.nowPlaying?.uri
+  const paused = playerState?.paused ?? (spotify.nowPlaying ? !spotify.isPlaying : true)
   const currentTrack = playerState?.track_window.current_track
-  const artwork = currentTrack?.album.images[0]?.url ?? playlist.images?.[0]?.url
+  const displayTrack = currentTrack ?? tracks.find((track) => track.uri === currentUri) ?? (spotify.nowPlaying ? {
+    id: spotify.nowPlaying.uri,
+    uri: spotify.nowPlaying.uri,
+    name: spotify.nowPlaying.title,
+    artists: [{ name: spotify.nowPlaying.artist }],
+    album: { images: spotify.nowPlaying.artwork ? [{ url: spotify.nowPlaying.artwork }] : [] },
+  } : tracks[initialIndex] ?? tracks[0])
+  const artwork = displayTrack?.album.images?.[0]?.url ?? playlist.images?.[0]?.url
   const listeningCompanion = getListeningCompanion(trackRhythm)
   const currentTrackIndex = tracks.findIndex((track) => track.uri === currentUri)
   const upcomingTracks = playerState?.track_window.next_tracks
@@ -487,7 +494,7 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
   }
 
   function saveListeningMoment() {
-    const track = currentTrack ?? tracks[0]
+    const track = displayTrack
     if (!track) return
     const now = new Date()
     const artist = track.artists.map((item) => item.name).join('、')
@@ -517,7 +524,7 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
         {artwork ? <img src={artwork} alt="当前歌曲封面" className="size-full object-cover" /> : <span className="grid size-full place-items-center"><Music2 className="size-12" /></span>}
       </div>
 
-      <div className="mt-5 flex items-center gap-3"><div className="min-w-0 flex-1"><h2 className="truncate text-xl font-semibold">{currentTrack?.name ?? tracks[0]?.name ?? playlist.name}</h2><p className="mt-1 truncate text-sm text-white/65">{currentTrack?.artists.map((a) => a.name).join('、') ?? tracks[0]?.artists.map((a) => a.name).join('、') ?? playlist.owner?.display_name ?? 'Spotify'}</p></div><button type="button" onClick={() => navigate('chat')} aria-label="和 Mori 聊聊这首歌" className="relative grid size-16 shrink-0 place-items-center rounded-full bg-white/[0.07] ring-1 ring-white/15"><ListeningMori listening={!paused} rhythm={trackRhythm} /></button></div>
+      <div className="mt-5 flex items-center gap-3"><div className="min-w-0 flex-1"><h2 className="truncate text-xl font-semibold">{displayTrack?.name ?? playlist.name}</h2><p className="mt-1 truncate text-sm text-white/65">{displayTrack?.artists.map((a) => a.name).join('、') ?? playlist.owner?.display_name ?? 'Spotify'}</p></div><button type="button" onClick={() => navigate('chat')} aria-label="和 Mori 聊聊这首歌" className="relative grid size-16 shrink-0 place-items-center rounded-full bg-white/[0.07] ring-1 ring-white/15"><ListeningMori listening={!paused} rhythm={trackRhythm} /></button></div>
 
       <div className="mt-4"><input type="range" min={0} max={playerState?.duration ?? tracks[0]?.duration_ms ?? 1} value={progressMs} onChange={(event) => setProgressMs(Number(event.target.value))} onPointerUp={(event) => void seek(Number(event.currentTarget.value))} onKeyUp={(event) => void seek(Number(event.currentTarget.value))} aria-label="播放进度" className="mori-progress-slider block h-4 w-full cursor-pointer appearance-none bg-transparent" style={{ '--progress': `${Math.min(100, progressMs / (playerState?.duration ?? tracks[0]?.duration_ms ?? 1) * 100)}%` } as React.CSSProperties} /><div className="mt-0.5 flex justify-between text-[11px] text-white/60"><span>{formatDuration(progressMs)}</span><span>{formatDuration(playerState?.duration ?? tracks[0]?.duration_ms ?? 0)}</span></div></div>
 
@@ -559,7 +566,7 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
         <div className="text-center"><h2 id="moment-title" className="flex items-center justify-center gap-2 text-xl font-semibold"><Sparkles className="size-5 text-[#cf8cff]" />记录这一刻</h2><p className="mt-2 text-sm text-white/60">听到这里，有什么想法吗？</p></div>
         <div className="mt-5 flex items-center gap-3 rounded-2xl bg-white/[0.07] p-3">
           <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-xl bg-white/10">{artwork ? <img src={artwork} alt="" className="size-full object-cover" /> : <Music2 className="size-5" />}</span>
-          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{currentTrack?.name ?? tracks[0]?.name ?? playlist.name}</span><span className="mt-0.5 block truncate text-xs text-white/55">{currentTrack?.artists.map((item) => item.name).join('、') ?? tracks[0]?.artists.map((item) => item.name).join('、') ?? 'Spotify'}</span><span className="mt-1 block text-xs text-white/45">{formatDuration(progressMs)} / {formatDuration(playerState?.duration ?? tracks[0]?.duration_ms ?? 0)}</span></span>
+          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{displayTrack?.name ?? playlist.name}</span><span className="mt-0.5 block truncate text-xs text-white/55">{displayTrack?.artists.map((item) => item.name).join('、') ?? 'Spotify'}</span><span className="mt-1 block text-xs text-white/45">{formatDuration(progressMs)} / {formatDuration(playerState?.duration ?? spotify.durationMs ?? tracks[initialIndex]?.duration_ms ?? 0)}</span></span>
         </div>
         <div className="relative mt-3">
           <label htmlFor="moment-note" className="sr-only">写下这一刻</label>

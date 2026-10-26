@@ -91,7 +91,14 @@ export function MiniPlayer() {
     <div className="absolute inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.5rem)] z-40 flex items-center gap-3 overflow-hidden rounded-2xl border border-white/12 bg-linear-to-br from-white/[0.07] via-[#211733]/80 to-primary/[0.10] p-2 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_10px_30px_rgba(8,4,20,0.32)] backdrop-blur-2xl backdrop-saturate-150 animate-in fade-in slide-in-from-bottom-2">
       <button
         type="button"
-        onClick={() => { if (spotifyTrack) spotify.requestFullPlayer(); navigate(spotifyTrack ? 'connect' : 'quiet') }}
+        onClick={() => {
+          if (spotifyTrack) {
+            // 必须在用户点击产生的手势中激活音频，否则 Safari 等浏览器会拦截 Web Playback SDK 的声音。
+            void window.moriSpotifyPlayer?.activateElement().catch(() => undefined)
+            spotify.requestFullPlayer()
+          }
+          navigate(spotifyTrack ? 'connect' : 'quiet')
+        }}
         className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg"
         aria-label={spotifyTrack ? `返回 Spotify：${title}` : `打开安静陪伴：${title}`}
       >
