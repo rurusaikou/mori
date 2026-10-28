@@ -1,6 +1,6 @@
 export const SPOTIFY_SCOPES = [
   'playlist-read-private', 'playlist-read-collaborative', 'user-read-private', 'user-read-email',
-  'user-library-read', 'streaming', 'user-read-playback-state', 'user-modify-playback-state',
+  'user-library-read',
 ]
 
 const STORAGE = { verifier: 'mori.spotify.verifier', state: 'mori.spotify.state', token: 'mori.spotify.token' } as const
@@ -50,6 +50,7 @@ async function challengeFor(verifier: string) {
 }
 
 export async function startSpotifyLogin() {
+  // PKCE verifier 只需跨越本次授权跳转，使用 sessionStorage 可避免它长期驻留。
   const verifier = randomString(96)
   const state = randomString(32)
   sessionStorage.setItem(STORAGE.verifier, verifier)
@@ -138,13 +139,6 @@ async function spotifyFetch<T>(url: string): Promise<T> {
   return response.json()
 }
 
-export async function getSpotifyAccessToken() { return (await validToken()).accessToken }
-
-export function hasSpotifyPlaybackScopes() {
-  const granted = new Set(getSpotifyToken()?.scope.split(' ') ?? [])
-  return ['streaming', 'user-read-playback-state', 'user-modify-playback-state'].every((scope) => granted.has(scope))
-}
-
 export function hasSpotifyLibraryScope() {
   return new Set(getSpotifyToken()?.scope.split(' ') ?? []).has('user-library-read')
 }
@@ -169,51 +163,6 @@ export async function getSpotifyPlaylistItems(playlistId: string, maxTracks = Nu
     next = page.next
   }
   return tracks.slice(0, maxTracks)
-}
-
-export async function transferSpotifyPlayback(deviceId: string) {
-  const token = await validToken()
-  const response = await fetch('https://api.spotify.com/v1/me/player', {
-    method: 'PUT', headers: { Authorization: `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device_ids: [deviceId], play: false }),
-  })
-  if (!response.ok && response.status !== 204) throw new Error('无法启用 Mori 播放设备')
-}
-
-export async function playSpotify(deviceId: string, contextUri: string, offset?: number) {
-  const token = await validToken()
-  const body: { context_uri: string; offset?: { position: number } } = { context_uri: contextUri }
-  if (offset !== undefined) body.offset = { position: offset }
-  const response = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
-    method: 'PUT', headers: { Authorization: `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  })
-  if (!response.ok && response.status !== 204) throw new Error('Spotify 暂时无法开始播放')
-}
-
-export async function playSpotifyUris(deviceId: string, uris: string[], offset?: number) {
-  const token = await validToken()
-  const body: { uris: string[]; offset?: { position: number } } = { uris: uris.slice(0, 100) }
-  if (offset !== undefined) body.offset = { position: offset }
-  const response = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
-    method: 'PUT', headers: { Authorization: `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  })
-  if (!response.ok && response.status !== 204) throw new Error('Spotify 暂时无法开始播放喜欢的歌曲')
-}
-
-export async function setSpotifyShuffle(deviceId: string, enabled: boolean) {
-  const token = await validToken()
-  const response = await fetch(`https://api.spotify.com/v1/me/player/shuffle?state=${enabled}&device_id=${encodeURIComponent(deviceId)}`, {
-    method: 'PUT', headers: { Authorization: `Bearer ${token.accessToken}` },
-  })
-  if (!response.ok && response.status !== 204) throw new Error('无法切换随机播放')
-}
-
-export async function setSpotifyRepeat(deviceId: string, mode: 'off' | 'context' | 'track') {
-  const token = await validToken()
-  const response = await fetch(`https://api.spotify.com/v1/me/player/repeat?state=${mode}&device_id=${encodeURIComponent(deviceId)}`, {
-    method: 'PUT', headers: { Authorization: `Bearer ${token.accessToken}` },
-  })
-  if (!response.ok && response.status !== 204) throw new Error('无法切换循环播放')
 }
 
 export async function getSpotifyLibrary() {

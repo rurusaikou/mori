@@ -5,7 +5,7 @@ Mori 是一款以音乐为纽带的 AI 陪伴产品。
 > From Music to the World.  
 > 陪你听歌，也陪你走向更广阔的世界。
 
-当前仓库包含 Mori 移动端 MVP 的高保真交互原型。Spotify 已支持真实授权、歌单读取与 Premium Web Playback SDK 播放；歌曲特征、音乐画像和 Mori 内收听记录使用本地服务端 JSON 持久化。文字 AI、心情与部分陪伴内容仍为原型状态。
+当前仓库是面向 macOS 的 Mori 桌面 MVP。应用以独立 Player 和透明 Presence 启动，点击 Mori 按需打开 Conversation；三个窗口共享主进程音乐状态并恢复各自位置。Electron 管理原生窗口和 Spotify Soloist 播放进程，Next.js/React 负责界面和本地服务。歌曲特征、音乐画像和 Mori 内收听记录使用本地 JSON 持久化，文字 AI、心情与部分陪伴内容仍为原型状态。
 
 ## 产品目标
 
@@ -34,6 +34,13 @@ Mori 坚持以下边界：
 - 音乐播放与账号接入必须遵守对应平台的授权和使用规则。
 
 ## 当前产品功能
+
+### Desktop Player / Presence / Conversation
+
+- Player 独立展示封面、歌曲、歌手、进度、音量和基础播放控制。
+- Presence 是透明、无边框、可拖动且常驻最前的 Mori 角色窗口；点击 Mori 打开或聚焦 Conversation。
+- Conversation 是独立聊天窗口，只轻量展示当前音乐上下文；关闭后音乐、Presence 和聊天记录不丢失。
+- 三类窗口位置保存在本机，重新启动后恢复；Playlist、Dock 和 Lyrics 尚未进入当前 Phase。
 
 ### 首页
 
@@ -86,20 +93,18 @@ Mori 坚持以下边界：
 - 连接后后台预取可读取歌单，支持 24 小时可选缓存和手动清理
 - 点击歌单先进入曲目列表，再进入 Mori 风格的 Spotify 播放器
 - 全局同步当前歌曲、播放状态和进度；从 Mini Player 返回完整播放页时，首屏直接复用全局状态，避免等待 SDK 期间显示错误曲目
-- “接下来播放”优先读取 Spotify Web Playback SDK 的真实待播队列，尚未取得队列时才按当前歌曲在歌单中的位置回退展示
+- “接下来播放”读取 Soloist 的真实 Queue，不为桌面效果创建假歌曲列表
 - 播放页 Mori 律动使用缓存的 BPM 控制周期，并以 energy、danceability 控制幅度
 - 播放页“一起听”基于可用的节奏特征提供克制的陪伴描述，并连接聊天与共同记忆中的瞬间记录
 - 独立音乐偏好页面，通过 MeloData 分析歌曲特征并生成用户画像
 - 网易云音乐与 QQ 音乐的待合作状态
 - 从歌单进入安静陪听
 
-底部导航左侧的“音乐集”直接进入“我的音乐世界”；中间 Mori 图标返回 Mori 首页；右侧进入共同记忆。点击首页主动消息可查看完整对话；首页输入框会先发送消息，再展开文字对话。
+桌面侧栏提供“音乐集”、Mori 首页和“记忆”三个主入口。点击首页主动消息可查看完整对话；首页输入框会先发送消息，再展开文字对话。
 
 首页与文字对话共享当前播放状态、聊天记录和输入草稿；聊天页是首页陪伴状态的展开，返回首页后会继续显示 Mori 最近一条回复。
 
-点击歌单会进入 Mori 风格的播放器，并保留跳转 Spotify 的入口。播放底层使用 Spotify Web Playback SDK，不代理、修改或下载音乐内容；Mori 内播放需要 Spotify Premium，并需要 `streaming`、读取播放状态和控制播放权限。
-
-从 Mini Player 恢复完整播放器时，会在点击手势内激活浏览器音频，以满足 Safari 等浏览器对 SDK 发声的限制。打开页面本身只读取 Spotify 状态，不自动转移设备或改变播放；播放、暂停和切歌仅由用户在 Mori 中的明确操作触发。
+点击歌单会进入 Mori 风格的播放器，并保留跳转 Spotify 的入口。桌面播放底层使用 Spotify Soloist，不代理、修改或下载音乐内容；Player、Presence 和 Conversation 都只通过统一 Music Context 读取状态，不直接连接 Soloist。
 
 ### 陪伴偏好
 
@@ -125,7 +130,7 @@ Mori 坚持以下边界：
 
 ### 当前原型的数据状态
 
-当前版本没有正式数据库。歌曲特征、用户音乐画像和 Mori 内收听历史由 Next.js Route Handler 写入 `data/*.json`，适合单机开发原型，不适合多实例部署或高并发写入。聊天与部分设置仍主要保存在 React 内存中。Spotify OAuth Token 保存在当前浏览器的 `localStorage`，仅适合 MVP 原型；生产版本应改为受保护的服务端会话或更强的设备安全存储。
+当前版本没有正式数据库。歌曲特征、用户音乐画像和 Mori 内收听历史由本机 Next.js Route Handler 写入 `data/*.json`，适合单机桌面原型。聊天与部分设置仍主要保存在 React 内存中。Spotify OAuth Token 暂存在 Electron 渲染进程的 `localStorage`；后续桌面版本应迁移到 macOS Keychain。
 
 本地数据文件：
 
@@ -147,20 +152,23 @@ Mori 坚持以下边界：
 ## 技术栈
 
 - Next.js 16
+- Electron 45
 - React 19
 - TypeScript
 - Tailwind CSS 4
 - Lucide React
 - pnpm
-- Spotify Web API / Web Playback SDK
+- Spotify Web API / Spotify Soloist
 - MeloData 音乐特征 API
 
 更详细的说明：
 
+- [项目架构](docs/ARCHITECTURE.md)
 - [代码结构](docs/CODE_STRUCTURE.md)
 - [缓存机制](docs/CACHE_MECHANISM.md)
 - [ISRC 学习文档](docs/ISRC_GUIDE.md)
 - [音乐律动方案调研](docs/MUSIC_RHYTHM_RESEARCH.md)
+- [Spotify Soloist 桌面播放方案调研](docs/SPOTIFY_SOLOIST_RESEARCH.md)
 - [Spotify Web Playback SDK 说明](docs/SPOTIFY_WEB_PLAYBACK_SDK.md)
 
 ## 启动项目
@@ -183,13 +191,13 @@ corepack prepare pnpm@12.3.4 --activate
 pnpm install
 ```
 
-### 配置 Spotify（真实歌单）
+### 配置 Spotify
 
 1. 在 [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) 创建应用。
 2. 在应用的 Redirect URIs 中精确添加：
 
 ```text
-http://127.0.0.1:3000/spotify/callback
+http://127.0.0.1:3210/spotify/callback
 ```
 
 3. 复制 Client ID，新建 `.env.local`：
@@ -202,18 +210,31 @@ cp .env.example .env.local
 
 ```text
 NEXT_PUBLIC_SPOTIFY_CLIENT_ID=你的_Client_ID
-NEXT_PUBLIC_SPOTIFY_REDIRECT_URI=http://127.0.0.1:3000/spotify/callback
+NEXT_PUBLIC_SPOTIFY_REDIRECT_URI=http://127.0.0.1:3210/spotify/callback
 ```
 
 PKCE 前端授权不需要、也不应在这里填写 Client Secret。Spotify 开发模式目前要求应用所有者使用 Premium 账号；如果其他账号无法登录，还需在 Dashboard 中把该用户加入允许列表。
 
-### 启动开发环境
+### 配置桌面播放
+
+Mori Desktop 使用 Spotify Soloist 输出音频，不再在 Electron 中加载 Web Playback SDK。请从 Spotify 官方页面下载与你的平台匹配的 Soloist，并使用 Premium 账号生成个人 API Key，然后在 `.env.local` 填写：
+
+```text
+MORI_SOLOIST_PATH=/Soloist/可执行文件/绝对路径
+MORI_SOLOIST_API_KEY=你的个人_API_Key
+```
+
+API Key 只由 Electron 主进程读取，不要使用 `NEXT_PUBLIC_` 前缀，也不要提交到仓库。首次启动后需要在 Spotify 官方客户端的设备列表中选择 `Mori` 完成 Connect 配对。Soloist 当前只提供 Apple Silicon macOS 构建，且官方构建有 90 天有效期；详细限制见 [Soloist 调研](docs/SPOTIFY_SOLOIST_RESEARCH.md)。
+
+### 启动 macOS 桌面端
 
 ```bash
 pnpm dev
 ```
 
-打开 [http://127.0.0.1:3000](http://127.0.0.1:3000)。Spotify 不接受 `localhost` 作为本地回调主机，请使用 `127.0.0.1`。手机宽度下显示全屏 App，桌面宽度下显示手机原型框架和产品说明。
+该命令会在 `127.0.0.1:3210` 启动本地渲染服务，并自动打开 Player 与 Presence；点击 Mori 会创建 Conversation。Spotify 不接受 `localhost` 作为本地回调主机，请使用 `127.0.0.1`。
+
+如需只调试渲染层，可运行 `pnpm dev:renderer`；这不是 Mori 的默认产品入口。
 
 ### 类型检查
 
@@ -221,22 +242,18 @@ pnpm dev
 pnpm exec tsc --noEmit
 ```
 
-### 生产构建
+### 构建渲染层
 
 ```bash
 pnpm build
 ```
 
+当前 `pnpm build` 生成 Electron 使用的 Next.js 渲染与本地服务产物。macOS `.app` 打包、签名和公证尚未纳入本轮 MVP。
+
 如果当前运行环境限制 Turbopack 创建本地进程或端口，可以使用：
 
 ```bash
 pnpm exec next build --webpack
-```
-
-### 启动生产构建
-
-```bash
-pnpm start
 ```
 
 ### 安全审计
@@ -247,11 +264,11 @@ pnpm audit --prod
 
 ## 当前阶段
 
-项目目前处于交互原型和 MVP 验证阶段。下一阶段优先事项：
+Soloist Phase 1 与基础多窗口 Phase 2 已进入代码验证。下一阶段优先事项：
 
-1. 持久化心情、记忆、设置和播放状态。
+1. 使用有效 Soloist 官方二进制完成真实播放、首次配对和队列验证。
 2. 实现记忆确认、编辑和删除。
-3. 将 Spotify Token 从浏览器存储迁移到安全的服务端会话，并实现平台侧授权撤销指引。
+3. 将 Spotify Token 从渲染进程存储迁移到 macOS Keychain，并实现平台侧授权撤销指引。
 4. 接入真实文字 AI，并建立 Mori 人格和安全边界。
-5. 完善异常状态、隐私控制和用户测试指标。
+5. 按 Phase 3 实现 Playlist Window 与 Player Dock，再进行 `.app` 打包、签名和公证。
 

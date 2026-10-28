@@ -1,7 +1,9 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+
 import type { ScreenId } from '@/lib/mori-data'
-import { BottomNav, MiniPlayer, Toast } from './app-chrome'
+import { DesktopSidebar, MiniPlayer, Toast } from './app-chrome'
 import { MoriProvider, useMori } from './mori-context'
 import { MoodScreen } from './screens/mood-screen'
 import { ChatScreen } from './screens/chat-screen'
@@ -12,6 +14,8 @@ import { QuietScreen } from './screens/quiet-screen'
 import { SettingsScreen } from './screens/settings-screen'
 import { MusicProfileScreen } from './screens/music-profile-screen'
 import { SpotifyProvider, useSpotify } from './spotify-context'
+import { MusicProvider } from './music-context'
+import { ConversationWindow, PlayerWindow, PresenceWindow, type DesktopWindowType } from './desktop-windows'
 
 const screens: Record<ScreenId, () => React.ReactNode> = {
   home: HomeScreen,
@@ -28,14 +32,25 @@ const IMMERSIVE: ScreenId[] = ['mood', 'quiet']
 const WITH_MINI_PLAYER: ScreenId[] = ['connect', 'memories', 'settings']
 
 export function MoriApp() {
+  const [windowType, setWindowType] = useState<DesktopWindowType | 'workspace' | null>(null)
+  useEffect(() => {
+    const value = new URLSearchParams(window.location.search).get('window')
+    setWindowType(value === 'player' || value === 'presence' || value === 'conversation' ? value : 'workspace')
+  }, [])
+
+  if (!windowType) return <div className="h-dvh bg-[#171229]" />
   return (
-    <SpotifyProvider>
-      <MoriProvider><PhoneShell /></MoriProvider>
-    </SpotifyProvider>
+    <MusicProvider>
+      <SpotifyProvider>
+        <MoriProvider>
+          {windowType === 'player' ? <PlayerWindow /> : windowType === 'presence' ? <PresenceWindow /> : windowType === 'conversation' ? <ConversationWindow /> : <DesktopShell />}
+        </MoriProvider>
+      </SpotifyProvider>
+    </MusicProvider>
   )
 }
 
-function PhoneShell() {
+function DesktopShell() {
   const { screen, currentTrack } = useMori()
   const spotify = useSpotify()
   const Screen = screens[screen]
@@ -50,8 +65,9 @@ function PhoneShell() {
           <span className="absolute inset-x-0 top-0 h-36 bg-linear-to-b from-[#1d1941]/80 to-transparent" />
         </div>
       )}
-      {!IMMERSIVE.includes(screen) && <BottomNav />}
+      {!IMMERSIVE.includes(screen) && <DesktopSidebar />}
       <div className="relative min-w-0 flex-1 pt-8 [-webkit-app-region:no-drag] before:absolute before:inset-x-0 before:top-0 before:h-8 before:[-webkit-app-region:drag]">
+        {window.moriDesktop && <button type="button" onClick={() => void window.moriDesktop?.openWindow('player')} className="absolute right-3 top-1 z-50 rounded-lg px-2.5 py-1 text-[11px] text-white/45 transition hover:bg-white/10 hover:text-white [-webkit-app-region:no-drag]">播放器</button>}
         <main className="relative h-full min-h-0">
           <div key={screen} className="absolute inset-0 animate-in fade-in duration-200">
             <Screen />

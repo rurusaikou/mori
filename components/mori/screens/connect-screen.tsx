@@ -1,13 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { BarChart3, Check, ChevronDown, LoaderCircle, Lock, MessageCircle, MoreHorizontal, Music2, Pause, Play, RefreshCw, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Sparkles, Unplug, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getSpotifyAccessToken, getSpotifyPlaylistItems, getSpotifySavedTracks, hasSpotifyLibraryScope, hasSpotifyPlaybackScopes, playSpotify, playSpotifyUris, setSpotifyRepeat, setSpotifyShuffle, startSpotifyLogin, type SpotifyPlaylist, type SpotifyTrack } from '@/lib/spotify'
+import { getSpotifyPlaylistItems, getSpotifySavedTracks, hasSpotifyLibraryScope, startSpotifyLogin, type SpotifyPlaylist, type SpotifyTrack } from '@/lib/spotify'
 import { clearSpotifyTrackCache, loadSpotifyTrackCache, readSpotifyTrackCache, shouldKeepSpotifyTrackCache } from '@/lib/spotify-track-cache'
 import { useMori } from '../mori-context'
 import { Mascot } from '../mascot'
 import { useSpotify } from '../spotify-context'
+import { useMusic } from '../music-context'
 
 const otherServices = [
   { id: 'netease', name: '网易云音乐', desc: '待官方合作接入', tile: 'bg-[#e7463c] text-white' },
@@ -27,7 +28,7 @@ export function ConnectScreen() {
   const [playback, setPlayback] = useState<PlaybackSelection | null>(null)
   const [savedTracks, setSavedTracks] = useState<SpotifyTrack[]>([])
   const [loadingSavedTracks, setLoadingSavedTracks] = useState(false)
-  const [playlistCacheProgress, setPlaylistCacheProgress] = useState({ completed: 0, total: 0 })
+  const [cachedPlaylistIds, setCachedPlaylistIds] = useState<Set<string>>(() => new Set())
   const playlistCacheRunRef = useRef('')
   const readablePlaylists = spotify.playlists.filter((playlist) => playlist.owner?.id === spotify.user?.id || playlist.collaborative)
   const readablePlaylistSignature = readablePlaylists.map((playlist) => `${playlist.id}:${playlist.tracks?.total ?? playlist.items?.total ?? 0}`).join('|')
@@ -38,6 +39,9 @@ export function ConnectScreen() {
     if (aReadable !== bReadable) return bReadable - aReadable
     return (b.tracks?.total ?? b.items?.total ?? 0) - (a.tracks?.total ?? a.items?.total ?? 0)
   })
+  const markPlaylistCached = useCallback((playlistId: string) => {
+    setCachedPlaylistIds((ids) => new Set(ids).add(playlistId))
+  }, [])
 
   useEffect(() => {
     if (!spotify.connected || !canReadSavedTracks) { setSavedTracks([]); setLoadingSavedTracks(false); return }
@@ -51,24 +55,21 @@ export function ConnectScreen() {
   useEffect(() => {
     if (!spotify.connected || !spotify.user?.id) {
       playlistCacheRunRef.current = ''
-      setPlaylistCacheProgress({ completed: 0, total: 0 })
+      setCachedPlaylistIds(new Set())
       return
     }
 
     const runKey = `${spotify.user.id}:${readablePlaylistSignature}`
     if (playlistCacheRunRef.current === runKey) return
     playlistCacheRunRef.current = runKey
-    const pending = readablePlaylists.filter((playlist) => !readSpotifyTrackCache(`playlist:${playlist.id}`))
-    if (!pending.length) {
-      setPlaylistCacheProgress({ completed: 0, total: 0 })
-      return
-    }
+    const cachedIds = new Set(readablePlaylists.filter((playlist) => readSpotifyTrackCache(`playlist:${playlist.id}`)).map((playlist) => playlist.id))
+    setCachedPlaylistIds(cachedIds)
+    const pending = readablePlaylists.filter((playlist) => !cachedIds.has(playlist.id))
+    if (!pending.length) return
 
     let cursor = 0
-    let completed = 0
-    setPlaylistCacheProgress({ completed: 0, total: pending.length })
 
-    // 限制两个并发 worker，避免大量歌单连接后同时触发 Spotify 限流。
+    // 后台仅保留两个 worker 以避免 Spotify 限流；详情页点击会绕过队列并复用相同请求。
     async function worker() {
       while (true) {
         const playlist = pending[cursor++]
@@ -76,11 +77,13 @@ export function ConnectScreen() {
         try {
           const cacheKey = `playlist:${playlist.id}`
           await loadSpotifyTrackCache(cacheKey, () => getSpotifyPlaylistItems(playlist.id))
+          setCachedPlaylistIds((ids) => {
+            const next = new Set(ids)
+            next.add(playlist.id)
+            return next
+          })
         } catch {
           // 单个歌单失败不应中断其他歌单的缓存。
-        } finally {
-          completed += 1
-          setPlaylistCacheProgress({ completed, total: pending.length })
         }
       }
     }
@@ -143,7 +146,7 @@ export function ConnectScreen() {
   }
 
   if (selectedCollection) {
-    return <SpotifyCollectionDetail collection={selectedCollection} onBack={() => setSelectedCollection(null)} onPlay={(tracks, startIndex) => startPlayback({ collection: selectedCollection, tracks, startIndex })} />
+    return <SpotifyCollectionDetail collection={selectedCollection} onCacheReady={markPlaylistCached} onBack={() => setSelectedCollection(null)} onPlay={(tracks, startIndex) => startPlayback({ collection: selectedCollection, tracks, startIndex })} />
   }
 
   return (
@@ -182,11 +185,11 @@ export function ConnectScreen() {
           <ChevronDown className="size-5 -rotate-90 text-muted-foreground" />
         </button>}
         <div className="mt-6 flex items-center justify-between px-1">
-          <div><h3 className="text-sm font-semibold">来自 Spotify 的歌单</h3>{playlistCacheProgress.total > 0 && playlistCacheProgress.completed < playlistCacheProgress.total && <p className="mt-0.5 text-[10px] text-muted-foreground">正在缓存歌单 {playlistCacheProgress.completed}/{playlistCacheProgress.total}</p>}</div>
+          <h3 className="text-sm font-semibold">来自 Spotify 的歌单</h3>
           {spotify.connected && <button type="button" disabled={spotify.loading} onClick={() => void spotify.sync()} className="flex items-center gap-1 text-xs text-primary disabled:opacity-50"><RefreshCw className={cn('size-3.5', spotify.loading && 'animate-spin')} />同步</button>}
         </div>
-        {spotify.loading || (playlistCacheProgress.total > 0 && playlistCacheProgress.completed < playlistCacheProgress.total) ? (
-          <div className="grid place-items-center py-12 text-sm text-muted-foreground"><LoaderCircle className="mb-3 size-6 animate-spin" />{spotify.loading ? '正在同步歌单…' : `正在缓存歌曲 ${playlistCacheProgress.completed}/${playlistCacheProgress.total}`}</div>
+        {spotify.loading ? (
+          <div className="grid place-items-center py-12 text-sm text-muted-foreground"><LoaderCircle className="mb-3 size-6 animate-spin" />正在同步歌单…</div>
         ) : spotify.error ? (
           <div className="mt-3 rounded-2xl border border-red-300/15 bg-red-400/5 p-4 text-sm text-red-200"><p>{spotify.error}</p><button type="button" onClick={() => void spotify.sync()} className="mt-3 text-xs underline">重新尝试</button></div>
         ) : spotify.connected ? (
@@ -201,10 +204,11 @@ export function ConnectScreen() {
             {orderedPlaylists.map((playlist) => {
               const trackTotal = playlist.tracks?.total ?? playlist.items?.total
               const canReadItems = playlist.owner?.id === spotify.user?.id || playlist.collaborative
+              const cached = cachedPlaylistIds.has(playlist.id)
               const content = <>
                 {playlist.images?.[0]?.url ? <img src={playlist.images[0].url} alt="" className="size-12 shrink-0 rounded-lg object-cover shadow-md shadow-black/30" /> : <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-white/10"><Music2 className="size-5" /></span>}
                 <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{playlist.name || '未命名歌单'}</span><span className="block truncate text-xs text-muted-foreground">{trackTotal === undefined ? '曲目数未提供' : `${trackTotal} 首`} · {playlist.owner?.display_name ?? 'Spotify'}</span></span>
-                <span className={cn('text-xs', canReadItems ? 'text-primary' : 'text-muted-foreground')}>{canReadItems ? '在 Mori 听' : '仅 Spotify 可听'}</span>
+                <span className={cn('flex shrink-0 items-center gap-1 text-xs', canReadItems ? 'text-primary' : 'text-muted-foreground')}>{canReadItems && !cached && <LoaderCircle className="size-3 animate-spin" />}{canReadItems ? (cached ? '在 Mori 听' : '准备中') : '仅 Spotify 可听'}</span>
               </>
               return <li key={playlist.id} className="animate-in fade-in slide-in-from-bottom-1">
                 <button type="button" onClick={() => canReadItems ? setSelectedCollection({ playlist }) : showToast('Spotify 仅允许 Mori 读取本人创建或参与协作的歌单')} className="flex w-full items-center gap-3 rounded-2xl bg-card p-2.5 pr-3 text-left transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{content}</button>
@@ -217,7 +221,7 @@ export function ConnectScreen() {
   )
 }
 
-function SpotifyCollectionDetail({ collection, onBack, onPlay }: { collection: MusicCollection; onBack: () => void; onPlay: (tracks: SpotifyTrack[], startIndex: number) => void }) {
+function SpotifyCollectionDetail({ collection, onCacheReady, onBack, onPlay }: { collection: MusicCollection; onCacheReady: (playlistId: string) => void; onBack: () => void; onPlay: (tracks: SpotifyTrack[], startIndex: number) => void }) {
   const cacheKey = collection.savedTracks ? null : `playlist:${collection.playlist.id}`
   const initialCachedTracks = collection.savedTracks ?? (cacheKey ? readSpotifyTrackCache(cacheKey) : null)
   const [tracks, setTracks] = useState<SpotifyTrack[]>(initialCachedTracks ?? [])
@@ -226,8 +230,11 @@ function SpotifyCollectionDetail({ collection, onBack, onPlay }: { collection: M
 
   useEffect(() => {
     if (collection.savedTracks || initialCachedTracks) return
-    void loadSpotifyTrackCache(`playlist:${collection.playlist.id}`, () => getSpotifyPlaylistItems(collection.playlist.id)).then(setTracks).catch((cause) => setError(cause instanceof Error ? cause.message : '无法读取歌单曲目')).finally(() => setLoading(false))
-  }, [collection, initialCachedTracks])
+    void loadSpotifyTrackCache(`playlist:${collection.playlist.id}`, () => getSpotifyPlaylistItems(collection.playlist.id)).then((loadedTracks) => {
+      setTracks(loadedTracks)
+      onCacheReady(collection.playlist.id)
+    }).catch((cause) => setError(cause instanceof Error ? cause.message : '无法读取歌单曲目')).finally(() => setLoading(false))
+  }, [collection, initialCachedTracks, onCacheReady])
 
   return <div className="flex h-full flex-col bg-[#17112d] md:-mt-11 md:h-[calc(100%+2.75rem)] md:pt-11">
     <header className="flex h-14 shrink-0 items-center gap-2 px-2">
@@ -248,25 +255,21 @@ function SpotifyCollectionDetail({ collection, onBack, onPlay }: { collection: M
 function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initialIndex = 0, resumeExisting = false, onBack }: { playlist: SpotifyPlaylist; initialTracks?: SpotifyTrack[]; useUris?: boolean; initialIndex?: number; resumeExisting?: boolean; onBack: () => void }) {
   const { navigate, showToast, addMemory } = useMori()
   const spotify = useSpotify()
+  const music = useMusic()
   const spotifyUrl = playlist.external_urls?.spotify
   const [tracks, setTracks] = useState<SpotifyTrack[]>(initialTracks ?? [])
   const [loading, setLoading] = useState(!initialTracks)
   const [error, setError] = useState<string | null>(null)
-  const [deviceId, setDeviceId] = useState<string | null>(null)
-  const [playerState, setPlayerState] = useState<SpotifyPlaybackState | null>(null)
-  const [progressMs, setProgressMs] = useState(resumeExisting ? spotify.progressMs : 0)
+  const [progressMs, setProgressMs] = useState(resumeExisting ? music.progressMs : 0)
   const [trackRhythm, setTrackRhythm] = useState<{ bpm: number | null; energy: number | null; danceability: number | null } | null>(null)
   const [panel, setPanel] = useState<'together' | 'playlist'>('together')
-  const [shuffle, setShuffle] = useState(false)
-  const [repeatMode, setRepeatMode] = useState<'off' | 'context' | 'track'>('off')
   const [momentOpen, setMomentOpen] = useState(false)
   const [momentNote, setMomentNote] = useState('')
   const [updatingPlaybackMode, setUpdatingPlaybackMode] = useState<'shuffle' | 'repeat' | null>(null)
-  const playerRef = useRef<SpotifyPlayer | null>(null)
   const startedRef = useRef(false)
   const listeningSessionRef = useRef<{ id: string; uri: string; startedAt: string; listenedMs: number; lastTickAt: number } | null>(null)
   const progressRef = useRef(0)
-  const canPlay = hasSpotifyPlaybackScopes()
+  const canPlay = music.connectionStatus === 'connected' && music.loggedIn
 
   useEffect(() => {
     spotify.setFullPlayerOpen(true)
@@ -278,84 +281,30 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
     void getSpotifyPlaylistItems(playlist.id).then(setTracks).catch((cause) => setError(cause instanceof Error ? cause.message : '无法读取歌单曲目')).finally(() => setLoading(false))
   }, [playlist.id, initialTracks])
 
-  useEffect(() => {
-    if (!canPlay) return
-    const onReady = ({ device_id }: { device_id: string }) => {
-      window.moriSpotifyDeviceId = device_id
-      setDeviceId(device_id)
-    }
-    const onNotReady = () => setDeviceId(null)
-    const onStateChanged = (state: SpotifyPlaybackState | null) => {
-      setPlayerState(state)
-      spotify.updatePlayback(state)
-      if (state) {
-        setProgressMs(state.position)
-        setShuffle(state.shuffle)
-        setRepeatMode(state.repeat_mode === 2 ? 'track' : state.repeat_mode === 1 ? 'context' : 'off')
-      }
-    }
-    const onAuthenticationError = ({ message }: { message: string }) => setError(message)
-    const onAccountError = () => setError('Mori 内播放需要 Spotify Premium')
-    const onPlaybackError = ({ message }: { message: string }) => setError(message)
+  function unavailablePlayerMessage() {
+    if (music.connectionStatus === 'unavailable') return '尚未配置 Spotify Soloist，请先设置本机播放器路径和 API Key'
+    if (music.connectionStatus === 'pairing') return '请在 Spotify 官方客户端中选择 Mori 设备完成首次配对'
+    return music.error ?? 'Spotify Soloist 尚未就绪'
+  }
 
-    function observe(player: SpotifyPlayer) {
-      playerRef.current = player
-      const existingDeviceId = window.moriSpotifyDeviceId ?? null
-      setDeviceId(existingDeviceId)
-      player.addListener('ready', onReady)
-      player.addListener('not_ready', onNotReady)
-      player.addListener('player_state_changed', onStateChanged)
-      player.addListener('authentication_error', onAuthenticationError)
-      player.addListener('account_error', onAccountError)
-      player.addListener('playback_error', onPlaybackError)
-      void player.getCurrentState().then(onStateChanged)
-    }
-
-    function initialize() {
-      if (!window.Spotify || playerRef.current) return
-      if (window.moriSpotifyPlayer) { observe(window.moriSpotifyPlayer); return }
-      const player = new window.Spotify.Player({ name: 'Mori 音乐伙伴', volume: 0.65, getOAuthToken: (callback) => { void getSpotifyAccessToken().then(callback) } })
-      window.moriSpotifyPlayer = player
-      observe(player)
-      void player.connect()
-    }
-    if (window.Spotify) initialize()
-    else {
-      window.onSpotifyWebPlaybackSDKReady = initialize
-      if (!document.querySelector('script[src="https://sdk.scdn.co/spotify-player.js"]')) {
-        const script = document.createElement('script'); script.src = 'https://sdk.scdn.co/spotify-player.js'; script.async = true; document.body.appendChild(script)
-      }
-    }
-    return () => {
-      const player = playerRef.current
-      if (!player) return
-      player.removeListener('ready', onReady)
-      player.removeListener('not_ready', onNotReady)
-      player.removeListener('player_state_changed', onStateChanged)
-      player.removeListener('authentication_error', onAuthenticationError)
-      player.removeListener('account_error', onAccountError)
-      player.removeListener('playback_error', onPlaybackError)
-      playerRef.current = null
-    }
-  }, [canPlay, spotify.updatePlayback])
-
-  const currentUri = playerState?.track_window.current_track.uri ?? spotify.nowPlaying?.uri
-  const paused = playerState?.paused ?? (spotify.nowPlaying ? !spotify.isPlaying : true)
-  const currentTrack = playerState?.track_window.current_track
-  const displayTrack = currentTrack ?? tracks.find((track) => track.uri === currentUri) ?? (spotify.nowPlaying ? {
-    id: spotify.nowPlaying.uri,
-    uri: spotify.nowPlaying.uri,
-    name: spotify.nowPlaying.title,
-    artists: [{ name: spotify.nowPlaying.artist }],
-    album: { images: spotify.nowPlaying.artwork ? [{ url: spotify.nowPlaying.artwork }] : [] },
+  const currentUri = music.track?.uri
+  const paused = !music.isPlaying
+  const currentTrack = music.track
+  const displayTrack = tracks.find((track) => track.uri === currentUri) ?? (music.track ? {
+    id: music.track.uri,
+    uri: music.track.uri,
+    name: music.track.title,
+    duration_ms: music.track.durationMs,
+    artists: music.track.artists.map((name) => ({ name })),
+    album: { name: music.track.album ?? '', images: music.track.artwork ? [{ url: music.track.artwork }] : [] },
   } : tracks[initialIndex] ?? tracks[0])
   const artwork = displayTrack?.album.images?.[0]?.url ?? playlist.images?.[0]?.url
   const listeningCompanion = getListeningCompanion(trackRhythm)
   const currentTrackIndex = tracks.findIndex((track) => track.uri === currentUri)
-  const upcomingTracks = playerState?.track_window.next_tracks
-    ? playerState.track_window.next_tracks.slice(0, 4)
-    : tracks.slice(currentTrackIndex >= 0 ? currentTrackIndex + 1 : 0, currentTrackIndex >= 0 ? currentTrackIndex + 5 : 4)
+  const upcomingTracks = music.queue.upcoming.map((item) => ({ uri: item.track.uri, name: item.track.title, artists: item.track.artists.map((name) => ({ name })), album: { images: item.track.artwork ? [{ url: item.track.artwork }] : [] } })).slice(0, 4)
   progressRef.current = progressMs
+
+  useEffect(() => { setProgressMs(music.progressMs) }, [music.progressMs, currentUri])
 
   useEffect(() => {
     const isrc = tracks.find((track) => track.uri === currentUri)?.external_ids?.isrc
@@ -383,7 +332,7 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
       const now = Date.now()
       session.listenedMs += Math.max(0, now - session.lastTickAt)
       session.lastTickAt = now
-      const durationMs = playerState?.duration ?? sourceTrack?.duration_ms ?? 0
+      const durationMs = music.durationMs || sourceTrack?.duration_ms || 0
       const positionMs = Math.min(durationMs || progressRef.current, progressRef.current)
       void fetch('/api/listening-history', {
         method: 'POST',
@@ -395,9 +344,9 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
             sessionId: session.id,
             spotifyUri: currentUri,
             isrc: sourceTrack?.external_ids?.isrc,
-            title: currentTrack.name,
-            artist: currentTrack.artists.map((artist) => artist.name).join('、'),
-            album: sourceTrack?.album.name,
+            title: currentTrack.title,
+            artist: currentTrack.artist,
+            album: currentTrack.album ?? sourceTrack?.album.name,
             artwork,
             startedAt: session.startedAt,
             updatedAt: new Date(now).toISOString(),
@@ -418,56 +367,38 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
     }
   }, [spotify.user?.id, currentUri, paused])
 
-  useEffect(() => {
-    if (!playerState || playerState.paused) return
-    let previous = Date.now()
-    const timer = window.setInterval(() => {
-      const now = Date.now()
-      const elapsed = now - previous
-      previous = now
-      setProgressMs((position) => Math.min(playerState.duration, position + elapsed))
-    }, 250)
-    return () => window.clearInterval(timer)
-  }, [playerState?.paused, playerState?.duration, currentUri])
-
   async function seek(position: number) {
     setProgressMs(position)
-    try { await playerRef.current?.seek(position) } catch { setError('暂时无法跳转播放位置') }
+    try { await music.seek(position) } catch { setError('暂时无法跳转播放位置') }
   }
   async function playAt(index: number) {
-    if (!deviceId) { setError('Mori 播放器还在连接 Spotify，请稍后再试'); return }
-    try {
-      if (useUris) {
-        const chunkStart = Math.floor(index / 100) * 100
-        await playSpotifyUris(deviceId, tracks.slice(chunkStart, chunkStart + 100).map((track) => track.uri), index - chunkStart)
-      }
-      else await playSpotify(deviceId, `spotify:playlist:${playlist.id}`, index)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '播放失败') }
+    if (!canPlay) { setError(unavailablePlayerMessage()); return }
+    try { await music.play(tracks[index]?.uri) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '播放失败') }
   }
 
   async function playUpcoming(track: { uri: string }) {
     const followingIndex = tracks.findIndex((item, index) => index > currentTrackIndex && item.uri === track.uri)
     const trackIndex = followingIndex >= 0 ? followingIndex : tracks.findIndex((item) => item.uri === track.uri)
     if (trackIndex >= 0) { await playAt(trackIndex); return }
-    if (!deviceId) { setError('Mori 播放器还在连接 Spotify，请稍后再试'); return }
-    try { await playSpotifyUris(deviceId, [track.uri], 0) }
+    if (!canPlay) { setError(unavailablePlayerMessage()); return }
+    try { await music.play(track.uri) }
     catch (cause) { setError(cause instanceof Error ? cause.message : '播放失败') }
   }
 
   useEffect(() => {
     if (resumeExisting) { startedRef.current = true; return }
-    if (!deviceId || !tracks.length || startedRef.current) return
+    if (!canPlay || !tracks.length || startedRef.current) return
     startedRef.current = true
     void playAt(initialIndex)
-  }, [deviceId, tracks.length, initialIndex, resumeExisting])
+  }, [canPlay, tracks.length, initialIndex, resumeExisting])
 
   async function toggleShuffle() {
-    if (!deviceId) { showToast('播放器仍在连接 Spotify'); return }
-    const next = !shuffle
+    if (!canPlay) { showToast(unavailablePlayerMessage()); return }
+    const next = !music.shuffle
     setUpdatingPlaybackMode('shuffle')
     try {
-      await setSpotifyShuffle(deviceId, next)
-      setShuffle(next)
+      await music.setShuffle(next)
       setError(null)
       showToast(next ? '已开启随机播放' : '已关闭随机播放')
     } catch (cause) {
@@ -478,12 +409,11 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
   }
 
   async function toggleRepeat() {
-    if (!deviceId) { showToast('播放器仍在连接 Spotify'); return }
-    const next = repeatMode === 'off' ? 'context' : repeatMode === 'context' ? 'track' : 'off'
+    if (!canPlay) { showToast(unavailablePlayerMessage()); return }
+    const next = music.repeat === 'off' ? 'context' : music.repeat === 'context' ? 'track' : 'off'
     setUpdatingPlaybackMode('repeat')
     try {
-      await setSpotifyRepeat(deviceId, next)
-      setRepeatMode(next)
+      await music.setRepeat(next)
       setError(null)
       showToast(next === 'context' ? '已开启列表循环' : next === 'track' ? '已开启单曲循环' : '已关闭循环播放')
     } catch (cause) {
@@ -515,7 +445,7 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
     {artwork && <><img src={artwork} alt="" className="absolute inset-0 size-full scale-125 object-cover opacity-35 blur-3xl" /><div className="absolute inset-0 bg-linear-to-b from-[#eee9ff]/25 via-[#24193b]/65 to-[#120d24]" /></>}
     <header className="relative z-10 grid h-14 shrink-0 grid-cols-[44px_1fr_44px] items-center px-2 md:h-[6.25rem] md:pt-11">
       <button type="button" onClick={onBack} aria-label="返回歌单列表" className="grid size-11 place-items-center rounded-full"><ChevronDown className="size-6" /></button>
-      <div className="min-w-0 text-center"><p className="truncate text-xs text-white/65">正在播放</p><h1 className="truncate text-sm font-semibold">{playlist.name || 'Spotify 歌单'}</h1></div>
+      <div className="min-w-0 text-center"><p className="truncate text-xs text-white/65">{canPlay ? (paused ? '已暂停' : '正在播放') : music.connectionStatus === 'pairing' ? '等待 Soloist 配对' : 'Soloist 未就绪'}</p><h1 className="truncate text-sm font-semibold">{playlist.name || 'Spotify 歌单'}</h1></div>
       {spotifyUrl ? <a href={spotifyUrl} target="_blank" rel="noreferrer" aria-label="在 Spotify 中打开" className="grid size-11 place-items-center rounded-full"><MoreHorizontal className="size-5" /></a> : <span />}
     </header>
 
@@ -526,17 +456,17 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
 
       <div className="mt-5 flex items-center gap-3"><div className="min-w-0 flex-1"><h2 className="truncate text-xl font-semibold">{displayTrack?.name ?? playlist.name}</h2><p className="mt-1 truncate text-sm text-white/65">{displayTrack?.artists.map((a) => a.name).join('、') ?? playlist.owner?.display_name ?? 'Spotify'}</p></div><button type="button" onClick={() => navigate('chat')} aria-label="和 Mori 聊聊这首歌" className="relative grid size-16 shrink-0 place-items-center rounded-full bg-white/[0.07] ring-1 ring-white/15"><ListeningMori listening={!paused} rhythm={trackRhythm} /></button></div>
 
-      <div className="mt-4"><input type="range" min={0} max={playerState?.duration ?? tracks[0]?.duration_ms ?? 1} value={progressMs} onChange={(event) => setProgressMs(Number(event.target.value))} onPointerUp={(event) => void seek(Number(event.currentTarget.value))} onKeyUp={(event) => void seek(Number(event.currentTarget.value))} aria-label="播放进度" className="mori-progress-slider block h-4 w-full cursor-pointer appearance-none bg-transparent" style={{ '--progress': `${Math.min(100, progressMs / (playerState?.duration ?? tracks[0]?.duration_ms ?? 1) * 100)}%` } as React.CSSProperties} /><div className="mt-0.5 flex justify-between text-[11px] text-white/60"><span>{formatDuration(progressMs)}</span><span>{formatDuration(playerState?.duration ?? tracks[0]?.duration_ms ?? 0)}</span></div></div>
+      <div className="mt-4"><input type="range" min={0} max={music.durationMs || tracks[0]?.duration_ms || 1} value={progressMs} onChange={(event) => setProgressMs(Number(event.target.value))} onPointerUp={(event) => void seek(Number(event.currentTarget.value))} onKeyUp={(event) => void seek(Number(event.currentTarget.value))} aria-label="播放进度" className="mori-progress-slider block h-4 w-full cursor-pointer appearance-none bg-transparent" style={{ '--progress': `${Math.min(100, progressMs / (music.durationMs || tracks[0]?.duration_ms || 1) * 100)}%` } as React.CSSProperties} /><div className="mt-0.5 flex justify-between text-[11px] text-white/60"><span>{formatDuration(progressMs)}</span><span>{formatDuration(music.durationMs || tracks[0]?.duration_ms || 0)}</span></div></div>
 
       <div className="mt-3 flex items-center justify-between px-1">
-        <button type="button" disabled={!deviceId || updatingPlaybackMode !== null} onClick={() => void toggleShuffle()} aria-label={shuffle ? '关闭随机播放' : '开启随机播放'} aria-pressed={shuffle} title={!deviceId ? '播放器连接后可用' : shuffle ? '关闭随机播放' : '开启随机播放'} className={cn('relative grid size-10 place-items-center rounded-full text-white/65 transition-all disabled:cursor-not-allowed disabled:opacity-35', shuffle && 'bg-primary/25 text-primary ring-1 ring-primary/45')}><Shuffle className={cn('size-5', updatingPlaybackMode === 'shuffle' && 'animate-pulse')} />{shuffle && <span className="absolute bottom-0.5 size-1 rounded-full bg-primary" />}</button>
-        <button aria-label="上一首" onClick={() => void playerRef.current?.previousTrack()}><SkipBack className="size-6 fill-current" /></button>
-        <button aria-label={paused ? '播放' : '暂停'} onClick={() => playerState ? void playerRef.current?.togglePlay() : void playAt(0)} className="grid size-14 place-items-center rounded-full bg-white text-[#2b1c4a] shadow-[0_0_30px_rgba(255,255,255,.35)]">{paused ? <Play className="ml-1 size-6 fill-current" /> : <Pause className="size-6 fill-current" />}</button>
-        <button aria-label="下一首" onClick={() => void playerRef.current?.nextTrack()}><SkipForward className="size-6 fill-current" /></button>
-        <button type="button" disabled={!deviceId || updatingPlaybackMode !== null} onClick={() => void toggleRepeat()} aria-label={repeatMode === 'off' ? '开启列表循环' : repeatMode === 'context' ? '切换为单曲循环' : '关闭循环播放'} aria-pressed={repeatMode !== 'off'} title={!deviceId ? '播放器连接后可用' : repeatMode === 'off' ? '开启列表循环' : repeatMode === 'context' ? '切换为单曲循环' : '关闭循环播放'} className={cn('relative grid size-10 place-items-center rounded-full text-white/65 transition-all disabled:cursor-not-allowed disabled:opacity-35', repeatMode !== 'off' && 'bg-primary/25 text-primary ring-1 ring-primary/45')}>{repeatMode === 'track' ? <Repeat1 className={cn('size-5', updatingPlaybackMode === 'repeat' && 'animate-pulse')} /> : <Repeat2 className={cn('size-5', updatingPlaybackMode === 'repeat' && 'animate-pulse')} />}{repeatMode !== 'off' && <span className="absolute bottom-0.5 size-1 rounded-full bg-primary" />}</button>
+        <button type="button" disabled={!canPlay || updatingPlaybackMode !== null} onClick={() => void toggleShuffle()} aria-label={music.shuffle ? '关闭随机播放' : '开启随机播放'} aria-pressed={music.shuffle} title={!canPlay ? 'Soloist 连接后可用' : music.shuffle ? '关闭随机播放' : '开启随机播放'} className={cn('relative grid size-10 place-items-center rounded-full text-white/65 transition-all disabled:cursor-not-allowed disabled:opacity-35', music.shuffle && 'bg-primary/25 text-primary ring-1 ring-primary/45')}><Shuffle className={cn('size-5', updatingPlaybackMode === 'shuffle' && 'animate-pulse')} />{music.shuffle && <span className="absolute bottom-0.5 size-1 rounded-full bg-primary" />}</button>
+        <button disabled={!canPlay} aria-label="上一首" onClick={() => void music.previous()}><SkipBack className="size-6 fill-current" /></button>
+        <button disabled={!canPlay} aria-label={paused ? '播放' : '暂停'} onClick={() => music.track ? void music.toggle() : void playAt(0)} className="grid size-14 place-items-center rounded-full bg-white text-[#2b1c4a] shadow-[0_0_30px_rgba(255,255,255,.35)] disabled:opacity-40">{paused ? <Play className="ml-1 size-6 fill-current" /> : <Pause className="size-6 fill-current" />}</button>
+        <button disabled={!canPlay} aria-label="下一首" onClick={() => void music.next()}><SkipForward className="size-6 fill-current" /></button>
+        <button type="button" disabled={!canPlay || updatingPlaybackMode !== null} onClick={() => void toggleRepeat()} aria-label={music.repeat === 'off' ? '开启列表循环' : music.repeat === 'context' ? '切换为单曲循环' : '关闭循环播放'} aria-pressed={music.repeat !== 'off'} title={!canPlay ? 'Soloist 连接后可用' : music.repeat === 'off' ? '开启列表循环' : music.repeat === 'context' ? '切换为单曲循环' : '关闭循环播放'} className={cn('relative grid size-10 place-items-center rounded-full text-white/65 transition-all disabled:cursor-not-allowed disabled:opacity-35', music.repeat !== 'off' && 'bg-primary/25 text-primary ring-1 ring-primary/45')}>{music.repeat === 'track' ? <Repeat1 className={cn('size-5', updatingPlaybackMode === 'repeat' && 'animate-pulse')} /> : <Repeat2 className={cn('size-5', updatingPlaybackMode === 'repeat' && 'animate-pulse')} />}{music.repeat !== 'off' && <span className="absolute bottom-0.5 size-1 rounded-full bg-primary" />}</button>
       </div>
 
-      {!canPlay && <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-3 text-xs"><p>重新授权播放权限后，才能在 Mori 内播放。</p><button type="button" onClick={() => void startSpotifyLogin()} className="mt-2 rounded-full bg-white px-3 py-1.5 font-semibold text-[#2b1c4a]">重新授权</button></div>}
+      {!canPlay && <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-3 text-xs"><p>{unavailablePlayerMessage()}</p></div>}
       {error && <p className="mt-3 rounded-xl bg-red-400/10 px-3 py-2 text-xs text-red-100">{error}</p>}
 
       <section className="mt-5 rounded-3xl border border-white/15 bg-white/10 p-4 backdrop-blur-2xl">
@@ -566,7 +496,7 @@ function SpotifyPlaylistPlayer({ playlist, initialTracks, useUris = false, initi
         <div className="text-center"><h2 id="moment-title" className="flex items-center justify-center gap-2 text-xl font-semibold"><Sparkles className="size-5 text-[#cf8cff]" />记录这一刻</h2><p className="mt-2 text-sm text-white/60">听到这里，有什么想法吗？</p></div>
         <div className="mt-5 flex items-center gap-3 rounded-2xl bg-white/[0.07] p-3">
           <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-xl bg-white/10">{artwork ? <img src={artwork} alt="" className="size-full object-cover" /> : <Music2 className="size-5" />}</span>
-          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{displayTrack?.name ?? playlist.name}</span><span className="mt-0.5 block truncate text-xs text-white/55">{displayTrack?.artists.map((item) => item.name).join('、') ?? 'Spotify'}</span><span className="mt-1 block text-xs text-white/45">{formatDuration(progressMs)} / {formatDuration(playerState?.duration ?? spotify.durationMs ?? tracks[initialIndex]?.duration_ms ?? 0)}</span></span>
+          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{displayTrack?.name ?? playlist.name}</span><span className="mt-0.5 block truncate text-xs text-white/55">{displayTrack?.artists.map((item) => item.name).join('、') ?? 'Spotify'}</span><span className="mt-1 block text-xs text-white/45">{formatDuration(progressMs)} / {formatDuration(music.durationMs || tracks[initialIndex]?.duration_ms || 0)}</span></span>
         </div>
         <div className="relative mt-3">
           <label htmlFor="moment-note" className="sr-only">写下这一刻</label>

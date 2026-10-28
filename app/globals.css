@@ -65,6 +65,20 @@
   }
 }
 
+html.mori-transparent-window,
+body.mori-transparent-window {
+  background: transparent !important;
+}
+
+@keyframes mori-presence-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.94); }
+  50% { opacity: 0.7; transform: scale(1.04); }
+}
+
+.mori-presence-aura {
+  animation: mori-presence-breathe 4s ease-in-out infinite;
+}
+
 @layer utilities {
   .no-scrollbar {
     scrollbar-width: none;
@@ -217,6 +231,22 @@
   border: 0;
   border-radius: 999px;
   background: white;
+}
+
+.mori-compact-progress::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #c6a5ff 0 var(--progress, 0%), rgb(255 255 255 / 16%) var(--progress, 0%) 100%);
+}
+
+.mori-compact-progress::-webkit-slider-thumb {
+  width: 8px;
+  height: 8px;
+  margin-top: -2.5px;
+  appearance: none;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0 8px rgb(201 161 255 / 70%);
 }
 
 @keyframes mori-typing {

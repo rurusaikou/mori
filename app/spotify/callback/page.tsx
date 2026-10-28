@@ -1,11 +1,16 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { completeSpotifyLogin } from '@/lib/spotify'
 
 export default function SpotifyCallbackPage() {
   const [message, setMessage] = useState('正在完成 Spotify 连接…')
+  const exchangeStarted = useRef(false)
+
   useEffect(() => {
+    // Next.js 开发模式会重复执行 effect；授权码与 PKCE verifier 都只能交换一次。
+    if (exchangeStarted.current) return
+    exchangeStarted.current = true
     const params = new URLSearchParams(window.location.search)
     const error = params.get('error')
     const code = params.get('code')

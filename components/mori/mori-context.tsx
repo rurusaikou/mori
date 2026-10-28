@@ -45,9 +45,10 @@ type MoriContextValue = {
 
 const MoriContext = createContext<MoriContextValue | null>(null)
 
-const TAB_SCREENS: ScreenId[] = ['connect', 'chat', 'memories']
+const PRIMARY_SCREENS: ScreenId[] = ['connect', 'memories']
 const MEMORIES_STORAGE_KEY = 'mori.saved-memories'
 const LEGACY_MOOD_MEMORIES_STORAGE_KEY = 'mori.mood-memories'
+const CHAT_STORAGE_KEY = 'mori.chat-state'
 
 export function MoriProvider({ children }: { children: React.ReactNode }) {
   const [stack, setStack] = useState<ScreenId[]>(['home'])
@@ -62,6 +63,7 @@ export function MoriProvider({ children }: { children: React.ReactNode }) {
   const [isPlaying, setIsPlaying] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const chatReplyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [chatHydrated, setChatHydrated] = useState(false)
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('screen') === 'connect') {
@@ -86,13 +88,39 @@ export function MoriProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(CHAT_STORAGE_KEY)
+      if (stored) {
+        const parsed: unknown = JSON.parse(stored)
+        if (parsed && typeof parsed === 'object') {
+          const state = parsed as { messages?: ChatMessage[]; draft?: string }
+          if (Array.isArray(state.messages) && state.messages.length) setChatMessages(state.messages)
+          if (typeof state.draft === 'string') setChatDraft(state.draft)
+        }
+      }
+    } catch {
+      // 对话缓存损坏时回到欢迎语；不能让恢复失败阻止 Conversation Window 打开。
+    } finally {
+      setChatHydrated(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!chatHydrated) return
+    try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ messages: chatMessages, draft: chatDraft })) } catch {
+      // 磁盘或隐私策略拒绝持久化时，当前窗口内的对话仍保持可用。
+    }
+  }, [chatHydrated, chatMessages, chatDraft])
+
   const screen = stack[stack.length - 1]
 
   const navigate = useCallback((id: ScreenId) => {
     setStack((prev) => {
       if (prev[prev.length - 1] === id) return prev
+      // 侧栏入口重建根栈；聊天和设置等详情页保留来源，才能正确返回。
       if (id === 'home') return ['home']
-      if (TAB_SCREENS.includes(id)) return ['home', id]
+      if (PRIMARY_SCREENS.includes(id)) return ['home', id]
       return [...prev, id]
     })
   }, [])

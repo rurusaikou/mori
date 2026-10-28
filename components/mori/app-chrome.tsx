@@ -1,24 +1,13 @@
 'use client'
 
-import { BatteryFull, Heart, Library, Pause, Play, Signal, Wifi } from 'lucide-react'
+import { ChevronUp, Heart, Library, Pause, Play, SkipBack, SkipForward } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ScreenId } from '@/lib/mori-data'
 import { useMori } from './mori-context'
 import { Cover } from './primitives'
 import { useSpotify } from './spotify-context'
-
-export function StatusBar() {
-  return (
-    <div className="relative z-30 hidden h-11 shrink-0 items-center justify-between px-7 text-xs font-semibold md:flex" aria-hidden="true">
-      <span>9:41</span>
-      <span className="flex items-center gap-1.5">
-        <Signal className="size-3.5" />
-        <Wifi className="size-3.5" />
-        <BatteryFull className="size-4" />
-      </span>
-    </div>
-  )
-}
+import { Mascot } from './mascot'
+import { useMusic } from './music-context'
 
 const tabs: { id: ScreenId; label: string; icon?: typeof Library; mori?: boolean }[] = [
   { id: 'connect', label: '音乐集', icon: Library },
@@ -26,7 +15,7 @@ const tabs: { id: ScreenId; label: string; icon?: typeof Library; mori?: boolean
   { id: 'memories', label: '记忆', icon: Heart },
 ]
 
-export function BottomNav() {
+export function DesktopSidebar() {
   const { screen, navigate } = useMori()
   return (
     <nav
@@ -75,25 +64,74 @@ function MoriNavIcon({ active }: { active: boolean }) {
   )
 }
 
+export function CompactPlayer({ onExpand }: { onExpand: () => void }) {
+  const { currentTrack, isPlaying, togglePlay, navigate } = useMori()
+  const music = useMusic()
+  const track = music.track
+  const playing = track ? music.isPlaying : isPlaying
+  const title = track?.title ?? currentTrack?.title ?? '连接 Spotify，和 Mori 一起听'
+  const artist = track?.artist ?? currentTrack?.artist ?? '点击展开完成连接'
+  const artwork = track?.artwork ?? currentTrack?.cover
+  const progress = track && music.durationMs ? music.progressMs / music.durationMs * 100 : 0
+
+  const expandTo = (screen?: ScreenId) => {
+    if (screen) navigate(screen)
+    onExpand()
+  }
+
+  return (
+    <div className="relative h-dvh overflow-hidden rounded-[18px] border border-white/15 bg-linear-to-br from-[#302452] via-[#1c1631] to-[#100c20] text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_20px_60px_rgba(4,2,12,0.5)]">
+      <div className="absolute inset-x-0 top-0 h-8 [-webkit-app-region:drag]" />
+      <button type="button" onClick={() => expandTo()} aria-label="展开 Mori" className="absolute right-2.5 top-2 z-20 grid size-7 place-items-center rounded-lg text-white/55 transition hover:bg-white/10 hover:text-white [-webkit-app-region:no-drag]"><ChevronUp className="size-4" /></button>
+      <div className="flex h-full items-center gap-2.5 px-3 pb-2.5 pt-8">
+        <button type="button" onClick={() => expandTo(track ? 'connect' : 'home')} className="relative size-16 shrink-0 overflow-hidden rounded-xl border border-white/15 bg-white/5 shadow-lg shadow-black/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          {artwork ? <img src={artwork} alt="" className="size-full object-cover" /> : <span className="grid size-full place-items-center"><Mascot scale={0.42} /></span>}
+        </button>
+        <div className="w-0 min-w-0 flex-1 self-stretch pt-1">
+          <button type="button" onClick={() => expandTo(track ? 'connect' : 'home')} className="block w-full text-left">
+            <span className="block truncate text-[13px] font-semibold">{title}</span>
+            <span className="mt-0.5 block truncate text-[11px] text-white/50">{artist}</span>
+          </button>
+          <input
+            aria-label="播放进度"
+            type="range"
+            min={0}
+            max={music.durationMs || 1}
+            value={track ? Math.min(music.progressMs, music.durationMs || 1) : 0}
+            disabled={!track || music.connectionStatus !== 'connected'}
+            onChange={(event) => void music.seek(Number(event.target.value))}
+            className="mori-compact-progress mt-2 block h-2 w-full cursor-pointer appearance-none bg-transparent disabled:cursor-default"
+            style={{ '--progress': `${Math.min(100, progress)}%` } as React.CSSProperties}
+          />
+          <div className="mt-0.5 flex items-center justify-center gap-1.5">
+            <button type="button" disabled={!track} onClick={() => void music.previous()} aria-label="上一首" className="grid size-7 place-items-center rounded-full text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-25"><SkipBack className="size-3.5 fill-current" /></button>
+            <button type="button" onClick={() => track ? void music.toggle() : currentTrack ? togglePlay() : expandTo('connect')} aria-label={playing ? '暂停' : '播放'} className="grid size-9 place-items-center rounded-full bg-white text-[#24173f] shadow-[0_0_18px_rgba(207,169,255,0.28)] active:scale-95">
+              {playing ? <Pause className="size-4 fill-current" /> : <Play className="ml-0.5 size-4 fill-current" />}
+            </button>
+            <button type="button" disabled={!track} onClick={() => void music.next()} aria-label="下一首" className="grid size-7 place-items-center rounded-full text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-25"><SkipForward className="size-3.5 fill-current" /></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function MiniPlayer() {
   const { currentTrack, isPlaying, togglePlay, navigate } = useMori()
   const spotify = useSpotify()
-  const spotifyTrack = spotify.nowPlaying
+  const music = useMusic()
+  const spotifyTrack = music.track
   if (spotify.fullPlayerOpen) return null
   if (!spotifyTrack && !currentTrack) return null
   const title = spotifyTrack?.title ?? currentTrack?.title ?? ''
   const artist = spotifyTrack?.artist ?? currentTrack?.artist ?? ''
-  const playing = spotifyTrack ? spotify.isPlaying : isPlaying
+  const playing = spotifyTrack ? music.isPlaying : isPlaying
   return (
     <div className="absolute inset-x-5 bottom-5 z-40 flex items-center gap-3 overflow-hidden rounded-2xl border border-white/12 bg-linear-to-br from-white/[0.07] via-[#211733]/80 to-primary/[0.10] p-2 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_10px_30px_rgba(8,4,20,0.32)] backdrop-blur-2xl backdrop-saturate-150 animate-in fade-in slide-in-from-bottom-2">
       <button
         type="button"
         onClick={() => {
-          if (spotifyTrack) {
-            // 必须在用户点击产生的手势中激活音频，否则 Safari 等浏览器会拦截 Web Playback SDK 的声音。
-            void window.moriSpotifyPlayer?.activateElement().catch(() => undefined)
-            spotify.requestFullPlayer()
-          }
+          if (spotifyTrack) spotify.requestFullPlayer()
           navigate(spotifyTrack ? 'connect' : 'quiet')
         }}
         className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg"
@@ -109,7 +147,7 @@ export function MiniPlayer() {
       </button>
       <button
         type="button"
-        onClick={() => spotifyTrack ? void spotify.togglePlayback() : togglePlay()}
+        onClick={() => spotifyTrack ? void music.toggle() : togglePlay()}
         aria-label={playing ? '暂停' : '播放'}
         className="grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-95"
       >
@@ -119,7 +157,7 @@ export function MiniPlayer() {
         key={spotifyTrack?.uri ?? currentTrack?.id}
         aria-hidden="true"
         className={cn('absolute bottom-0 left-0 h-0.5 bg-primary', spotifyTrack ? 'transition-[width] duration-500' : 'right-0 origin-left motion-safe:animate-[mori-progress_180s_linear_forwards]')}
-        style={{ width: spotifyTrack && spotify.durationMs ? `${Math.min(100, spotify.progressMs / spotify.durationMs * 100)}%` : undefined, animationPlayState: spotifyTrack ? undefined : playing ? 'running' : 'paused' }}
+        style={{ width: spotifyTrack && music.durationMs ? `${Math.min(100, music.progressMs / music.durationMs * 100)}%` : undefined, animationPlayState: spotifyTrack ? undefined : playing ? 'running' : 'paused' }}
       />
     </div>
   )

@@ -1,6 +1,8 @@
 # Spotify Web Playback SDK 说明
 
-最后更新：2026-10-26
+最后更新：2026-10-29
+
+> 状态说明：本文档保留 Web Playback SDK 的浏览器行为与历史设计记录。Mori Desktop 已于 2026-10-29 改用 Spotify Soloist；Electron 不再加载 Web Playback SDK，也不再依赖其 Widevine/EME 播放环境。桌面现行方案见 [Spotify Soloist 调研](SPOTIFY_SOLOIST_RESEARCH.md)。
 
 ## 1. 文档目的
 
@@ -87,6 +89,8 @@ Safari 等浏览器通常要求音频播放由用户手势触发。Mori 从 Mini
 - `components/mori/screens/connect-screen.tsx`：创建或复用 Web Playback SDK 播放器，提供完整播放控制和陪听界面。
 - `lib/spotify.ts`：封装 Spotify Web API 的播放、随机、循环和设备相关请求。
 - `types/spotify-web-playback.d.ts`：声明 SDK 播放器、当前曲目和真实待播队列类型。
+
+完整播放器会区分“加载 SDK、验证播放权限、创建 Spotify Connect 设备、播放器就绪”几个阶段，并显示当前阶段和等待时间。任一阶段超过 15 秒会转为超时错误；SDK 初始化、授权、账号限制、设备离线和播放请求错误分别展示，不再用账号“未连接”概括播放器故障。错误状态提供重试入口，SDK 脚本加载失败时重试会重新加载脚本。
 
 ## 8. 开源使用说明
 
