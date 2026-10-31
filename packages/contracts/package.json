@@ -1,0 +1,8 @@
+{
+  "name": "@mori/contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./playback-host": "./playback-host.ts"
+  }
+}

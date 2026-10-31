@@ -1,5 +1,6 @@
-pmOnFail: ignore
+packages:
+  - 'apps/*'
+  - 'packages/*'
 
-minimumReleaseAgeExclude:
-  - '@next/*'
-  - next
+allowBuilds:
+  esbuild: true

@@ -1,10 +1,7 @@
 node_modules/
-.next/
-.next-desktop/
 .env*
-!.env.example
 *.tsbuildinfo
 .DS_Store
-data/
-memo
-
+apps/extension/build/
+apps/extension/dist/
+apps/player-host/dist/

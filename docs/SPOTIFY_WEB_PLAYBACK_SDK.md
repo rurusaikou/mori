@@ -1,139 +1,62 @@
-# Spotify Web Playback SDK 说明
+# Spotify Web Playback SDK
 
-最后更新：2026-10-29
+## 核心结论
 
-> 状态说明：本文档保留 Web Playback SDK 的浏览器行为与历史设计记录。Mori Desktop 已于 2026-10-29 改用 Spotify Soloist；Electron 不再加载 Web Playback SDK，也不再依赖其 Widevine/EME 播放环境。桌面现行方案见 [Spotify Soloist 调研](SPOTIFY_SOLOIST_RESEARCH.md)。
+Web Playback SDK 把 Mori Playback Host 注册成 Spotify Connect 设备。声音由 Host 所在浏览器输出，但播放会话仍属于用户的 Spotify 账号。
 
-## 1. 文档目的
+要求与限制：
 
-本文档说明 Spotify Web Playback SDK 在 Mori 中的实际作用、播放状态为什么会与 Spotify 客户端同步，以及开源使用者需要了解的技术边界。
+- 播放能力要求 Spotify Premium。
+- SDK 需要支持 EME/DRM 的正常安全 Web Origin。
+- 跨域 iframe 必须允许 `autoplay` 和 `encrypted-media`。
+- 浏览器 autoplay policy 可能要求额外用户手势。
+- Mori 不能下载、代理、修改或建立脱离 Spotify Connect 的音频会话。
 
-## 2. 核心结论
+## Mori 的实现
 
-Spotify Web Playback SDK 会把浏览器注册成一个 Spotify Connect 播放设备。它不是向 Mori 提供一份可以独立管理的音乐文件，也不会建立脱离 Spotify 账号的播放会话。
-
-当 Mori 浏览器成为当前播放设备后，Mori、Spotify 桌面端和 Spotify 手机端控制的是同一个 Spotify 播放会话。因此：
-
-- Spotify 暂停，Mori 的真实播放也会暂停。
-- Spotify 切歌，Mori 的真实播放也会切歌。
-- Mori 播放、暂停或切歌，Spotify 客户端会显示相同变化。
-- Mori 不能禁止同一账号的官方 Spotify 客户端控制该播放设备。
-
-这是 Spotify Connect 的产品机制，不是 Mori 状态管理导致的重复同步。
-
-## 3. 设备与播放会话模型
+SDK 不运行在 content script、service worker 或 Extension sandbox。它运行在独立 `apps/player-host/` 静态应用中：
 
 ```text
-Spotify 账号的播放会话
-        │
-        ├── Spotify 桌面端
-        ├── Spotify 手机端
-        ├── 智能音箱
-        └── Mori 音乐伙伴
-            （Web Playback SDK 创建的浏览器设备）
+Extension Provider
+  → Offscreen Document
+  → Playback Host iframe
+  → Spotify Web Playback SDK
+  → Mori Connect device
 ```
 
-Spotify 客户端中显示的“Mori 音乐伙伴”就是 Mori 创建的 Connect 设备。声音由该浏览器输出，但播放状态仍属于 Spotify 账号的统一播放会话。
+Playback Host：
 
-## 4. 状态变化流程
+- 动态加载 `https://sdk.scdn.co/spotify-player.js`；
+- 在 `connect()` 前注册 ready/error listeners，避免丢失快速失败事件；
+- 只在内存中保存当前 access token；
+- 通过带 window/origin 校验的 `postMessage` 接收设备初始化和用户手势激活命令；
+- 将 ready、not_ready、state 和 error 事件发送回 Extension。
 
-以用户在 Spotify 桌面端切歌为例：
+`player.ts` 只处理跨窗口协议，`spotify-player.ts` 封装 SDK 生命周期；二者与 Extension 共用 `packages/contracts/playback-host.ts`，避免命令和事件结构漂移。
 
-```text
-Spotify 桌面端点击下一首
-        ↓
-Spotify 更新账号当前播放状态
-        ↓
-Mori 的 Web Playback SDK 收到 player_state_changed
-        ↓
-浏览器开始播放新的歌曲
-        ↓
-Mori 更新歌名、封面、进度和待播队列
-```
+## 状态同步
 
-Mori 不能通过忽略 `player_state_changed` 获得独立播放。忽略事件只会让 UI 停留在旧歌曲，真实音频仍然已经暂停或切换，最终造成界面与声音不一致。
+Spotify 官方客户端与 Mori 控制的是同一账号播放会话。任一设备暂停或切歌都会改变真实状态。Mori 必须接收 `player_state_changed` 并更新 UI，不能通过忽略事件伪造独立播放。
 
-## 5. Mori 的功能边界
+实际的播放、暂停和切歌统一由 Spotify Web API 按 `device_id` 执行。这样 Mori 自建设备与 Spotify Connect 回退设备使用同一条控制路径；SDK Host 只承担设备、音频和状态事件，不重复实现另一套控制逻辑。
 
-### Spotify 负责
+## 部署
 
-- Spotify 账号、曲库和歌单。
-- 音频流、DRM、音质和版权控制。
-- Spotify Connect 播放设备与账号级播放状态。
-- 实际的播放、暂停、切歌、随机和循环结果。
+`pnpm build:host` 生成 `apps/player-host/dist/`。生产服务器必须：
 
-### Mori 负责
+- 使用 HTTPS；
+- 正确返回 `index.html` 与 `player.js`；
+- CSP 的 `connect-src` 允许 `'self'`、本地开发 Host、Spotify HTTPS/WSS；同时允许 SDK 脚本、SDK 内部的 `https://sdk.scdn.co/embedded/index.html` iframe、媒体 blob 和 worker blob；
+- 页面样式由独立 `player.css` 提供，并通过 `style-src 'self'` 加载，不使用会被 CSP 拦截的内联 `<style>`；
+- `frame-ancestors` 只允许预期的 Extension Origin；
+- 不在服务端记录 URL、body 或消息中的 OAuth token。
 
-- 展示 Spotify 当前歌曲、封面、进度和播放状态。
-- 接收用户在 Mori 中发起的播放、暂停、切歌、随机和循环操作。
-- 聊天、陪听、歌曲特征展示、心情记录和共同记忆。
-- 清楚提示音乐由 Spotify 提供。
+本地开发运行 `pnpm dev:host`，默认 URL 为 `http://127.0.0.1:3210/playback-host/`。
 
-### 不应发生
+## 官方资料
 
-- 打开播放器、进入聊天或记录瞬间时自动改变 Spotify 播放状态。
-- 为了制造“独立播放”的假象而忽略 Spotify 的真实状态事件。
-- 下载、导出、代理或修改 Spotify 音频流。
-- 把 Spotify Web Playback SDK 描述为 Mori 自有的独立播放器。
-
-## 6. 浏览器音频激活
-
-Safari 等浏览器通常要求音频播放由用户手势触发。Mori 从 Mini Player 进入完整播放器时，会在点击处理内调用 SDK 的 `activateElement()`，让浏览器允许 Web Playback SDK 输出声音。
-
-音频激活只是在浏览器层面解除播放限制，不会让播放会话脱离 Spotify，也不应在页面挂载时自动切换播放设备。
-
-## 7. 当前项目中的对应实现
-
-- `components/mori/spotify-context.tsx`：保存全局当前歌曲、播放状态和进度，并监听 SDK 状态。
-- `components/mori/app-chrome.tsx`：Mini Player 展示全局播放状态，并在用户点击时激活浏览器音频。
-- `components/mori/screens/connect-screen.tsx`：创建或复用 Web Playback SDK 播放器，提供完整播放控制和陪听界面。
-- `lib/spotify.ts`：封装 Spotify Web API 的播放、随机、循环和设备相关请求。
-- `types/spotify-web-playback.d.ts`：声明 SDK 播放器、当前曲目和真实待播队列类型。
-
-完整播放器会区分“加载 SDK、验证播放权限、创建 Spotify Connect 设备、播放器就绪”几个阶段，并显示当前阶段和等待时间。任一阶段超过 15 秒会转为超时错误；SDK 初始化、授权、账号限制、设备离线和播放请求错误分别展示，不再用账号“未连接”概括播放器故障。错误状态提供重试入口，SDK 脚本加载失败时重试会重新加载脚本。
-
-## 8. 开源使用说明
-
-Mori 是开源参考实现，不提供公共 Spotify 应用凭据、托管播放服务或音乐授权。使用者需要自行：
-
-- 在 Spotify Developer Dashboard 创建应用。
-- 配置自己的 Client ID 和回调地址。
-- 使用满足播放条件的 Spotify 账号。
-- 根据自己的使用和分发方式遵守 Spotify Developer Policy。
-- 对自行修改、部署或分发的版本负责。
-
-仓库提供的默认方案是 Spotify 陪伴控制器：
-
-- Spotify 继续负责音乐播放和版权。
-- Mori 负责控制入口、陪听、聊天和记忆。
-- Mori 与 Spotify 的播放状态仍然双向同步。
-
-使用者如果将项目改造成原生 iOS/Android 客户端，应自行评估 Spotify App Remote SDK。WebView 在后台播放、音频激活、锁屏控制和生命周期方面存在额外限制。
-
-### 改造成独立播放器
-
-如果使用者希望 Spotify 的暂停或切歌不影响 Mori，就不能继续使用 Spotify Web Playback SDK 或 App Remote 作为播放引擎，需要自行替换音源和播放层，并处理：
-
-- 音乐版权与地区授权。
-- 音频文件或流媒体地址。
-- DRM、CDN 与播放统计。
-- 后台播放、锁屏控制和离线能力。
-
-Spotify API 不能把 Spotify 曲库授权给 Mori 建立一个与 Spotify Connect 分离的播放器。
-
-## 9. 当前项目定义
-
-在继续使用 Spotify Web Playback SDK 的前提下，建议使用以下定义：
-
-> Mori 是一个拥有聊天、陪听和记忆能力的开源 Spotify 陪伴控制器参考实现。
-
-避免使用“Mori 独立音乐播放器”或“Mori 独占控制 Spotify”这类描述。
-
-## 10. 官方资料
-
-- [Spotify Web Playback SDK Reference](https://developer.spotify.com/documentation/web-playback-sdk/reference)
-- [Spotify Web API：Transfer Playback](https://developer.spotify.com/documentation/web-api/reference/transfer-a-users-playback)
-- [Spotify iOS SDK](https://developer.spotify.com/documentation/ios)
-- [Spotify Android SDK](https://developer.spotify.com/documentation/android)
+- [Web Playback SDK](https://developer.spotify.com/documentation/web-playback-sdk)
+- [Web Playback SDK Reference](https://developer.spotify.com/documentation/web-playback-sdk/reference)
+- [Spotify Web API Player](https://developer.spotify.com/documentation/web-api/reference/#category-player)
 - [Spotify Developer Policy](https://developer.spotify.com/policy)
 

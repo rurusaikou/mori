@@ -6,9 +6,11 @@
       "esnext"
     ],
     "allowJs": true,
-    "target": "ES6",
+    "target": "ES2022",
     "skipLibCheck": true,
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
@@ -17,27 +19,15 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@mori/domain": ["./packages/domain/index.ts"],
+      "@mori/contracts/playback-host": ["./packages/contracts/playback-host.ts"]
     }
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    ".next-desktop/types/**/*.ts",
-    ".next-desktop/dev/types/**/*.ts"
-  ],
+  "include": ["apps/extension/src/**/*.ts", "apps/extension/src/**/*.tsx", "apps/player-host/src/**/*.ts", "packages/**/*.ts"],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "apps/extension/build",
+    "apps/player-host/dist"
   ]
 }

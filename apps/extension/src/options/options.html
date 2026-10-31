@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Mori 设置</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <h1>Mori 设置</h1>
+      <p>先在 Spotify Developer Dashboard 注册下面的 Redirect URI，再填写公开的 Client ID。</p>
+      <label>Redirect URI <output id="redirect"></output></label>
+      <label>Spotify Client ID <input id="client-id" autocomplete="off" spellcheck="false"></label>
+      <label>Playback Host URL <input id="playback-host-url" type="url" autocomplete="off" spellcheck="false"></label>
+      <label>测试播放 Spotify URI（可选，不是 Redirect URI）<input id="test-uri" placeholder="留空，或填写 spotify:playlist:… / spotify:track:…" autocomplete="off" spellcheck="false"></label>
+      <div class="actions"><button id="save">保存</button><button id="connect">连接 Spotify</button><button id="disconnect" class="secondary">解除连接</button></div>
+      <p id="status" role="status"></p>
+      <small>测试 URI 仅在账号没有可恢复的播放内容时使用，只接受以 <code>spotify:</code> 开头的 Spotify URI。OAuth 回调地址只需添加到 Spotify Developer Dashboard，不能填在这里。</small>
+      <small>开发环境使用 <code>http://127.0.0.1:3210/playback-host/</code>。正式发布时必须替换为部署后的 HTTPS 地址，并保留末尾斜杠。</small>
+    </main>
+    <script type="module" src="../../build/src/options/options.js"></script>
+  </body>
+</html>

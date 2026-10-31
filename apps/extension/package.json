@@ -1,0 +1,5 @@
+{
+  "name": "@mori/extension",
+  "private": true,
+  "type": "module"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "@mori/player-host",
+  "private": true,
+  "type": "module"
+}

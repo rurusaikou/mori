@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Mori Music Companion",
+  "version": "0.2.0",
+  "description": "A floating AI music companion that stays with you while Spotify plays.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "identity",
+    "offscreen",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "build/src/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "召唤 Mori"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["build/src/content/content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "options_page": "src/options/options.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https: http://127.0.0.1:3210 http://localhost:3210"
+  }
+}
