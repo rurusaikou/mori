@@ -1,3 +1,8 @@
+/**
+ * 作用：渲染 Mori 应用内设置概览，并区分当前状态与规划功能。
+ * 输入：当前 PlaybackState。
+ * 输出：设置面板 React UI；不直接修改 OAuth 或 Host 技术配置。
+ */
 import type { PlaybackState } from '@mori/domain'
 import type { ReactNode } from 'react'
 

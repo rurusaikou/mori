@@ -1,3 +1,8 @@
+/**
+ * 作用：管理 Mori 悬浮入口、拖拽定位、面板层级及 UI 与后台之间的业务交互。
+ * 输入：后台状态快照和广播消息，以及用户拖拽、点击和播放操作。
+ * 输出：Mori 悬浮 React UI、发送给后台的 RuntimeRequest，以及本地面板交互状态。
+ */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { MoriCharacter } from './MoriCharacter'
 import { MiniPlayer, PlayerCard } from '../player/PlayerCard'
@@ -26,6 +31,8 @@ export function MoriPresence() {
   const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null)
 
   useEffect(() => {
+    // The content script can mount after the service worker has been suspended or after playback
+    // changed in another tab. Hydrate all independent snapshots before relying on broadcasts.
     void Promise.all([
       sendRuntimeRequest<{ state: PlaybackState }>({ type: 'MORI_GET_STATE' }),
       sendRuntimeRequest<{ visible: boolean; position: { x: number; y: number } | null }>({ type: 'MORI_GET_PRESENCE_STATE' }),
@@ -100,6 +107,8 @@ export function MoriPresence() {
     if (!current || current.id !== event.pointerId) return
     const dx = event.clientX - current.startX
     const dy = event.clientY - current.startY
+    // A small threshold separates an intentional drag from a click on touchpads and touchscreens;
+    // without it, normal clicks can save a new position instead of opening the player.
     if (Math.hypot(dx, dy) > 5) current.moved = true
     if (!current.moved) return
     setPosition({ left: clamp(current.left + dx, 8, window.innerWidth - 84), top: clamp(current.top + dy, 8, window.innerHeight - 84) })
@@ -111,6 +120,8 @@ export function MoriPresence() {
     drag.current = null
     if (current.moved) {
       const rect = rootRef.current?.getBoundingClientRect()
+      // Persist normalized coordinates so Mori keeps the same relative location when the next
+      // page has a different viewport size or browser zoom level.
       if (rect) void sendRuntimeRequest({ type: 'MORI_SAVE_POSITION', position: { x: rect.left / window.innerWidth, y: rect.top / window.innerHeight } })
     } else setPanelMode((mode) => mode === 'closed' ? 'mini' : mode === 'full' ? 'mini' : 'closed')
   }

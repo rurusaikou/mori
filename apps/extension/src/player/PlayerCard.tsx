@@ -1,3 +1,8 @@
+/**
+ * 作用：渲染 Mini Player 与完整播放面板，并协调播放控制、功能页签和进度展示。
+ * 输入：PlaybackState、Companion 数据、曲库操作回调和播放控制回调。
+ * 输出：播放器 React UI，以及通过回调提交的播放、模式、记忆和导航操作。
+ */
 import { useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicTrack, PlaybackMode, PlaybackState } from '@mori/domain'
 import { ChatPanel } from '../chat/ChatPanel'
@@ -34,6 +39,8 @@ export function PlayerCard({ playback, messages, memories, settingsOpen, onOpenS
   const playbackMode: PlaybackMode = playback.shuffle ? 'shuffle' : playback.repeatMode
 
   async function runControl(action: typeof controlBusy, task: () => Promise<void>) {
+    // Spotify writes may complete out of order. Serialize controls so a rapid sequence cannot
+    // leave feedback and the visible mode describing different commands.
     if (controlBusy) return
     setControlBusy(action); setFeedback('')
     try { await task() }
@@ -50,6 +57,8 @@ export function PlayerCard({ playback, messages, memories, settingsOpen, onOpenS
   }
 
   async function cyclePlaybackMode() {
+    // The product exposes one mode button although Spotify stores shuffle and repeat separately.
+    // Keep the cycle aligned with SpotifyMusicProvider, which resets the non-selected setting.
     const modes: PlaybackMode[] = ['off', 'shuffle', 'context', 'track']
     const nextMode = modes[(modes.indexOf(playbackMode) + 1) % modes.length]
     await runControl('mode', () => onSetPlaybackMode(nextMode))
@@ -178,6 +187,8 @@ function PlaybackProgress({ playback }: { playback: PlaybackState }) {
   useEffect(() => {
     setProgress(playback.progressMs)
     if (!playback.isPlaying || !duration) return
+    // SDK/Web API snapshots are intermittent. Advance only the visual progress locally and reset
+    // from the next authoritative playback snapshot; no synthetic value is sent to the backend.
     const timer = window.setInterval(() => setProgress((value) => Math.min(duration, value + 1_000)), 1_000)
     return () => window.clearInterval(timer)
   }, [playback.progressMs, playback.isPlaying, playback.track?.uri, duration])

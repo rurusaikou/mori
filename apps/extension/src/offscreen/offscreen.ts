@@ -1,3 +1,8 @@
+/**
+ * 作用：在 offscreen document 中托管 Playback Host iframe，并桥接 Extension 与跨 Origin Host。
+ * 输入：后台 PlaybackHostRequest、配置的 Host URL，以及 iframe postMessage 事件。
+ * 输出：发往 Playback Host 的定向消息、返回后台的 RuntimeResponse 和播放事件。
+ */
 import type { PlaybackHostRequest, RuntimeResponse } from '../shared/messages'
 import { OFFSCREEN_MESSAGE_SOURCE, PLAYBACK_HOST_MESSAGE_SOURCE } from '@mori/contracts/playback-host'
 

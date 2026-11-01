@@ -1,3 +1,8 @@
+/**
+ * 作用：渲染 Mori 对话记录和消息输入表单，并提交用户消息。
+ * 输入：ConversationMessage 列表和异步 onSend 回调。
+ * 输出：对话面板 React UI，以及通过回调发送的用户文本。
+ */
 import { useState, type FormEvent } from 'react'
 import type { ConversationMessage } from '@mori/domain'
 

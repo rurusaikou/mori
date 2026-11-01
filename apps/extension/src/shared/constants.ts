@@ -1,3 +1,8 @@
+/**
+ * 作用：集中定义 Extension 使用的存储键、Spotify 权限和默认 Host 配置。
+ * 输入：无运行时输入。
+ * 输出：供其他模块导入的只读常量。
+ */
 export const STORAGE_KEYS = {
   clientId: 'mori.spotify.client-id',
   token: 'mori.spotify.token',

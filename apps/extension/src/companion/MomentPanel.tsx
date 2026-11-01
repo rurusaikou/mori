@@ -1,3 +1,8 @@
+/**
+ * 作用：渲染用户主动保存的音乐瞬间列表。
+ * 输入：MusicMemory 数组。
+ * 输出：音乐瞬间 React UI；不直接修改或持久化数据。
+ */
 import type { MusicMemory } from '@mori/domain'
 
 export function MomentPanel({ memories }: { memories: MusicMemory[] }) {

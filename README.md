@@ -72,12 +72,5 @@ Content Script 不读取 Spotify DOM，也不持有 OAuth Token。Background 是
 
 ## 文档
 
-文档按“产品定义 → 系统边界 → 代码位置 → 实现流程 → 第三方约束”分层，后端尚未实现的内容只保留在 `apps/api` 边界说明中。
-
-- [产品定义](docs/PRODUCT.md)
-- [项目架构](docs/ARCHITECTURE.md)
-- [代码结构](docs/CODE_STRUCTURE.md)
-- [代码实现说明](docs/IMPLEMENTATION.md)
-- [Spotify Web Playback SDK](docs/SPOTIFY_WEB_PLAYBACK_SDK.md)
-- [后端边界（尚未实现）](apps/api/README.md)
+`docs/` 保存本地开发文档，按“产品定义 → 系统边界 → 代码位置 → 实现流程 → 第三方约束”分层；该目录不纳入版本控制。后端尚未实现的公开边界说明保留在 [apps/api/README.md](apps/api/README.md)。
 

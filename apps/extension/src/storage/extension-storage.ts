@@ -1,3 +1,8 @@
+/**
+ * 作用：集中封装 Chrome local/session storage 的键、类型和缓存版本边界。
+ * 输入：Spotify 配置、Token、Presence、Companion、PlaybackState 与曲库缓存数据。
+ * 输出：类型化存储读取结果，以及写入、删除操作返回的 Promise。
+ */
 import { DEFAULT_PLAYBACK_HOST_URL, STORAGE_KEYS } from '../shared/constants'
 import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicTrack, PlaybackState } from '@mori/domain'
 

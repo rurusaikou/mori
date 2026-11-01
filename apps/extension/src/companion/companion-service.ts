@@ -1,3 +1,8 @@
+/**
+ * 作用：提供本地 Companion fallback，对话回复和音乐瞬间持久化逻辑。
+ * 输入：用户文本、当前 PlaybackState，以及 ExtensionStorage 中的历史数据。
+ * 输出：更新后的 ConversationMessage 或 MusicMemory 列表，并写入本地存储。
+ */
 import type { ConversationMessage, MusicMemory, PlaybackState } from '@mori/domain'
 import { extensionStorage } from '../storage/extension-storage'
 
@@ -22,6 +27,8 @@ export async function sendCompanionMessage(text: string, playback: PlaybackState
   // an approved AI adapter can replace it without sending Spotify metadata to a model by accident.
   const reply = localReply(value, playback)
   const moriMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'mori', text: reply }
+  // Bound local history so long-lived profiles do not grow chrome.storage indefinitely before a
+  // server-side conversation store exists.
   const next = [...messages, userMessage, moriMessage].slice(-100)
   await extensionStorage.setConversation(next)
   return next
@@ -35,6 +42,8 @@ export async function saveMusicMemory(playback: PlaybackState) {
     note: playback.track ? `记住和 Mori 一起听《${playback.track.title}》的这一刻。` : '记住这一刻。',
     track: playback.track,
   }
+  // Memories are user-triggered but still bounded locally; future export/sync can replace this
+  // limit without changing the UI contract.
   const next = [memory, ...memories].slice(0, 200)
   await extensionStorage.setMemories(next)
   return next

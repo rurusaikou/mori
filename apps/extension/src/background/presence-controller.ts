@@ -1,4 +1,10 @@
+/**
+ * 作用：管理 Mori 的全局显示状态、工具栏点击行为及页面注入恢复。
+ * 输入：Chrome 工具栏点击事件、已保存的 Presence 状态和当前标签页信息。
+ * 输出：持久化后的显示状态、页面注入操作，以及发往各 HTTP(S) 标签页的可见性消息。
+ */
 import type { TabMessage } from '../shared/messages'
+import { broadcastTabMessage } from '../shared/tab-messaging'
 import { extensionStorage } from '../storage/extension-storage'
 
 export class PresenceController {
@@ -45,7 +51,6 @@ export class PresenceController {
 
   private async broadcast() {
     const message: TabMessage = { type: 'MORI_SET_VISIBILITY', visible: this.#enabled }
-    const tabs = await chrome.tabs.query({})
-    await Promise.allSettled(tabs.filter((tab) => tab.id && tab.url && /^https?:/.test(tab.url)).map((tab) => chrome.tabs.sendMessage(tab.id!, message)))
+    await broadcastTabMessage(message, (tab) => Boolean(tab.url && /^https?:/.test(tab.url)))
   }
 }

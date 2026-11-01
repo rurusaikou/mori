@@ -1,3 +1,8 @@
+/**
+ * 作用：加载并展示 Spotify 歌单和歌曲，处理缓存提示、刷新与歌曲播放选择。
+ * 输入：当前 PlaybackState，以及读取缓存、歌单、歌曲和播放 URI 的异步回调。
+ * 输出：歌单 React UI，以及通过 playUri/refreshLibrary 等回调发出的用户操作。
+ */
 import { useEffect, useState } from 'react'
 import type { MusicPlaylist, MusicTrack, PlaybackState } from '@mori/domain'
 
@@ -18,9 +23,13 @@ export function PlaylistPanel({ playback, getPlaylists, hasLibraryCache, refresh
   const [loading, setLoading] = useState(true)
   const [showLoading, setShowLoading] = useState(false)
   const [error, setError] = useState('')
+  // A play request is acknowledged before DRM/device setup finishes. Keep the selected row in a
+  // pending state until the broadcast track matches it or the controller publishes an error.
   const [requestedUri, setRequestedUri] = useState<string | null>(null)
   function beginLoading(readingSpotify: boolean) {
     setLoading(true)
+    // Cache reads are intentionally silent; show a network loading message only when the Provider
+    // reports that no session cache exists and the user is actually waiting on Spotify.
     setShowLoading(readingSpotify)
   }
 

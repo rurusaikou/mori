@@ -1,3 +1,8 @@
+/**
+ * 作用：封装 Mori 使用的 Spotify Web API 请求及响应数据转换。
+ * 输入：有效 access token、设备 ID、歌单 ID、播放 URI 和播放模式参数。
+ * 输出：规范化的播放/曲库数据，或包含 Spotify 状态信息的错误。
+ */
 import type { MusicPlaylist, MusicTrack } from '@mori/domain'
 import { getValidAccessToken } from './spotify-auth'
 

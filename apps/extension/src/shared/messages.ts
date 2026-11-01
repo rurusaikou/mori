@@ -1,3 +1,8 @@
+/**
+ * 作用：定义 Content、Service Worker、offscreen 与标签页之间的类型化消息协议。
+ * 输入：无运行时输入；类型由各 Extension 上下文引用。
+ * 输出：RuntimeRequest、RuntimeResponse、TabMessage 和 PlaybackHostRequest 类型。
+ */
 import type { ConversationMessage, MusicMemory, PlaybackMode, PlaybackState } from '@mori/domain'
 import type { PlaybackHostCommand, PlaybackHostEvent, PlaybackHostPayload } from '@mori/contracts/playback-host'
 

@@ -1,3 +1,8 @@
+/**
+ * 作用：根据播放状态渲染 Mori 角色的视觉形态。
+ * 输入：当前 PlaybackState。
+ * 输出：Mori 角色 React UI；不产生业务状态变更。
+ */
 import type { PlaybackState } from '@mori/domain'
 
 export function MoriCharacter({ playback }: { playback: PlaybackState }) {

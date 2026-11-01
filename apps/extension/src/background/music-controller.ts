@@ -1,10 +1,18 @@
+/**
+ * 作用：管理 Extension 内唯一的播放状态，协调 MusicProvider、状态持久化与跨标签广播。
+ * 输入：来自 Service Worker 的播放命令、播放模式、Spotify Host 播放事件。
+ * 输出：更新后的 PlaybackState、Provider 调用结果，以及发送给各标签页的播放状态消息。
+ */
 import { SpotifyMusicProvider } from '../providers/spotify/spotify-provider'
 import { INITIAL_PLAYBACK_STATE, type MusicProvider, type PlaybackMode, type PlaybackState } from '@mori/domain'
 import type { PlaybackHostEvent, TabMessage } from '../shared/messages'
+import { broadcastTabMessage } from '../shared/tab-messaging'
 import { extensionStorage } from '../storage/extension-storage'
 
 export class MusicController {
   readonly provider: MusicProvider = new SpotifyMusicProvider()
+  // The controller owns the canonical snapshot. Returning or broadcasting clones prevents UI
+  // consumers from mutating state without persistence and cross-tab synchronization.
   #state: PlaybackState = { ...INITIAL_PLAYBACK_STATE }
 
   get state() { return structuredClone(this.#state) }
@@ -28,44 +36,24 @@ export class MusicController {
   }
 
   async toggle() {
-    await this.update({ error: null })
-    try {
-      await this.provider.toggle(this.#state)
-      // Spotify Web API can take a moment to expose a newly transferred playback state.
-      // A service worker has no `window`, so use the worker-global timer here.
-      setTimeout(() => void this.refreshFromProvider(), 800)
-    } catch (error) {
-      const message = readablePlaybackError(error)
-      await this.update({ availability: playbackAvailabilityFor(message), error: message })
-      throw error
-    }
+    await this.runProviderCommand(() => this.provider.toggle(this.#state), { refreshDelayMs: 800 })
   }
 
   async command(command: 'next' | 'previous') {
-    await this.update({ error: null })
-    try {
-      await this.provider[command]()
-      // Connect commands are accepted before Spotify exposes the new track through Web API.
-      // Refresh later so fallback devices (which emit no Mori SDK event) still update the UI.
-      setTimeout(() => void this.refreshFromProvider(), 800)
-    } catch (error) {
-      const message = readablePlaybackError(error)
-      await this.update({ availability: playbackAvailabilityFor(message), error: message })
-      throw error
-    }
+    await this.runProviderCommand(() => this.provider[command](), { refreshDelayMs: 800 })
   }
 
   async setPlaybackMode(mode: PlaybackMode) {
-    await this.update({ error: null })
-    try {
-      await this.provider.setPlaybackMode(mode)
-      await this.update({ shuffle: mode === 'shuffle', repeatMode: mode === 'context' ? 'context' : mode === 'track' ? 'track' : 'off' })
-      setTimeout(() => void this.refreshFromProvider(), 500)
-    } catch (error) {
-      const message = readablePlaybackError(error)
-      await this.update({ availability: playbackAvailabilityFor(message), error: message })
-      throw error
-    }
+    await this.runProviderCommand(
+      () => this.provider.setPlaybackMode(mode),
+      {
+        refreshDelayMs: 500,
+        onSuccess: () => this.update({
+          shuffle: mode === 'shuffle',
+          repeatMode: mode === 'context' ? 'context' : mode === 'track' ? 'track' : 'off',
+        }),
+      },
+    )
   }
 
   getUserPlaylists() { return this.provider.getUserPlaylists() }
@@ -77,15 +65,10 @@ export class MusicController {
   refreshLibrary() { return this.provider.refreshLibrary() }
 
   async playUri(uri: string, contextUri?: string, queueUris?: string[]) {
-    await this.update({ error: null })
-    try {
-      await this.provider.playUri(uri, contextUri, queueUris)
-      setTimeout(() => void this.refreshFromProvider(), 800)
-    } catch (error) {
-      const message = readablePlaybackError(error)
-      await this.update({ availability: playbackAvailabilityFor(message), error: message })
-      throw error
-    }
+    await this.runProviderCommand(
+      () => this.provider.playUri(uri, contextUri, queueUris),
+      { refreshDelayMs: 800 },
+    )
   }
 
   async handleHostEvent(event: PlaybackHostEvent) {
@@ -115,11 +98,32 @@ export class MusicController {
     await this.persistAndBroadcast()
   }
 
+  private async runProviderCommand(
+    command: () => Promise<void>,
+    options: { refreshDelayMs?: number; onSuccess?: () => Promise<void> } = {},
+  ) {
+    // Every provider write must clear stale errors and map failures through the same availability
+    // boundary; otherwise identical Spotify failures produce different UI states by command.
+    await this.update({ error: null })
+    try {
+      await command()
+      await options.onSuccess?.()
+      // Spotify Web API can lag behind accepted commands. Delayed refresh also covers fallback
+      // devices, which do not emit Mori SDK events. Service workers use the global timer.
+      if (options.refreshDelayMs !== undefined) {
+        setTimeout(() => void this.refreshFromProvider(), options.refreshDelayMs)
+      }
+    } catch (error) {
+      const message = readablePlaybackError(error)
+      await this.update({ availability: playbackAvailabilityFor(message), error: message })
+      throw error
+    }
+  }
+
   private async persistAndBroadcast() {
     await extensionStorage.setPlayback(this.#state)
     const message: TabMessage = { type: 'MORI_PLAYBACK_STATE', state: this.state }
-    const tabs = await chrome.tabs.query({})
-    await Promise.allSettled(tabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id!, message)))
+    await broadcastTabMessage(message)
   }
 
   private async refreshFromProvider() {

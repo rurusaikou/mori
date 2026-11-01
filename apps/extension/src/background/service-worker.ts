@@ -1,5 +1,11 @@
+/**
+ * 作用：作为 Extension 后台入口，恢复状态并路由 UI、Spotify、Companion 与播放 Host 消息。
+ * 输入：Chrome runtime 消息、工具栏事件和 offscreen document 上报的播放事件。
+ * 输出：统一 RuntimeResponse、状态持久化操作，以及向标签页广播的业务状态。
+ */
 import { getCompanionData, saveMusicMemory, sendCompanionMessage } from '../companion/companion-service'
 import type { RuntimeRequest, RuntimeResponse, TabMessage } from '../shared/messages'
+import { broadcastTabMessage } from '../shared/tab-messaging'
 import { extensionStorage } from '../storage/extension-storage'
 import { MusicController } from './music-controller'
 import { PresenceController } from './presence-controller'
@@ -100,6 +106,5 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
 async function broadcastCompanionData() {
   const data = await getCompanionData()
   const message: TabMessage = { type: 'MORI_COMPANION_DATA', ...data }
-  const tabs = await chrome.tabs.query({})
-  await Promise.allSettled(tabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id!, message)))
+  await broadcastTabMessage(message)
 }

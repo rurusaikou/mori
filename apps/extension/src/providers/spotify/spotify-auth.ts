@@ -1,3 +1,8 @@
+/**
+ * 作用：实现 Spotify Authorization Code + PKCE 授权、Token 刷新与断开。
+ * 输入：Spotify Client ID、Chrome Identity 回调结果和已保存的 SpotifyToken。
+ * 输出：写入 ExtensionStorage 的有效 Token，或面向用户的授权错误。
+ */
 import { SPOTIFY_SCOPES } from '../../shared/constants'
 import { extensionStorage, type SpotifyToken } from '../../storage/extension-storage'
 

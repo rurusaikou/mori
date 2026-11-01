@@ -1,3 +1,8 @@
+/**
+ * 作用：实现 MusicProvider，协调 Spotify Web API、offscreen 播放设备和曲库缓存。
+ * 输入：播放命令、Spotify URI、PlaybackState、授权 Token 和 session 曲库缓存。
+ * 输出：Spotify 播放操作、MusicPlaylist/MusicTrack 数据、PlaybackState 和更新后的缓存。
+ */
 import { INITIAL_PLAYBACK_STATE, type MusicPlaylist, type MusicProvider, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
 import type { PlaybackHostRequest, RuntimeResponse } from '../../shared/messages'
 import { extensionStorage } from '../../storage/extension-storage'

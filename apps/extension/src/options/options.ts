@@ -1,3 +1,8 @@
+/**
+ * 作用：管理 Extension 技术设置页，包括 Spotify Client ID、测试 URI、Host URL 和账号连接。
+ * 输入：Options 页面表单输入、ExtensionStorage 配置和用户按钮操作。
+ * 输出：校验并持久化的设置、Spotify 连接请求，以及页面状态提示。
+ */
 import { sendRuntimeRequest } from '../shared/runtime-client'
 import { extensionStorage } from '../storage/extension-storage'
 
@@ -25,6 +30,8 @@ async function save() {
     throw new Error('测试播放 URI 必须留空，或使用 spotify:track:…、spotify:album:…、spotify:playlist:… 格式')
   }
   const parsedHostUrl = new URL(playbackHostUrl)
+  // Access tokens cross into this iframe host. Reject cleartext remote origins while preserving
+  // localhost HTTP for the documented development server.
   if (parsedHostUrl.protocol !== 'https:' && !(parsedHostUrl.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(parsedHostUrl.hostname))) {
     throw new Error('Playback Host 必须使用 HTTPS；仅本地开发可使用 localhost HTTP')
   }
