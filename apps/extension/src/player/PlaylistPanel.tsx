@@ -4,26 +4,40 @@ import type { MusicPlaylist, MusicTrack, PlaybackState } from '@mori/domain'
 type Props = {
   playback: PlaybackState
   getPlaylists: () => Promise<MusicPlaylist[]>
+  hasLibraryCache: (playlistId?: string) => Promise<boolean>
   refreshLibrary: () => Promise<MusicPlaylist[]>
   getPlaylistTracks: (playlistId: string) => Promise<MusicTrack[]>
   playUri: (uri: string, contextUri?: string, queueUris?: string[]) => Promise<void>
 }
 
-export function PlaylistPanel({ playback, getPlaylists, refreshLibrary, getPlaylistTracks, playUri }: Props) {
+export function PlaylistPanel({ playback, getPlaylists, hasLibraryCache, refreshLibrary, getPlaylistTracks, playUri }: Props) {
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>([])
   const [tracks, setTracks] = useState<MusicTrack[] | null>(null)
   const [activePlaylist, setActivePlaylist] = useState<MusicPlaylist | null>(null)
   const [title, setTitle] = useState('播放列表')
   const [loading, setLoading] = useState(true)
+  const [showLoading, setShowLoading] = useState(false)
   const [error, setError] = useState('')
   const [requestedUri, setRequestedUri] = useState<string | null>(null)
+  function beginLoading(readingSpotify: boolean) {
+    setLoading(true)
+    setShowLoading(readingSpotify)
+  }
+
+  function finishLoading() {
+    setLoading(false)
+    setShowLoading(false)
+  }
 
   useEffect(() => {
     // Load once per panel mount. The parent supplies an inline callback whose identity can change
     // on playback broadcasts; depending on it would refetch the entire library on every event.
-    void getPlaylists().then(setPlaylists)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : '无法读取 Spotify 歌单'))
-      .finally(() => setLoading(false))
+    void (async () => {
+      beginLoading(!await hasLibraryCache())
+      try { setPlaylists(await getPlaylists()) }
+      catch (reason) { setError(reason instanceof Error ? reason.message : '无法读取 Spotify 歌单') }
+      finally { finishLoading() }
+    })()
   }, [])
 
   useEffect(() => {
@@ -32,7 +46,7 @@ export function PlaylistPanel({ playback, getPlaylists, refreshLibrary, getPlayl
 
   async function openPlaylist(playlist: MusicPlaylist) {
     if (playlist.isAccessible === false) return
-    setLoading(true); setError(''); setTitle(playlist.name); setActivePlaylist(playlist)
+    beginLoading(!await hasLibraryCache(playlist.id)); setError(''); setTitle(playlist.name); setActivePlaylist(playlist)
     try { setTracks(await getPlaylistTracks(playlist.id)) }
     catch (reason) {
       if (reason instanceof Error && /forbidden|not available|not found/i.test(reason.message)) {
@@ -40,7 +54,7 @@ export function PlaylistPanel({ playback, getPlaylists, refreshLibrary, getPlayl
         setTracks(null); setActivePlaylist(null); setTitle('播放列表'); setError('')
       } else setError(reason instanceof Error ? reason.message : '无法读取歌单歌曲')
     }
-    finally { setLoading(false) }
+    finally { finishLoading() }
   }
 
   async function playTrack(track: MusicTrack) {
@@ -56,19 +70,19 @@ export function PlaylistPanel({ playback, getPlaylists, refreshLibrary, getPlayl
   }
 
   async function refresh() {
-    setLoading(true); setError(''); setTracks(null); setActivePlaylist(null); setTitle('播放列表')
+    beginLoading(true); setError(''); setTracks(null); setActivePlaylist(null); setTitle('播放列表')
     try { setPlaylists(await refreshLibrary()) }
     catch (reason) { setError(reason instanceof Error ? reason.message : '无法刷新 Spotify 歌单') }
-    finally { setLoading(false) }
+    finally { finishLoading() }
   }
 
-  return <section className="feature-view playlist-panel" aria-label="Spotify 播放列表">
+  return <section className="feature-view" aria-label="Spotify 播放列表">
     <header className="panel-header">
       {tracks && <button type="button" className="back-button" onClick={() => { setTracks(null); setActivePlaylist(null); setTitle('播放列表'); setError('') }} aria-label="返回歌单">‹</button>}
       <strong>{title}</strong>
       {!tracks && <button type="button" className="refresh-button" disabled={loading} onClick={() => void refresh()} aria-label="刷新歌单" title="刷新歌单">↻</button>}
     </header>
-    {loading && <p className="list-status">正在读取 Spotify…</p>}
+    {showLoading && <p className="list-status">正在从 Spotify 同步…</p>}
     {error && <p className="list-status error">{error}</p>}
     {!loading && !error && <div className="media-list">
       {tracks

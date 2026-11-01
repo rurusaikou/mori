@@ -67,7 +67,7 @@ TypeScript 使用 `@mori/domain` 和 `@mori/contracts/playback-host`，避免应
 | `apps/extension/src/providers/spotify/spotify-auth.ts` | Spotify PKCE 与 Token 刷新 |
 | `apps/extension/src/content/index.tsx` | Shadow DOM 注入入口 |
 | `apps/extension/src/mori/MoriPresence.tsx` | Mori 手势与页面状态 |
-| `apps/extension/src/player/PlayerCard.tsx` | 三页主面板与固定底部播放条 |
+| `apps/extension/src/player/PlayerCard.tsx` | Mini Player、顶部当前歌曲播放器与三页 Full Panel |
 | `apps/extension/src/player/PlaylistPanel.tsx` | Spotify 歌单与歌曲 |
 | `apps/extension/src/chat/ChatPanel.tsx` | 对话记录与输入 |
 | `apps/extension/src/companion/MomentPanel.tsx` | 用户授权保存的音乐瞬间 |

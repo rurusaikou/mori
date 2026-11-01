@@ -44,17 +44,6 @@ async function ensureSpotifyDevice() {
 }
 
 export class SpotifyMusicProvider implements MusicProvider {
-  readonly id = 'spotify'
-  readonly capabilities = {
-    canCreatePlaybackDevice: true,
-    requiresExistingDevice: false,
-    canPlay: true,
-    canPause: true,
-    canSkipNext: true,
-    canSkipPrevious: true,
-    canSave: false,
-  }
-
   async connect() {
     await connectSpotify()
     // A new authorization may belong to another Spotify account; never reuse the previous
@@ -68,11 +57,10 @@ export class SpotifyMusicProvider implements MusicProvider {
 
   async getPlaybackState(): Promise<PlaybackState> {
     const remote = await getRemotePlayback()
-    if (!remote?.item) return { ...INITIAL_PLAYBACK_STATE, availability: 'ready', deviceId: remote?.device?.id ?? null, shuffle: remote?.shuffle_state ?? false, repeatMode: remote?.repeat_state ?? 'off' }
+    if (!remote?.item) return { ...INITIAL_PLAYBACK_STATE, availability: 'ready', shuffle: remote?.shuffle_state ?? false, repeatMode: remote?.repeat_state ?? 'off' }
     return {
       ...INITIAL_PLAYBACK_STATE,
       availability: 'ready',
-      deviceId: remote.device?.id ?? null,
       shuffle: remote.shuffle_state ?? false,
       repeatMode: remote.repeat_state ?? 'off',
       isPlaying: remote.is_playing,
@@ -97,13 +85,14 @@ export class SpotifyMusicProvider implements MusicProvider {
     const remote = await getRemotePlayback()
     if (!remote?.item || !embedded) await transferPlayback(deviceId, false)
     await startPlayback(deviceId, remote?.item ? undefined : (await extensionStorage.getTestUri()).trim() || undefined)
+    if (embedded) await sendToPlaybackHost('PLAYER_SET_VOLUME', { volume: 0.8 })
   }
 
   async next() { await nextPlayback(await resolveActivePlaybackDevice()) }
   async previous() { await previousPlayback(await resolveActivePlaybackDevice()) }
   async setPlaybackMode(mode: PlaybackMode) {
     const deviceId = await resolveActivePlaybackDevice()
-    // The mini UI presents mutually exclusive modes even though Spotify models shuffle and repeat
+    // Mori presents mutually exclusive modes even though Spotify models shuffle and repeat
     // as separate settings. Reset the other setting so the visible icon always matches reality.
     await Promise.all([
       setShuffle(deviceId, mode === 'shuffle'),
@@ -130,6 +119,11 @@ export class SpotifyMusicProvider implements MusicProvider {
     return refreshPlaylistTracks(playlistId)
   }
 
+  async hasLibraryCache(playlistId?: string) {
+    const cache = await extensionStorage.getLibraryCache()
+    return playlistId ? Boolean(cache.tracks[playlistId]) : Boolean(cache.playlists)
+  }
+
   async refreshLibrary() {
     await invalidateLibraryCache()
     return refreshPlaylists()
@@ -140,6 +134,9 @@ export class SpotifyMusicProvider implements MusicProvider {
     if (embedded) await sendToPlaybackHost('PLAYER_ACTIVATE')
     await transferPlayback(deviceId, false)
     await startPlayback(deviceId, uri, contextUri, queueUris)
+    // Spotify may reapply the device volume while transferring/starting playback. Restore the
+    // local SDK output after the play command, not only before it, to avoid a playing-but-silent host.
+    if (embedded) await sendToPlaybackHost('PLAYER_SET_VOLUME', { volume: 0.8 })
   }
 }
 

@@ -44,7 +44,9 @@ async function requestPlayer(type: PlaybackHostRequest['type'], payload: Playbac
     pending.set(id, { resolve, reject, timer })
     // The token is included in PLAYER_INIT. Target the configured origin rather than `*` so a
     // navigated or compromised iframe cannot receive credentials intended for another host.
-    const hostPayload = type === 'PLAYER_INIT' ? { token: payload.token } : undefined
+    const hostPayload = type === 'PLAYER_INIT'
+      ? { token: payload.token }
+      : type === 'PLAYER_SET_VOLUME' ? { volume: payload.volume } : undefined
     frame.contentWindow?.postMessage({ source: OFFSCREEN_MESSAGE_SOURCE, id, type, payload: hostPayload }, activeHostOrigin)
   })
 }

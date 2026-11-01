@@ -4,6 +4,7 @@ type PlayerError = { message?: string }
 type SpotifyPlayer = {
   connect(): Promise<boolean>
   activateElement(): Promise<void>
+  setVolume(volume: number): Promise<void>
   addListener(event: string, callback: (payload?: never) => void): void
   removeListener(event: string, callback: (payload?: never) => void): void
 }
@@ -44,6 +45,11 @@ export class SpotifyPlaybackDevice {
   async activate() {
     if (!this.#player) throw new Error('Mori Playback Host 尚未初始化')
     await this.#player.activateElement()
+  }
+
+  async setVolume(volume: number) {
+    if (!this.#player) throw new Error('Mori Playback Host 尚未初始化')
+    await this.#player.setVolume(Math.max(0, Math.min(1, volume)))
   }
 
   #loadSdk() {
@@ -91,12 +97,11 @@ export class SpotifyPlaybackDevice {
   #registerStateListeners(currentPlayer: SpotifyPlayer) {
     currentPlayer.addListener('ready', (payload?: never) => {
       this.#deviceId = (payload as { device_id?: string } | undefined)?.device_id || ''
-      this.emit({ type: 'ready', deviceId: this.#deviceId })
+      this.emit({ type: 'ready' })
     })
-    currentPlayer.addListener('not_ready', (payload?: never) => {
-      const unavailableId = (payload as { device_id?: string } | undefined)?.device_id || this.#deviceId
+    currentPlayer.addListener('not_ready', () => {
       this.#deviceId = ''
-      this.emit({ type: 'not_ready', deviceId: unavailableId })
+      this.emit({ type: 'not_ready' })
     })
     currentPlayer.addListener('player_state_changed', (payload?: never) => {
       const state = payload as { paused: boolean; position: number; duration: number; track_window?: { current_track?: SpotifySdkTrack } } | undefined

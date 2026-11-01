@@ -11,7 +11,7 @@ export function MomentPanel({ memories }: { memories: MusicMemory[] }) {
         </div>
         <p>{memory.note}</p>
       </article>)}
-    </div> : <div className="empty-state"><span>✦</span><strong>还没有音乐瞬间</strong><p>播放歌曲时点击底部的瞬间按钮，Mori 会替你记住。</p></div>}
+    </div> : <div className="empty-state"><span>✦</span><strong>还没有音乐瞬间</strong><p>播放歌曲时点击控制栏左侧的 ✦，Mori 会替你记住。</p></div>}
   </section>
 }
 

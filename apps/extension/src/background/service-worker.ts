@@ -57,6 +57,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         return { changed: true }
       case 'MORI_GET_PLAYLISTS':
         return { playlists: await music.getUserPlaylists() }
+      case 'MORI_GET_LIBRARY_CACHE_STATUS':
+        return { cached: await music.hasLibraryCache(message.playlistId) }
       case 'MORI_REFRESH_LIBRARY':
         return { playlists: await music.refreshLibrary() }
       case 'MORI_GET_PLAYLIST_TRACKS':
@@ -70,13 +72,12 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         return getCompanionData()
       case 'MORI_SEND_MESSAGE': {
         const messages = await sendCompanionMessage(message.text, music.state)
-        await broadcastCompanionData(messages)
+        await broadcastCompanionData()
         return { messages }
       }
       case 'MORI_SAVE_MEMORY': {
-        const memories = await saveMusicMemory(message.note, music.state)
-        const data = await getCompanionData()
-        await broadcastCompanionData(data.messages, memories)
+        const memories = await saveMusicMemory(music.state)
+        await broadcastCompanionData()
         return { memories }
       }
       case 'PLAYBACK_EVENT':
@@ -96,8 +97,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
   return true
 })
 
-async function broadcastCompanionData(messages: Awaited<ReturnType<typeof getCompanionData>>['messages'], memories?: Awaited<ReturnType<typeof getCompanionData>>['memories']) {
-  const data = memories ? { messages, memories } : await getCompanionData()
+async function broadcastCompanionData() {
+  const data = await getCompanionData()
   const message: TabMessage = { type: 'MORI_COMPANION_DATA', ...data }
   const tabs = await chrome.tabs.query({})
   await Promise.allSettled(tabs.filter((tab) => tab.id).map((tab) => chrome.tabs.sendMessage(tab.id!, message)))

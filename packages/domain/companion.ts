@@ -4,8 +4,6 @@ export type ConversationMessage = {
   id: string
   role: 'user' | 'mori'
   text: string
-  createdAt: string
-  trackUri?: string
 }
 
 export type MusicMemory = {

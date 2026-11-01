@@ -6,7 +6,6 @@ type SpotifyPlayback = {
   shuffle_state?: boolean
   repeat_state?: 'off' | 'context' | 'track'
   progress_ms?: number
-  device?: { id?: string | null }
   item?: {
     uri: string
     name: string

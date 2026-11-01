@@ -1,7 +1,7 @@
 import { DEFAULT_PLAYBACK_HOST_URL, STORAGE_KEYS } from '../shared/constants'
 import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicTrack, PlaybackState } from '@mori/domain'
 
-export type SpotifyToken = { accessToken: string; refreshToken?: string; expiresAt: number; scope: string }
+export type SpotifyToken = { accessToken: string; refreshToken?: string; expiresAt: number }
 export type PresencePosition = { x: number; y: number }
 export type SpotifyLibraryCache = {
   version: 3

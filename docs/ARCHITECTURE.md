@@ -48,6 +48,8 @@ Extension 和 Player Host 只共享 `packages/contracts/playback-host.ts` 中的
 
 Presence 开关和归一化位置存储在 `chrome.storage.local`。普通 HTTP(S) 页面预先注入轻量 content script；只有开关开启时才渲染 Mori。因此刷新、跨站导航、新标签页和浏览器重启后都能恢复。
 
+Mori 本体是固定 viewport 锚点，Panel 是相对锚点绝对定位的独立层。Panel 展开方向由锚点所在象限决定，并经过 16px viewport 边界碰撞修正；Panel 不进入 Mori 的布局盒，因此展开、收起和功能页变化不会改变锚点坐标。
+
 ### 对话与记忆
 
 当前 `CompanionService` 是本地 fallback。对话和记忆保存在 `chrome.storage.local`；只有用户主动点击记忆操作时才保存音乐瞬间。未来 AI adapter 不得直接接触 OAuth Token 或 Spotify 音频。
@@ -73,7 +75,7 @@ Presence 开关和归一化位置存储在 `chrome.storage.local`。普通 HTTP(
 
 Service Worker 可能随时挂起，所以持久状态不能只放内存。音频不能放在 popup 或 content script：popup 会在失焦时关闭，content script 会随导航销毁。Provider 在需要播放时确保 offscreen document 存在；offscreen document 再维护 Playback Host iframe。
 
-Chrome 因静音回收 offscreen document 后，下一次播放命令会重新创建完整链路。
+Chrome 因长时间没有音频活动而回收 offscreen document 后，下一次播放命令会重新创建完整链路。
 
 ## 6. MusicProvider 抽象
 
@@ -82,9 +84,8 @@ UI 不直接调用 Spotify SDK。`MusicProvider` 提供：
 - 连接与断开；
 - 获取播放状态；
 - 播放、暂停、上一首、下一首；
-- 获取用户歌单和歌单歌曲；
+- 获取、刷新和查询缓存中的用户歌单与歌曲；
 - 播放 Spotify URI；
-- capabilities 描述能力差异。
 
 新增 Apple Music、YouTube Music 等 Provider 时应实现相同边界，不在 React 组件中增加平台 SDK 分支。
 

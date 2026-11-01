@@ -23,6 +23,10 @@ async function handleRequest(request: PlaybackHostFrameRequest) {
     return playback.initialize(request.payload.token)
   }
   if (request.type === 'PLAYER_ACTIVATE') { await playback.activate(); return null }
+  if (request.type === 'PLAYER_SET_VOLUME') {
+    await playback.setVolume(request.payload?.volume ?? 0.8)
+    return null
+  }
   return null
 }
 

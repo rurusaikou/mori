@@ -45,7 +45,7 @@ pnpm dev:host     # 终端 2：启动 http://127.0.0.1:3210/playback-host/
 | `pnpm build` | 构建 Extension 与 Playback Host |
 | `pnpm build:extension` | 只构建 Extension |
 | `pnpm build:host` | 只构建 Playback Host |
-| `pnpm check` | TypeScript、两个构建和基础完整性检查 |
+| `pnpm check` | TypeScript 检查并构建 Extension 与 Playback Host |
 
 构建产物位于 `apps/extension/build/` 和 `apps/player-host/dist/`，均不提交 Git。
 
@@ -72,11 +72,12 @@ Content Script 不读取 Spotify DOM，也不持有 OAuth Token。Background 是
 
 ## 文档
 
+文档按“产品定义 → 系统边界 → 代码位置 → 实现流程 → 第三方约束”分层，后端尚未实现的内容只保留在 `apps/api` 边界说明中。
+
 - [产品定义](docs/PRODUCT.md)
 - [项目架构](docs/ARCHITECTURE.md)
 - [代码结构](docs/CODE_STRUCTURE.md)
 - [代码实现说明](docs/IMPLEMENTATION.md)
-- [后端边界](docs/BACKEND.md)
-- [Extension 生命周期与消息流](docs/BROWSER_EXTENSION_ARCHITECTURE.md)
 - [Spotify Web Playback SDK](docs/SPOTIFY_WEB_PLAYBACK_SDK.md)
+- [后端边界（尚未实现）](apps/api/README.md)
 

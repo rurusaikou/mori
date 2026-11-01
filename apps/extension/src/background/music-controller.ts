@@ -1,10 +1,10 @@
 import { SpotifyMusicProvider } from '../providers/spotify/spotify-provider'
-import { INITIAL_PLAYBACK_STATE, type PlaybackMode, type PlaybackState } from '@mori/domain'
+import { INITIAL_PLAYBACK_STATE, type MusicProvider, type PlaybackMode, type PlaybackState } from '@mori/domain'
 import type { PlaybackHostEvent, TabMessage } from '../shared/messages'
 import { extensionStorage } from '../storage/extension-storage'
 
 export class MusicController {
-  readonly provider = new SpotifyMusicProvider()
+  readonly provider: MusicProvider = new SpotifyMusicProvider()
   #state: PlaybackState = { ...INITIAL_PLAYBACK_STATE }
 
   get state() { return structuredClone(this.#state) }
@@ -72,6 +72,8 @@ export class MusicController {
 
   getPlaylistTracks(playlistId: string) { return this.provider.getPlaylistTracks(playlistId) }
 
+  hasLibraryCache(playlistId?: string) { return this.provider.hasLibraryCache(playlistId) }
+
   refreshLibrary() { return this.provider.refreshLibrary() }
 
   async playUri(uri: string, contextUri?: string, queueUris?: string[]) {
@@ -87,8 +89,8 @@ export class MusicController {
   }
 
   async handleHostEvent(event: PlaybackHostEvent) {
-    if (event.type === 'ready') return this.update({ availability: 'ready', deviceId: event.deviceId, error: null })
-    if (event.type === 'not_ready') return this.update({ availability: 'provider-unavailable', deviceId: null, error: 'Mori Spotify 设备暂时离线' })
+    if (event.type === 'ready') return this.update({ availability: 'ready', error: null })
+    if (event.type === 'not_ready') return this.update({ availability: 'provider-unavailable', error: 'Mori Spotify 设备暂时离线' })
     if (event.type === 'error') {
       const availability = event.kind === 'account_error' ? 'needs-premium' : event.kind === 'autoplay_failed' ? 'autoplay-blocked' : 'provider-unavailable'
       return this.update({ availability, error: event.message })

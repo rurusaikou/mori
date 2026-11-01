@@ -13,12 +13,13 @@ export type RuntimeRequest =
   | { type: 'MORI_PLAYBACK_COMMAND'; command: 'next' | 'previous' }
   | { type: 'MORI_SET_PLAYBACK_MODE'; mode: PlaybackMode }
   | { type: 'MORI_GET_PLAYLISTS' }
+  | { type: 'MORI_GET_LIBRARY_CACHE_STATUS'; playlistId?: string }
   | { type: 'MORI_REFRESH_LIBRARY' }
   | { type: 'MORI_GET_PLAYLIST_TRACKS'; playlistId: string }
   | { type: 'MORI_PLAY_URI'; uri: string; contextUri?: string; queueUris?: string[] }
   | { type: 'MORI_GET_COMPANION_DATA' }
   | { type: 'MORI_SEND_MESSAGE'; text: string }
-  | { type: 'MORI_SAVE_MEMORY'; note: string }
+  | { type: 'MORI_SAVE_MEMORY' }
   | { type: 'PLAYBACK_EVENT'; event: PlaybackHostEvent }
 
 export type TabMessage =

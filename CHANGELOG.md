@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-01 — Anchored adaptive panel
+
+- 将 Mori 固定为 viewport 拖拽锚点，Panel 改为不影响锚点布局的绝对定位层。
+- 根据锚点象限自动选择展开方向，并增加 16px viewport 边界碰撞检测。
+- 增加 Mori → Mini Player → Full Panel 三级渐进交互和逐级收回行为。
+- 修复 closed Shadow DOM 下内部按钮被误判为外部点击的问题，并移除 Mini Player 右上角收藏按钮。
+- 将 Full Panel 调整为“标题 → 当前歌曲 → Tab → 内容”，保留 Mini 播放状态；面板约 400px 高，歌单内容内部滚动。
+- 明确 `✦` 为「记录这一瞬间」入口，并移除 Full Panel 的心形收藏语义。
+- 删除独立的瞬间大按钮，将 `✦` 移到控制栏左侧，并把随机/循环模式移到下一首右侧。
+- 将 Panel 与 Mori 的锚点间距缩短为 6px；Spotify 开始播放后显式恢复 Host 本地音量，修复状态正常但没有声音的问题。
+- 清理未消费的 Provider capability、播放设备快照、对话/token 元数据、Panel 方向属性和重复 CSS；合并重复的生命周期及后端文档。
+
 ## 2026-10-31 — Playback consistency and implementation guide
 
 - 删除未被消费的记忆 UI 状态和已失去用途的 Playback Host 控制命令。
@@ -17,6 +29,7 @@
 - 播放栏增加随机、歌单循环和单曲循环状态，单击循环切换并同步 Spotify active device；增加本地推进的歌曲进度条。
 - 增加 Saved Tracks“我收藏的歌曲”；读取内容被 Spotify 拒绝的歌单会缓存为置灰禁用状态。
 - 首次加载歌单列表时并发预检内容访问权限，使 Forbidden 歌单首次展示即置灰。
+- 根据真实缓存状态显示歌单同步提示，缓存命中时不再出现 Spotify 加载文案。
 - 启用 TypeScript 未使用代码检查，并增加代码实现说明。
 
 ## 2026-10-30 — Extension-only architecture

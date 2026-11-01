@@ -1,6 +1,6 @@
 # Mori 代码实现说明
 
-本文解释当前代码如何协作，重点记录状态归属、消息路径和第三方限制。目录职责请先看 [CODE_STRUCTURE.md](CODE_STRUCTURE.md)，产品及系统边界请看 [ARCHITECTURE.md](ARCHITECTURE.md)。
+本文解释当前代码如何协作，重点记录状态归属、消息路径和第三方限制。目录职责请先看 [CODE_STRUCTURE.md](CODE_STRUCTURE.md)，产品及系统边界请看 [ARCHITECTURE.md](ARCHITECTURE.md)，Spotify SDK 专属约束请看 [SPOTIFY_WEB_PLAYBACK_SDK.md](SPOTIFY_WEB_PLAYBACK_SDK.md)。
 
 ## 1. 启动与常驻
 
@@ -13,6 +13,10 @@ Chrome 从 `apps/extension/manifest.json` 启动 Manifest V3 Service Worker，�
 3. 后台向所有已打开标签广播 `MORI_SET_VISIBILITY`；
 4. 新页面或刷新后的 content script 通过 `MORI_GET_PRESENCE_STATE` 恢复 Mori；
 5. 拖动位置以归一化坐标保存，避免窗口尺寸变化后角色移出视口。
+
+Panel 定位不使用普通文档流。渲染后读取 Mori、Root 和 Panel 的 viewport rect：锚点在右半区时优先向左展开，在左半区时向右；下半区优先向上，上半区向下。首选坐标再 clamp 到 `[16px, viewport - panelSize - 16px]`，最后转换成相对 Root 的 absolute offset。拖动或窗口 resize 时重新计算，但从不修改 Mori 的位置状态。
+
+Presence UI 有 `closed → mini → full` 三个层级。单击 Mori 只打开 Mini Player；Mini 的播放控件不会触发升级，点击其空白区域或更多按钮才进入 Full Panel。点击外部区域和 Full Panel 关闭按钮按层级逐步收回。Mini 与 Full 共用同一个定位容器，因此切换尺寸时重新碰撞计算但不改变锚点。
 
 网页切换只会销毁该页的 Content Script，不会销毁后台维护的播放链路。
 
@@ -33,14 +37,15 @@ Chrome 从 `apps/extension/manifest.json` 启动 Manifest V3 Service Worker，�
 
 `shared/messages.ts` 是 Extension 内消息入口。主要请求如下：
 
-| 请求 | 处理者 | 结果传播方式 |
+| 请求 | 业务路径 | 结果传播方式 |
 |---|---|---|
 | `MORI_GET_STATE` | `MusicController` | 直接返回快照 |
-| `MORI_TOGGLE_PLAYBACK` | `SpotifyMusicProvider` | 立即确认，完成后广播 PlaybackState |
-| `MORI_PLAYBACK_COMMAND` | `SpotifyMusicProvider` | 等待 active device 切歌结果，再延迟刷新并广播 |
-| `MORI_PLAY_URI` | `SpotifyMusicProvider` | 立即确认，完成后广播 |
-| `MORI_GET_PLAYLISTS` / `MORI_GET_PLAYLIST_TRACKS` | Spotify Web API | 直接返回数据或错误 |
-| `MORI_REFRESH_LIBRARY` | `SpotifyMusicProvider` | 清除曲库缓存并重新获取歌单 |
+| `MORI_TOGGLE_PLAYBACK` | `MusicController → MusicProvider` | 立即确认，完成后广播 PlaybackState |
+| `MORI_PLAYBACK_COMMAND` | `MusicController → MusicProvider` | 等待 active device 切歌结果，再延迟刷新并广播 |
+| `MORI_PLAY_URI` | `MusicController → MusicProvider` | 立即确认，完成后广播 |
+| `MORI_GET_PLAYLISTS` / `MORI_GET_PLAYLIST_TRACKS` | `MusicController → MusicProvider` | 直接返回缓存或 Spotify 数据 |
+| `MORI_GET_LIBRARY_CACHE_STATUS` | `MusicController → MusicProvider` | 返回 session 缓存是否存在 |
+| `MORI_REFRESH_LIBRARY` | `MusicController → MusicProvider` | 清除曲库缓存并重新获取歌单 |
 | `MORI_SEND_MESSAGE` / `MORI_SAVE_MEMORY` | `CompanionService` | 持久化后向 tabs 广播 |
 | `PLAYBACK_EVENT` | `MusicController` | 仅接受 offscreen document 来源 |
 
@@ -50,9 +55,11 @@ Chrome 从 `apps/extension/manifest.json` 启动 Manifest V3 Service Worker，�
 
 `spotify-auth.ts` 使用 Authorization Code + PKCE，因此 Extension 中不存在 Client Secret。公开 Client ID、access token 和 refresh token 当前存于 `chrome.storage.local`，但 Service Worker 启动时会把 storage access level 限制为 `TRUSTED_CONTEXTS`，Content Script 无法直接读取。
 
-每次 Web API 请求前通过 `getValidAccessToken()` 检查有效期，并在不足一分钟时刷新。生产后端完成后，refresh token 应迁移到服务端加密保存；这项未来边界记录在 [BACKEND.md](BACKEND.md)。
+每次 Web API 请求前通过 `getValidAccessToken()` 检查有效期，并在不足一分钟时刷新。生产后端完成后，refresh token 应迁移到服务端加密保存；未来边界记录在 [`apps/api/README.md`](../apps/api/README.md)。
 
 歌单和歌曲 metadata 由 Provider 缓存在 `chrome.storage.session`，TTL 为 60 分钟。存在缓存时立即返回；超过 TTL 仍先返回旧数据，并在后台刷新（stale-while-revalidate）；没有缓存时才等待 Spotify。同一资源的并发请求复用一个 Promise。明确刷新、重新授权、账号变化或断开 Spotify 时清空缓存；浏览器关闭后由 session storage 自动清除。
+
+歌单 UI 在请求前显式查询后台 session 缓存状态。有缓存（包括 stale-while-revalidate 的过期缓存）就直接展示，不出现 Spotify 加载文案；只有没有缓存、确实需要等待网络时才显示“正在从 Spotify 同步”。
 
 歌曲 metadata 同时保存 Spotify 的可播放状态。本地歌曲、`is_playable=false` 或带 restrictions 的条目仍显示在歌单中，但 UI 置灰并禁用，避免用户点击后才收到失败。缓存 schema 变更时通过版本号自动忽略旧 session 数据。
 
@@ -72,15 +79,17 @@ Provider
   → 若 Host 失败，查询已有非受限 Connect device
 ```
 
-SDK Host 只负责创建 Mori 设备、激活浏览器音频元素和上报 `player_state_changed`。播放、暂停、上一首、下一首、播放 URI 都由 Spotify Web API 按最终 `device_id` 执行。统一控制路径是为了保证 Mori 自建设备和 Connect 回退设备行为一致。
+SDK Host 只负责创建 Mori 设备、激活浏览器音频元素、恢复本地音量和上报 `player_state_changed`。音量恢复发生在 Spotify 设备转移与播放命令完成之后，避免 Spotify 重新应用设备音量后出现“状态在播放但没有声音”。播放、暂停、上一首、下一首、播放 URI 都由 Spotify Web API 按最终 `device_id` 执行。统一控制路径是为了保证 Mori 自建设备和 Connect 回退设备行为一致。
 
-歌单歌曲播放使用 `{ context_uri: playlist.uri, offset: { uri: track.uri } }` 建立完整播放上下文，而不是 `{ uris: [track.uri] }` 的单曲队列。这样底部上一首/下一首才能沿当前歌单移动。
+歌单歌曲播放使用 `{ context_uri: playlist.uri, offset: { uri: track.uri } }` 建立完整播放上下文，而不是 `{ uris: [track.uri] }` 的单曲队列。这样控制栏的上一首/下一首才能沿当前歌单移动。
 
 Spotify 官方播放接口只接受 album、artist、playlist 作为 `context_uri`；Saved Tracks 不是合法 context。Mori 对“我收藏的歌曲”使用当前已读取的可播放 URI 列表，并把用户所选歌曲旋转到队首后作为队列启动。
 
 角色单击播放会尝试恢复 Spotify 当前播放上下文。若账号当前没有歌曲上下文，用户需要先从 Mori 的歌单面板选择歌曲；Options 中的测试 URI 只用于本地技术验证，不是生产推荐或默认歌单机制。
 
 首次播放前调用 `activateElement()` 是浏览器 autoplay policy 的要求。页面切换后音频仍由 offscreen 中的 Host iframe 输出；Chrome 回收 offscreen document 后，下一次用户操作会重建它。
+
+播放错误统一映射为 `PlaybackState.availability`：未授权为 `needs-auth`，Premium 不可用为 `needs-premium`，没有设备为 `needs-device`，自动播放被拦截为 `autoplay-blocked`，其余网络、Host、SDK 或 DRM 问题为 `provider-unavailable`。原始 Chrome 消息通道错误会转换成用户可以执行的重试提示。
 
 ## 6. 播放状态真值
 
@@ -91,17 +100,19 @@ Spotify 官方播放接口只接受 album、artist、playlist 作为 `context_ur
 - 错误统一转换为用户可理解的 availability 与提示；
 - 每次更新写入 `chrome.storage.session` 并广播到所有标签。
 
-切歌或转移设备后，Spotify Web API 可能稍后才返回新状态，因此 Controller 延迟刷新。Web API 返回的 `device.id` 必须写回 PlaybackState，否则一次刷新会覆盖 SDK ready 事件保存的设备信息。
+切歌或转移设备后，Spotify Web API 可能稍后才返回新状态，因此 Controller 延迟刷新。Host 的 SDK 事件与 Web API 刷新都必须先进入 Controller，不能由 UI 直接覆盖播放快照。
 
 UI 只根据广播状态渲染 `idle`、`listening`、错误和当前歌曲，不自行假设命令已经成功。
 
-展开后的 mini 主面板使用歌单、对话、瞬间三个互斥页面，底部播放条始终存在。上一首/下一首请求会等待 Spotify Web API 的真实结果；Provider 查询当前 active Connect device，而不是为切歌新建一个尚未激活的 Mori 设备。
+Full Panel 按“标题 → 当前歌曲播放器 → Tab → 内容”排列。顶部播放器与 Mini Player 读取同一个 `PlaybackState`，所以升级为 Full Panel 只改变表现层，不重新初始化播放状态。上一首/下一首请求会等待 Spotify Web API 的真实结果；Provider 查询当前 active Connect device，而不是为切歌新建一个尚未激活的 Mori 设备。
 
-底部歌曲封面使用圆形唱片形态并保留音乐符号；播放状态下只旋转唱片图片，暂停时停止。系统开启“减少动态效果”时不执行旋转动画。
+Full Panel 使用 78px 歌曲封面、进度条和紧凑控制区；播放状态下封面转为圆形并旋转，暂停时停止。控制栏左侧 `✦` 是音乐记忆入口，播放模式位于下一首右侧，两者都不打开额外选择面板。系统开启“减少动态效果”时不执行旋转或脉冲动画。
 
-播放条最右侧的模式按钮单击后依次切换顺序播放、歌曲随机、歌单循环和单曲循环，不打开弹出菜单。Spotify 本身把 shuffle 和 repeat 作为两个独立设置，Mori 将它们呈现为互斥模式：启用一种时同步关闭另一种。模式变更必须作用于当前 active device，并写回统一 PlaybackState。
+Full Panel 高度固定在约 400px，并在小视口降至可用高度。歌单区域默认显示约三至四行并在内部滚动；切换对话或瞬间时仍使用同一面板边界，避免扩展成长页面级音乐应用。
 
-播放条顶部显示歌曲进度。SDK/Web API 的 `progressMs` 是校准点；播放期间 UI 每秒本地推进并限制在 `durationMs` 内，新的播放状态事件到达后重新校准。
+播放器中的模式按钮单击后依次切换顺序播放、歌曲随机、歌单循环和单曲循环，不打开弹出菜单。Spotify 本身把 shuffle 和 repeat 作为两个独立设置，Mori 将它们呈现为互斥模式：启用一种时同步关闭另一种。模式变更必须作用于当前 active device，并写回统一 PlaybackState。
+
+当前歌曲信息下方显示播放进度。SDK/Web API 的 `progressMs` 是校准点；播放期间 UI 每秒本地推进并限制在 `durationMs` 内，新的播放状态事件到达后重新校准。
 
 ## 7. 对话与记忆
 
@@ -115,12 +126,13 @@ UI 只根据广播状态渲染 `idle`、`listening`、错误和当前歌曲，�
 
 ## 8. Playback Host 协议与安全
 
-`packages/contracts/playback-host.ts` 只定义两个 Host 命令：
+`packages/contracts/playback-host.ts` 定义三个 Host 命令：
 
 - `PLAYER_INIT`：传入短期 access token，初始化或恢复设备；
-- `PLAYER_ACTIVATE`：在用户手势链路中激活音频元素。
+- `PLAYER_ACTIVATE`：在用户播放操作中激活音频元素；
+- `PLAYER_SET_VOLUME`：播放开始后恢复 SDK 本地输出音量。
 
-Host URL 只用于 Extension offscreen 配置 iframe，不进入跨 Origin Host payload。offscreen 发送消息时指定精确 `targetOrigin`，回包同时校验 iframe window 与 origin。Host 不持久化 token，也不会在回包中返回 token。
+Host URL 只用于 Extension offscreen 配置 iframe，不进入跨 Origin Host payload。只有 `PLAYER_INIT` 携带短期 token，`PLAYER_SET_VOLUME` 只携带 0–1 的音量值。offscreen 发送消息时指定精确 `targetOrigin`，回包同时校验 iframe window 与 origin。Host 不持久化 token，也不会在回包中返回 token。
 
 Playback Host 的 CSP 必须显式允许 `frame-src https://sdk.scdn.co`。官方 SDK 会在内部创建 `embedded/index.html` iframe；若只允许 SDK 脚本而阻止该 iframe，`connect()` 不一定立即报错，而会表现为 Mori 等待设备超时。`connect-src` 还必须包含 `'self'`；本地开发同时列出 `http://127.0.0.1:3210` 和 `http://localhost:3210`，避免 Host 自身连接被策略拦截。
 

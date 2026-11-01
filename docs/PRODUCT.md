@@ -7,6 +7,6 @@ Mori 是住在浏览器里的 AI 音乐知音伙伴。
 - 用户不需要先打开 Spotify Web Player；Mori 在任意普通网页上悬浮。
 - Mori 不复制完整 Spotify Client，不读取 Spotify DOM，不下载或修改 Spotify 音频。
 
-核心体验：连接 Spotify → 召唤 Mori → 点击播放 → Mori 进入 listening → 浏览其他网页时音乐与陪伴持续。
+核心体验：连接 Spotify → 召唤 Mori → 单击打开 Mini Player → 点击播放 → Mori 进入 listening → 需要时展开 Full Panel → 浏览其他网页时音乐与陪伴持续。
 
 当前 MVP 中，“点击播放”表示恢复账号已有的 Spotify 播放上下文。首次没有可恢复歌曲时，用户先在 Mori 的歌单面板选择一首歌；Mori 不凭空决定播放内容，也不要求打开 Spotify Web Player。

@@ -5,10 +5,11 @@
 export const OFFSCREEN_MESSAGE_SOURCE = 'mori-offscreen' as const
 export const PLAYBACK_HOST_MESSAGE_SOURCE = 'mori-playback-host' as const
 
-export type PlaybackHostCommand = 'PLAYER_INIT' | 'PLAYER_ACTIVATE'
+export type PlaybackHostCommand = 'PLAYER_INIT' | 'PLAYER_ACTIVATE' | 'PLAYER_SET_VOLUME'
 
 export type PlaybackHostPayload = {
   token?: string
+  volume?: number
 }
 
 export type SpotifySdkTrack = {
@@ -19,8 +20,8 @@ export type SpotifySdkTrack = {
 }
 
 export type PlaybackHostEvent =
-  | { type: 'ready'; deviceId: string }
-  | { type: 'not_ready'; deviceId: string }
+  | { type: 'ready' }
+  | { type: 'not_ready' }
   | { type: 'error'; kind: string; message: string }
   | { type: 'state'; paused: boolean; position: number; duration: number; track: SpotifySdkTrack | null }
 

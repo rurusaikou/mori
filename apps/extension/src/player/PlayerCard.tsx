@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicTrack, PlaybackMode, PlaybackState } from '@mori/domain'
 import { ChatPanel } from '../chat/ChatPanel'
 import { MomentPanel } from '../companion/MomentPanel'
@@ -10,18 +10,20 @@ type Props = {
   playback: PlaybackState
   messages: ConversationMessage[]
   memories: MusicMemory[]
+  onClose: () => void
   onToggle: () => Promise<void>
   onCommand: (command: 'previous' | 'next') => Promise<void>
   onSetPlaybackMode: (mode: PlaybackMode) => Promise<void>
   onSend: (text: string) => Promise<void>
-  onSaveMemory: (note: string) => Promise<void>
+  onSaveMemory: () => Promise<void>
   onGetPlaylists: () => Promise<MusicPlaylist[]>
+  onHasLibraryCache: (playlistId?: string) => Promise<boolean>
   onRefreshLibrary: () => Promise<MusicPlaylist[]>
   onGetPlaylistTracks: (playlistId: string) => Promise<MusicTrack[]>
   onPlayUri: (uri: string, contextUri?: string, queueUris?: string[]) => Promise<void>
 }
 
-export function PlayerCard({ playback, messages, memories, onToggle, onCommand, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onRefreshLibrary, onGetPlaylistTracks, onPlayUri }: Props) {
+export function PlayerCard({ playback, messages, memories, onClose, onToggle, onCommand, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onHasLibraryCache, onRefreshLibrary, onGetPlaylistTracks, onPlayUri }: Props) {
   const [view, setView] = useState<View>('playlists')
   const [controlBusy, setControlBusy] = useState<'previous' | 'toggle' | 'next' | 'memory' | 'mode' | null>(null)
   const [feedback, setFeedback] = useState('')
@@ -37,7 +39,7 @@ export function PlayerCard({ playback, messages, memories, onToggle, onCommand, 
 
   async function saveMoment() {
     await runControl('memory', async () => {
-      await onSaveMemory('')
+      await onSaveMemory()
       setFeedback('已保存到「瞬间」')
       setView('moments')
     })
@@ -50,7 +52,31 @@ export function PlayerCard({ playback, messages, memories, onToggle, onCommand, 
   }
 
   return <section className="card" aria-label="Mori 音乐伙伴">
-    <header className="card-header"><strong>Mori</strong><span className="status-dot" title={playback.isPlaying ? '正在陪听' : '已暂停'} /></header>
+    <header className="card-header"><strong>Mori</strong><button type="button" className="panel-close" onClick={onClose} aria-label="收起到迷你播放器" title="收起">●</button></header>
+    <section className="expanded-player" aria-label="当前歌曲播放器">
+      <div className="expanded-track-row">
+        <span className={`expanded-cover ${playback.isPlaying ? 'spinning' : ''}`}>
+          {playback.track?.artwork ? <img src={playback.track.artwork} alt="" /> : <span>♪</span>}
+        </span>
+        <div className="expanded-track-info">
+          <strong>{playback.track?.title ?? '等待音乐'}</strong>
+          <small>{playback.track?.artist || '从歌单选择一首歌'}</small>
+          <PlaybackProgress playback={playback} />
+          <div className="expanded-controls">
+            <button type="button" className={`moment-control ${controlBusy === 'memory' ? 'busy' : ''}`} disabled={Boolean(controlBusy)} onClick={() => void saveMoment()} aria-label="记录这一瞬间" title="记录这一瞬间">✦</button>
+            <button type="button" disabled={Boolean(controlBusy)} onClick={() => void runControl('previous', () => onCommand('previous'))} aria-label="上一首">|‹</button>
+            <button type="button" className="primary" disabled={Boolean(controlBusy)} onClick={() => void runControl('toggle', onToggle)} aria-label={playback.isPlaying ? '暂停' : '播放'}>{controlBusy === 'toggle' ? '…' : playback.isPlaying ? 'Ⅱ' : '▶'}</button>
+            <button type="button" disabled={Boolean(controlBusy)} onClick={() => void runControl('next', () => onCommand('next'))} aria-label="下一首">›|</button>
+            <div className="playback-mode-control">
+              <button type="button" className={playbackMode !== 'off' ? 'active' : ''} disabled={Boolean(controlBusy)} onClick={() => void cyclePlaybackMode()} aria-label={`${modeLabel(playbackMode)}，点击切换`} title={`${modeLabel(playbackMode)}，点击切换`}>
+                <ModeIcon mode={playbackMode} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {(feedback || playback.error) && <p className="expanded-feedback">{feedback || playback.error}</p>}
+    </section>
     <nav className="feature-tabs" aria-label="Mori 功能">
       <Tab active={view === 'playlists'} icon={<MusicIcon />} label="歌单" onClick={() => setView('playlists')} />
       <Tab active={view === 'chat'} icon={<ChatIcon />} label="对话" onClick={() => setView('chat')} />
@@ -58,31 +84,50 @@ export function PlayerCard({ playback, messages, memories, onToggle, onCommand, 
     </nav>
 
     <main className="card-content">
-      {view === 'playlists' && <PlaylistPanel playback={playback} getPlaylists={onGetPlaylists} refreshLibrary={onRefreshLibrary} getPlaylistTracks={onGetPlaylistTracks} playUri={onPlayUri} />}
+      {view === 'playlists' && <PlaylistPanel playback={playback} getPlaylists={onGetPlaylists} hasLibraryCache={onHasLibraryCache} refreshLibrary={onRefreshLibrary} getPlaylistTracks={onGetPlaylistTracks} playUri={onPlayUri} />}
       {view === 'chat' && <ChatPanel messages={messages} onSend={onSend} />}
       {view === 'moments' && <MomentPanel memories={memories} />}
     </main>
+  </section>
+}
 
-    {(feedback || playback.error) && <p className={`control-feedback ${playback.error ? 'error' : ''}`}>{feedback || playback.error}</p>}
-    <footer className="now-playing">
-      <PlaybackProgress playback={playback} />
-      <div className="now-track">
-        <span className={`now-disc ${playback.isPlaying ? 'spinning' : ''}`}>
-          {playback.track?.artwork ? <img src={playback.track.artwork} alt="" /> : <span className="now-placeholder" />}
-          <span className="disc-note">♪</span>
-        </span>
-        <span><strong>{playback.track?.title ?? '等待音乐'}</strong><small>{playback.track?.artist || '从歌单选择一首歌'}</small></span>
-      </div>
-      <button type="button" className={`moment-control ${controlBusy === 'memory' ? 'busy' : ''}`} onClick={() => void saveMoment()} aria-label="记录音乐瞬间">✦</button>
-      <button type="button" disabled={Boolean(controlBusy)} onClick={() => void runControl('previous', () => onCommand('previous'))} aria-label="上一首">|‹</button>
-      <button type="button" className="primary" disabled={Boolean(controlBusy)} onClick={() => void runControl('toggle', onToggle)} aria-label={playback.isPlaying ? '暂停' : '播放'}>{controlBusy === 'toggle' ? '…' : playback.isPlaying ? 'Ⅱ' : '▶'}</button>
-      <button type="button" disabled={Boolean(controlBusy)} onClick={() => void runControl('next', () => onCommand('next'))} aria-label="下一首">›|</button>
-      <div className="playback-mode-control">
-        <button type="button" className={playbackMode !== 'off' ? 'active' : ''} disabled={Boolean(controlBusy)} onClick={() => void cyclePlaybackMode()} aria-label={`${modeLabel(playbackMode)}，点击切换`} title={`${modeLabel(playbackMode)}，点击切换`}>
-          <ModeIcon mode={playbackMode} />
-        </button>
-      </div>
-    </footer>
+type MiniPlayerProps = {
+  playback: PlaybackState
+  onToggle: () => Promise<void>
+  onCommand: (command: 'previous' | 'next') => Promise<void>
+  onSaveMemory: () => Promise<void>
+  onExpand: () => void
+}
+
+export function MiniPlayer({ playback, onToggle, onCommand, onSaveMemory, onExpand }: MiniPlayerProps) {
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState('')
+
+  async function run(event: ReactMouseEvent, task: () => Promise<void>) {
+    event.stopPropagation()
+    if (busy) return
+    setBusy(true); setFeedback('')
+    try { await task() }
+    catch (error) { setFeedback(error instanceof Error ? error.message : '操作失败') }
+    finally { setBusy(false) }
+  }
+
+  return <section className="mini-player" aria-label="Mori 迷你播放器" onClick={onExpand}>
+    <div className="mini-track">
+      <span className={`mini-cover ${playback.isPlaying ? 'spinning' : ''}`}>
+        {playback.track?.artwork ? <img src={playback.track.artwork} alt="" /> : <span>♪</span>}
+      </span>
+      <span><strong>{playback.track?.title ?? '等待音乐'}</strong><small>{playback.track?.artist || '点击播放或打开完整面板'}</small></span>
+    </div>
+    <PlaybackProgress playback={playback} />
+    <div className="mini-controls">
+      <button type="button" disabled={busy} onClick={(event) => void run(event, onSaveMemory)} aria-label="记录音乐瞬间">✦</button>
+      <button type="button" disabled={busy} onClick={(event) => void run(event, () => onCommand('previous'))} aria-label="上一首">|‹</button>
+      <button type="button" className="primary" disabled={busy} onClick={(event) => void run(event, onToggle)} aria-label={playback.isPlaying ? '暂停' : '播放'}>{playback.isPlaying ? 'Ⅱ' : '▶'}</button>
+      <button type="button" disabled={busy} onClick={(event) => void run(event, () => onCommand('next'))} aria-label="下一首">›|</button>
+      <button type="button" onClick={(event) => { event.stopPropagation(); onExpand() }} aria-label="打开完整面板">☷</button>
+    </div>
+    {(feedback || playback.error) && <p className="mini-feedback">{feedback || playback.error}</p>}
   </section>
 }
 

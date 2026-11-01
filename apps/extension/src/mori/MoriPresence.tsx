@@ -1,23 +1,28 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { MoriCharacter } from './MoriCharacter'
-import { PlayerCard } from '../player/PlayerCard'
+import { MiniPlayer, PlayerCard } from '../player/PlayerCard'
 import { INITIAL_PLAYBACK_STATE, type ConversationMessage, type MusicMemory, type MusicPlaylist, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
 import type { TabMessage } from '../shared/messages'
 import { sendRuntimeRequest } from '../shared/runtime-client'
 
 type DragState = { id: number; startX: number; startY: number; left: number; top: number; moved: boolean }
+type PanelMode = 'closed' | 'mini' | 'full'
+
+const PANEL_GAP = 6
+const VIEWPORT_MARGIN = 16
 
 export function MoriPresence() {
   const [visible, setVisible] = useState(false)
-  const [expanded, setExpanded] = useState(false)
+  const [panelMode, setPanelMode] = useState<PanelMode>('closed')
   const [playback, setPlayback] = useState<PlaybackState>(INITIAL_PLAYBACK_STATE)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [memories, setMemories] = useState<MusicMemory[]>([])
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const moriRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const drag = useRef<DragState | null>(null)
-  const longPressTimer = useRef<number | null>(null)
-  const longPressed = useRef(false)
+  const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null)
 
   useEffect(() => {
     void Promise.all([
@@ -38,18 +43,55 @@ export function MoriPresence() {
     return () => chrome.runtime.onMessage.removeListener(listener)
   }, [])
 
+  useEffect(() => {
+    if (panelMode === 'closed') return
+    const collapseFromOutside = (event: PointerEvent) => {
+      const root = rootRef.current
+      const rootNode = root?.getRootNode()
+      const shadowHost = rootNode instanceof ShadowRoot ? rootNode.host : null
+      const path = event.composedPath()
+      // A closed Shadow DOM hides its internal nodes from document-level listeners. The composed
+      // path still contains the extension host, so treat either root or host as an inside click;
+      // otherwise pointerdown would collapse the panel before any control receives its click.
+      if ((root && path.includes(root)) || (shadowHost && path.includes(shadowHost))) return
+      setPanelMode((mode) => mode === 'full' ? 'mini' : 'closed')
+    }
+    document.addEventListener('pointerdown', collapseFromOutside, true)
+    return () => document.removeEventListener('pointerdown', collapseFromOutside, true)
+  }, [panelMode])
+
+  useLayoutEffect(() => {
+    if (panelMode === 'closed') { setPanelStyle(null); return }
+
+    const placePanel = () => {
+      const root = rootRef.current?.getBoundingClientRect()
+      const anchor = moriRef.current?.getBoundingClientRect()
+      const panel = panelRef.current?.getBoundingClientRect()
+      if (!root || !anchor || !panel) return
+
+      const expandLeft = anchor.left + anchor.width / 2 >= window.innerWidth / 2
+      const expandUp = anchor.top + anchor.height / 2 >= window.innerHeight / 2
+      const preferredLeft = expandLeft ? anchor.left - PANEL_GAP - panel.width : anchor.right + PANEL_GAP
+      const preferredTop = expandUp ? anchor.top - PANEL_GAP - panel.height : anchor.bottom + PANEL_GAP
+      const viewportLeft = clamp(preferredLeft, VIEWPORT_MARGIN, Math.max(VIEWPORT_MARGIN, window.innerWidth - panel.width - VIEWPORT_MARGIN))
+      const viewportTop = clamp(preferredTop, VIEWPORT_MARGIN, Math.max(VIEWPORT_MARGIN, window.innerHeight - panel.height - VIEWPORT_MARGIN))
+
+      // Convert collision-corrected viewport coordinates into offsets from the immutable anchor.
+      // The panel is absolute, so changing these offsets never changes Mori's fixed position.
+      setPanelStyle({ left: viewportLeft - root.left, top: viewportTop - root.top, visibility: 'visible' })
+    }
+
+    placePanel()
+    window.addEventListener('resize', placePanel)
+    return () => window.removeEventListener('resize', placePanel)
+  }, [panelMode, position])
+
   function pointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     const rect = rootRef.current?.getBoundingClientRect()
     if (!rect) return
     drag.current = { id: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top, moved: false }
-    longPressed.current = false
-    // One surface supports click, long-press and drag. The timer only wins if movement stays
-    // below the drag threshold; pointerUp then suppresses the ordinary playback click.
-    longPressTimer.current = window.setTimeout(() => {
-      if (!drag.current?.moved) { longPressed.current = true; setExpanded((value) => !value) }
-    }, 550)
   }
 
   function pointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -59,30 +101,26 @@ export function MoriPresence() {
     const dy = event.clientY - current.startY
     if (Math.hypot(dx, dy) > 5) current.moved = true
     if (!current.moved) return
-    if (longPressTimer.current) window.clearTimeout(longPressTimer.current)
     setPosition({ left: clamp(current.left + dx, 8, window.innerWidth - 84), top: clamp(current.top + dy, 8, window.innerHeight - 84) })
   }
 
   function pointerUp(event: ReactPointerEvent<HTMLButtonElement>) {
     const current = drag.current
     if (!current || current.id !== event.pointerId) return
-    if (longPressTimer.current) window.clearTimeout(longPressTimer.current)
     drag.current = null
     if (current.moved) {
       const rect = rootRef.current?.getBoundingClientRect()
       if (rect) void sendRuntimeRequest({ type: 'MORI_SAVE_POSITION', position: { x: rect.left / window.innerWidth, y: rect.top / window.innerHeight } })
-    } else if (!longPressed.current) void togglePlayback()
+    } else setPanelMode((mode) => mode === 'closed' ? 'mini' : mode === 'full' ? 'mini' : 'closed')
   }
 
   function pointerCancel() {
-    if (longPressTimer.current) window.clearTimeout(longPressTimer.current)
-    longPressTimer.current = null
     drag.current = null
   }
 
   async function togglePlayback() {
     try { await sendRuntimeRequest({ type: 'MORI_TOGGLE_PLAYBACK' }) }
-    catch (error) { setPlayback((state) => ({ ...state, error: error instanceof Error ? error.message : '播放失败' })); setExpanded(true); throw error }
+    catch (error) { setPlayback((state) => ({ ...state, error: error instanceof Error ? error.message : '播放失败' })); setPanelMode('mini'); throw error }
   }
 
   async function command(command: 'previous' | 'next') {
@@ -100,8 +138,8 @@ export function MoriPresence() {
     setMessages(result.messages)
   }
 
-  async function saveMemory(note: string) {
-    await sendRuntimeRequest({ type: 'MORI_SAVE_MEMORY', note })
+  async function saveMemory() {
+    await sendRuntimeRequest({ type: 'MORI_SAVE_MEMORY' })
   }
 
   async function getPlaylists() {
@@ -114,6 +152,11 @@ export function MoriPresence() {
     return result.tracks
   }
 
+  async function hasLibraryCache(playlistId?: string) {
+    const result = await sendRuntimeRequest<{ cached: boolean }>({ type: 'MORI_GET_LIBRARY_CACHE_STATUS', playlistId })
+    return result.cached
+  }
+
   async function refreshLibrary() {
     const result = await sendRuntimeRequest<{ playlists: MusicPlaylist[] }>({ type: 'MORI_REFRESH_LIBRARY' })
     return result.playlists
@@ -123,10 +166,14 @@ export function MoriPresence() {
 
   if (!visible) return null
   return <div ref={rootRef} className={`root ${playback.isPlaying ? 'playing' : ''}`} style={position ?? undefined}>
-    <button className="mori" type="button" aria-label={playback.isPlaying ? '暂停音乐' : '播放音乐'} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel}>
+    <button ref={moriRef} className="mori" type="button" aria-label={panelMode === 'closed' ? '打开 Mori 播放器' : '收起 Mori 播放器'} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel}>
       <MoriCharacter playback={playback} />
     </button>
-    {expanded && <PlayerCard playback={playback} messages={messages} memories={memories} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} />}
+    {panelMode !== 'closed' && <div ref={panelRef} className="panel-positioner" style={panelStyle ?? { visibility: 'hidden' }}>
+      {panelMode === 'mini'
+        ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSaveMemory={saveMemory} onExpand={() => setPanelMode('full')} />
+        : <PlayerCard playback={playback} messages={messages} memories={memories} onClose={() => setPanelMode('mini')} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} />}
+    </div>}
   </div>
 }
 

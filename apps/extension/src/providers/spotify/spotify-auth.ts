@@ -18,16 +18,15 @@ async function requireClientId() {
   return clientId
 }
 
-function normalizeToken(payload: { access_token: string; refresh_token?: string; expires_in: number; scope?: string }, previous?: SpotifyToken): SpotifyToken {
+function normalizeToken(payload: { access_token: string; refresh_token?: string; expires_in: number }, previous?: SpotifyToken): SpotifyToken {
   return {
     accessToken: payload.access_token,
     refreshToken: payload.refresh_token ?? previous?.refreshToken,
     expiresAt: Date.now() + payload.expires_in * 1_000,
-    scope: payload.scope ?? previous?.scope ?? '',
   }
 }
 
-async function saveToken(payload: { access_token: string; refresh_token?: string; expires_in: number; scope?: string }, previous?: SpotifyToken) {
+async function saveToken(payload: { access_token: string; refresh_token?: string; expires_in: number }, previous?: SpotifyToken) {
   const token = normalizeToken(payload, previous)
   await extensionStorage.setToken(token)
   return token
@@ -100,9 +99,9 @@ export async function disconnectSpotify() {
 async function parseTokenResponse(response: Response) {
   const body = await response.text()
   try {
-    const payload = JSON.parse(body) as { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string }
+    const payload = JSON.parse(body) as { access_token?: string; refresh_token?: string; expires_in?: number }
     if (!payload.access_token || typeof payload.expires_in !== 'number') throw new Error('missing token fields')
-    return payload as { access_token: string; refresh_token?: string; expires_in: number; scope?: string }
+    return payload as { access_token: string; refresh_token?: string; expires_in: number }
   } catch {
     // Do not leak an opaque token or a proxy response into the UI through JSON.parse's raw error.
     throw new Error('Spotify 登录服务返回了无法识别的数据，请重新连接 Spotify')
