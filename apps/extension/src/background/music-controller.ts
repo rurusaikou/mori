@@ -8,12 +8,14 @@ import { INITIAL_PLAYBACK_STATE, type MusicProvider, type PlaybackMode, type Pla
 import type { PlaybackHostEvent, TabMessage } from '../shared/messages'
 import { broadcastTabMessage } from '../shared/tab-messaging'
 import { extensionStorage } from '../storage/extension-storage'
+import { logInfo } from './logger'
 
 export class MusicController {
   readonly provider: MusicProvider = new SpotifyMusicProvider()
   // The controller owns the canonical snapshot. Returning or broadcasting clones prevents UI
   // consumers from mutating state without persistence and cross-tab synchronization.
   #state: PlaybackState = { ...INITIAL_PLAYBACK_STATE }
+  #loggedTrackUri: string | null = null
 
   get state() { return structuredClone(this.#state) }
 
@@ -28,11 +30,13 @@ export class MusicController {
   async connect() {
     await this.provider.connect()
     await this.update({ availability: 'ready', error: null })
+    logInfo('spotify', 'authorization_connected')
   }
 
   async disconnect() {
     await this.provider.disconnect()
     await this.replace({ ...INITIAL_PLAYBACK_STATE, availability: 'needs-auth' })
+    logInfo('spotify', 'authorization_disconnected')
   }
 
   async toggle() {
@@ -64,6 +68,8 @@ export class MusicController {
 
   refreshLibrary() { return this.provider.refreshLibrary() }
 
+  getPreferenceTracks() { return this.provider.getPreferenceTracks() }
+
   async playUri(uri: string, contextUri?: string, queueUris?: string[]) {
     await this.runProviderCommand(
       () => this.provider.playUri(uri, contextUri, queueUris),
@@ -72,7 +78,10 @@ export class MusicController {
   }
 
   async handleHostEvent(event: PlaybackHostEvent) {
-    if (event.type === 'ready') return this.update({ availability: 'ready', error: null })
+    if (event.type === 'ready') {
+      logInfo('spotify', 'playback_host_ready')
+      return this.update({ availability: 'ready', error: null })
+    }
     if (event.type === 'not_ready') return this.update({ availability: 'provider-unavailable', error: 'Mori Spotify 设备暂时离线' })
     if (event.type === 'error') {
       const availability = event.kind === 'account_error' ? 'needs-premium' : event.kind === 'autoplay_failed' ? 'autoplay-blocked' : 'provider-unavailable'
@@ -85,6 +94,10 @@ export class MusicController {
       artwork: event.track.album?.images?.[0]?.url,
       durationMs: event.duration,
     } : null
+    if (track?.uri && track.uri !== this.#loggedTrackUri) {
+      this.#loggedTrackUri = track.uri
+      logInfo('playback', 'track_changed', { uri: track.uri, title: track.title, artist: track.artist, durationMs: track.durationMs })
+    }
     return this.update({ availability: 'ready', isPlaying: !event.paused, track, progressMs: event.position, durationMs: event.duration, error: null })
   }
 

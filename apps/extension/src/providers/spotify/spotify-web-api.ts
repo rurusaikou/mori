@@ -21,7 +21,7 @@ type SpotifyPlayback = {
 }
 
 type SpotifyDevice = { id: string | null; is_active: boolean; is_restricted: boolean; name: string }
-type SpotifyPlaylistTrack = { uri: string; name: string; duration_ms: number; is_local?: boolean; is_playable?: boolean; restrictions?: { reason?: string }; artists?: Array<{ name: string }>; album?: { images?: Array<{ url: string }> } }
+type SpotifyPlaylistTrack = { uri: string; name: string; duration_ms: number; is_local?: boolean; is_playable?: boolean; restrictions?: { reason?: string }; external_ids?: { isrc?: string }; artists?: Array<{ name: string }>; album?: { images?: Array<{ url: string }> } }
 
 export const LIKED_TRACKS_ID = 'mori-liked-tracks'
 
@@ -36,7 +36,8 @@ export async function spotifyFetch<T>(path: string, init: RequestInit = {}): Pro
 
   let response: Response
   try {
-    response = await fetch(`https://api.spotify.com/v1${path}`, {
+    const url = path.startsWith('https://api.spotify.com/v1/') ? path : `https://api.spotify.com/v1${path}`
+    response = await fetch(url, {
       ...init,
       headers: { Authorization: `Bearer ${token}`, ...init.headers },
     })
@@ -87,17 +88,22 @@ export async function canAccessPlaylist(playlistId: string) {
 }
 
 export async function getUserPlaylists(): Promise<MusicPlaylist[]> {
-  const [response, liked] = await Promise.all([
-    spotifyFetch<{ items: Array<{ id: string; uri: string; name: string; images?: Array<{ url: string }>; items?: { total: number }; tracks?: { total: number } }> }>('/me/playlists?limit=30'),
-    spotifyFetch<{ total: number }>('/me/tracks?limit=1'),
-  ])
+  type PlaylistItem = { id: string; uri: string; name: string; images?: Array<{ url: string }>; items?: { total: number }; tracks?: { total: number } }
+  const liked = await spotifyFetch<{ total: number }>('/me/tracks?limit=1')
+  const items: PlaylistItem[] = []
+  let next: string | null = '/me/playlists?limit=50'
+  while (next) {
+    const page: { items: PlaylistItem[]; next: string | null } | null = await spotifyFetch(next)
+    items.push(...(page?.items ?? []))
+    next = page?.next ?? null
+  }
   return [{
     id: LIKED_TRACKS_ID,
     uri: 'spotify:collection:tracks',
     name: '我收藏的歌曲',
     trackCount: liked?.total ?? 0,
     isAccessible: true,
-  }, ...(response?.items ?? []).map((playlist) => ({
+  }, ...items.map((playlist) => ({
     id: playlist.id,
     uri: playlist.uri,
     name: playlist.name,
@@ -108,23 +114,29 @@ export async function getUserPlaylists(): Promise<MusicPlaylist[]> {
 }
 
 export async function getPlaylistTracks(playlistId: string): Promise<MusicTrack[]> {
-  const path = playlistId === LIKED_TRACKS_ID
+  let next: string | null = playlistId === LIKED_TRACKS_ID
     ? '/me/tracks?limit=50'
     : `/playlists/${encodeURIComponent(playlistId)}/items?limit=50`
-  const response = await spotifyFetch<{ items: Array<{ item?: SpotifyPlaylistTrack | null; track?: SpotifyPlaylistTrack | null }> }>(path)
-  return (response?.items ?? []).flatMap((entry) => {
-    // `item` is the current field; `track` keeps existing non-dev-mode apps compatible
-    // during Spotify's endpoint migration window.
-    const track = entry.item ?? entry.track
-    return track?.uri ? [{
-    uri: track.uri,
-    title: track.name,
-    artist: track.artists?.map((artist) => artist.name).join('、') || '',
-    artwork: track.album?.images?.[0]?.url,
-    durationMs: track.duration_ms,
-    isPlayable: !track.is_local && track.is_playable !== false && !track.restrictions,
-    }] : []
-  })
+  const tracks: MusicTrack[] = []
+  while (next) {
+    const page: { items: Array<{ item?: SpotifyPlaylistTrack | null; track?: SpotifyPlaylistTrack | null }>; next: string | null } | null = await spotifyFetch(next)
+    for (const entry of page?.items ?? []) {
+      // `item` is the current field; `track` keeps existing non-dev-mode apps compatible
+      // during Spotify's endpoint migration window.
+      const track = entry.item ?? entry.track
+      if (track?.uri) tracks.push({
+        uri: track.uri,
+        isrc: track.external_ids?.isrc,
+        title: track.name,
+        artist: track.artists?.map((artist) => artist.name).join('、') || '',
+        artwork: track.album?.images?.[0]?.url,
+        durationMs: track.duration_ms,
+        isPlayable: !track.is_local && track.is_playable !== false && !track.restrictions,
+      })
+    }
+    next = page?.next ?? null
+  }
+  return tracks
 }
 
 export const transferPlayback = (deviceId: string, play = false) => spotifyFetch<never>('/me/player', {

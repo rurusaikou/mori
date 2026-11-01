@@ -11,12 +11,15 @@ export const STORAGE_KEYS = {
   presenceEnabled: 'mori.presence.enabled',
   testUri: 'mori.spotify.test-uri',
   playbackHostUrl: 'mori.spotify.playback-host-url',
+  apiBaseUrl: 'mori.api.base-url',
   conversation: 'mori.conversation.messages',
   memories: 'mori.memories',
   libraryCache: 'mori.spotify.library-cache',
+  musicPreference: 'mori.music-preference',
 } as const
 
 export const DEFAULT_PLAYBACK_HOST_URL = 'http://127.0.0.1:3210/playback-host/'
+export const DEFAULT_API_BASE_URL = 'http://127.0.0.1:3211'
 
 export const SPOTIFY_SCOPES = [
   'streaming',

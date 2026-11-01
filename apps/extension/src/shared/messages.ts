@@ -14,6 +14,7 @@ export type RuntimeRequest =
   | { type: 'MORI_SAVE_POSITION'; position: { x: number; y: number } }
   | { type: 'MORI_CONNECT_SPOTIFY' }
   | { type: 'MORI_DISCONNECT_SPOTIFY' }
+  | { type: 'MORI_GET_SPOTIFY_CONNECTION' }
   | { type: 'MORI_TOGGLE_PLAYBACK' }
   | { type: 'MORI_PLAYBACK_COMMAND'; command: 'next' | 'previous' }
   | { type: 'MORI_SET_PLAYBACK_MODE'; mode: PlaybackMode }
@@ -25,6 +26,8 @@ export type RuntimeRequest =
   | { type: 'MORI_GET_COMPANION_DATA' }
   | { type: 'MORI_SEND_MESSAGE'; text: string }
   | { type: 'MORI_SAVE_MEMORY' }
+  | { type: 'MORI_GET_MUSIC_PREFERENCE' }
+  | { type: 'MORI_ANALYZE_MUSIC_PREFERENCE' }
   | { type: 'PLAYBACK_EVENT'; event: PlaybackHostEvent }
 
 export type TabMessage =

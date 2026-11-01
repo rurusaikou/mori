@@ -8,6 +8,7 @@ import type { RuntimeRequest, RuntimeResponse, TabMessage } from '../shared/mess
 import { broadcastTabMessage } from '../shared/tab-messaging'
 import { extensionStorage } from '../storage/extension-storage'
 import { MusicController } from './music-controller'
+import { analyzeMusicPreference, getMusicPreferenceState } from './music-preference-service'
 import { PresenceController } from './presence-controller'
 
 const music = new MusicController()
@@ -47,6 +48,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
       case 'MORI_DISCONNECT_SPOTIFY':
         await music.disconnect()
         return { connected: false }
+      case 'MORI_GET_SPOTIFY_CONNECTION':
+        return { connected: Boolean(await extensionStorage.getToken()) }
       case 'MORI_TOGGLE_PLAYBACK':
         // Playback setup may create an offscreen document, initialize DRM and transfer a Spotify
         // device. A content-script message channel is too fragile for that multi-second workflow,
@@ -86,6 +89,10 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         await broadcastCompanionData()
         return { memories }
       }
+      case 'MORI_GET_MUSIC_PREFERENCE':
+        return getMusicPreferenceState()
+      case 'MORI_ANALYZE_MUSIC_PREFERENCE':
+        return { profile: await analyzeMusicPreference(music) }
       case 'PLAYBACK_EVENT':
         // Playback events are privileged state updates. Accept them only from Mori's own
         // offscreen document, never from a content script that shares runtime messaging.

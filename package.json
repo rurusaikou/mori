@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node scripts/build-extension.mjs --watch",
     "dev:host": "node scripts/build-playback-host.mjs --watch --serve",
+    "dev:api": "node --env-file-if-exists=.env.local apps/api/server.mjs",
     "build": "node scripts/build-extension.mjs && node scripts/build-playback-host.mjs",
     "build:extension": "node scripts/build-extension.mjs",
     "build:host": "node scripts/build-playback-host.mjs",

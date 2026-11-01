@@ -5,4 +5,5 @@ node_modules/
 apps/extension/build/
 apps/extension/dist/
 apps/player-host/dist/
+apps/api/data/
 docs/

@@ -89,7 +89,15 @@ export class SpotifyMusicProvider implements MusicProvider {
     if (current.isPlaying) { await pausePlayback(deviceId); return }
     const remote = await getRemotePlayback()
     if (!remote?.item || !embedded) await transferPlayback(deviceId, false)
-    await startPlayback(deviceId, remote?.item ? undefined : (await extensionStorage.getTestUri()).trim() || undefined)
+    if (remote?.item) {
+      await startPlayback(deviceId)
+    } else {
+      const selection = await this.getRandomLibraryTrack()
+      const testUri = (await extensionStorage.getTestUri()).trim()
+      if (selection) await startPlayback(deviceId, selection.track.uri, selection.contextUri, selection.queueUris)
+      else if (testUri) await startPlayback(deviceId, testUri)
+      else throw new Error('Spotify 曲库中没有可随机播放的歌曲，请先收藏歌曲或添加可读取歌单')
+    }
     if (embedded) await sendToPlaybackHost('PLAYER_SET_VOLUME', { volume: 0.8 })
   }
 
@@ -143,6 +151,93 @@ export class SpotifyMusicProvider implements MusicProvider {
     // local SDK output after the play command, not only before it, to avoid a playing-but-silent host.
     if (embedded) await sendToPlaybackHost('PLAYER_SET_VOLUME', { volume: 0.8 })
   }
+
+  async getPreferenceTracks() {
+    const playlists = await this.getUserPlaylists()
+    const liked = playlists.find((item) => item.id === LIKED_TRACKS_ID)
+    const others = playlists.filter((item) => item.id !== LIKED_TRACKS_ID && item.isAccessible !== false)
+    const sources = liked ? [liked, ...others] : others
+    const tracksByPlaylist = new Map<string, MusicTrack[]>()
+    const allUnique = new Set<string>()
+
+    // The percentage must be based on the complete de-duplicated library, not on Spotify's first
+    // page. Read every source before calculating the dynamic 50% sample ceiling.
+    for (const playlist of sources) {
+      try {
+        const tracks = await this.getPlaylistTracks(playlist.id)
+        tracksByPlaylist.set(playlist.id, tracks)
+        for (const track of tracks) allUnique.add(preferenceTrackKey(track))
+      } catch {
+        // An unavailable playlist is excluded from both the denominator and the final sample.
+      }
+    }
+
+    const sampleLimit = Math.ceil(allUnique.size * 0.5)
+    const likedQuota = Math.ceil(sampleLimit * 0.5)
+    const otherBudget = sampleLimit - likedQuota
+    const unique = new Map<string, MusicTrack>()
+
+    const addPlaylistSample = (playlist: MusicPlaylist, quota: number) => {
+      if (quota <= 0) return
+      let added = 0
+      for (const track of tracksByPlaylist.get(playlist.id) ?? []) {
+        const key = preferenceTrackKey(track)
+        if (unique.has(key)) continue
+        unique.set(key, track)
+        added += 1
+        if (added >= quota) break
+      }
+    }
+
+    // Saved Tracks receives half of the dynamic sample budget. The other half is divided across
+    // readable playlists so list order cannot let the first playlist dominate the taste profile.
+    if (liked) addPlaylistSample(liked, likedQuota)
+    if (others.length) {
+      const quotaPerPlaylist = Math.floor(otherBudget / others.length)
+      const remainder = otherBudget % others.length
+      for (const [index, playlist] of others.entries()) {
+        addPlaylistSample(playlist, quotaPerPlaylist + (index < remainder ? 1 : 0))
+      }
+    }
+    return [...unique.values()]
+  }
+
+  private async getRandomLibraryTrack() {
+    const playlists = shuffled(await this.getUserPlaylists()).filter((playlist) => playlist.isAccessible !== false && playlist.trackCount > 0)
+    for (const playlist of playlists) {
+      try {
+        const tracks = (await this.getPlaylistTracks(playlist.id)).filter((track) => track.isPlayable !== false)
+        if (!tracks.length) continue
+        const selectedIndex = randomIndex(tracks.length)
+        const track = tracks[selectedIndex]
+        if (playlist.id !== LIKED_TRACKS_ID) return { track, contextUri: playlist.uri }
+        // Saved Tracks has no valid Spotify context URI. Rotate its playable URI queue so the
+        // random selection starts first while next/previous still have meaningful items.
+        const uris = tracks.map((item) => item.uri)
+        return { track, queueUris: [...uris.slice(selectedIndex), ...uris.slice(0, selectedIndex)] }
+      } catch {
+        // Random start should continue trying other playlists when one became unavailable.
+      }
+    }
+    return null
+  }
+}
+
+function preferenceTrackKey(track: MusicTrack) {
+  return track.isrc || `${track.title.toLowerCase()}::${track.artist.toLowerCase()}`
+}
+
+function randomIndex(length: number) {
+  return crypto.getRandomValues(new Uint32Array(1))[0] % length
+}
+
+function shuffled<T>(items: T[]) {
+  const result = [...items]
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const target = randomIndex(index + 1)
+    ;[result[index], result[target]] = [result[target], result[index]]
+  }
+  return result
 }
 
 function isFresh(fetchedAt: number) {

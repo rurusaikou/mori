@@ -24,6 +24,7 @@ docs/                产品、前后端架构与 Spotify 文档
 pnpm install
 pnpm dev          # 终端 1：监听 Extension
 pnpm dev:host     # 终端 2：启动 http://127.0.0.1:3210/playback-host/
+pnpm dev:api      # 终端 3：从 .env.local 读取 MELODATA_API_KEY
 ```
 
 然后：
@@ -32,7 +33,8 @@ pnpm dev:host     # 终端 2：启动 http://127.0.0.1:3210/playback-host/
 2. 选择“加载已解压的扩展程序”，加载仓库中的 `apps/extension/`，不要加载 `apps/extension/build/`。
 3. 打开 Mori 设置，将显示的 Redirect URI 注册到 Spotify Developer Dashboard。
 4. 填写 Spotify Client ID；本地 Playback Host 保持默认地址；连接 Spotify Premium 账号。
-5. 打开任意普通 HTTP(S) 页面，点击工具栏 Mori 图标。
+5. 如需音乐偏好分析，启动本地 Mori API；密钥只配置在 API 进程，不填写到 Extension。
+6. 打开任意普通 HTTP(S) 页面，点击工具栏 Mori 图标。
 
 代码更新后需要在 `chrome://extensions` 重新加载扩展，并刷新测试网页。
 
@@ -42,6 +44,7 @@ pnpm dev:host     # 终端 2：启动 http://127.0.0.1:3210/playback-host/
 |---|---|
 | `pnpm dev` | 监听 Extension bundle |
 | `pnpm dev:host` | 监听并提供本地 Playback Host |
+| `pnpm dev:api` | 启动本地音乐偏好分析 API（需要 `MELODATA_API_KEY`） |
 | `pnpm build` | 构建 Extension 与 Playback Host |
 | `pnpm build:extension` | 只构建 Extension |
 | `pnpm build:host` | 只构建 Playback Host |

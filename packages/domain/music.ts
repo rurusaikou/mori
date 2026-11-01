@@ -10,6 +10,7 @@ export type PlaybackMode = 'off' | 'shuffle' | 'context' | 'track'
 
 export type MusicTrack = {
   uri: string
+  isrc?: string
   title: string
   artist: string
   artwork?: string
@@ -50,6 +51,7 @@ export type MusicProvider = {
   hasLibraryCache(playlistId?: string): Promise<boolean>
   refreshLibrary(): Promise<MusicPlaylist[]>
   playUri(uri: string, contextUri?: string, queueUris?: string[]): Promise<void>
+  getPreferenceTracks(): Promise<MusicTrack[]>
 }
 
 export const INITIAL_PLAYBACK_STATE: PlaybackState = {

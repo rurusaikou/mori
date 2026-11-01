@@ -1,6 +1,12 @@
 # Mori API
 
-Mori 的服务端边界。当前仓库尚未实现生产后端，因此这里不放置伪造接口或临时内存服务器。
+Mori 的服务端边界。当前包含本地开发使用的音乐特征代理；它让 `MELODATA_API_KEY` 保持在 Extension 之外。该服务不是生产后端，也不持久化用户画像。
+
+```bash
+pnpm dev:api
+```
+
+启动脚本会从仓库根目录的 `.env.local` 读取 `MELODATA_API_KEY`。默认监听 `http://127.0.0.1:3211`，提供 `POST /music-profile`。Extension 负责采样 Spotify 曲库和本地保存最终画像；服务按 ISRC 将歌曲特征持久化到忽略上传的 `apps/api/data/music-features.json`。重新分析时只请求缓存中不存在的歌曲，且每完成一个小批次就原子写盘，避免重启或中途限流浪费已经消耗的查询次数。
 
 未来后端负责：
 

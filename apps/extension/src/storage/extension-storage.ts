@@ -3,13 +3,13 @@
  * 输入：Spotify 配置、Token、Presence、Companion、PlaybackState 与曲库缓存数据。
  * 输出：类型化存储读取结果，以及写入、删除操作返回的 Promise。
  */
-import { DEFAULT_PLAYBACK_HOST_URL, STORAGE_KEYS } from '../shared/constants'
-import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicTrack, PlaybackState } from '@mori/domain'
+import { DEFAULT_API_BASE_URL, DEFAULT_PLAYBACK_HOST_URL, STORAGE_KEYS } from '../shared/constants'
+import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicPreferenceProfile, MusicTrack, PlaybackState } from '@mori/domain'
 
 export type SpotifyToken = { accessToken: string; refreshToken?: string; expiresAt: number }
 export type PresencePosition = { x: number; y: number }
 export type SpotifyLibraryCache = {
-  version: 3
+  version: 4
   playlists?: { fetchedAt: number; data: MusicPlaylist[] }
   tracks: Record<string, { fetchedAt: number; data: MusicTrack[] }>
 }
@@ -31,6 +31,8 @@ export const extensionStorage = {
   setTestUri: (value: string) => chrome.storage.local.set({ [STORAGE_KEYS.testUri]: value }),
   getPlaybackHostUrl: () => localGet(STORAGE_KEYS.playbackHostUrl, DEFAULT_PLAYBACK_HOST_URL),
   setPlaybackHostUrl: (value: string) => chrome.storage.local.set({ [STORAGE_KEYS.playbackHostUrl]: value }),
+  getApiBaseUrl: () => localGet(STORAGE_KEYS.apiBaseUrl, DEFAULT_API_BASE_URL),
+  setApiBaseUrl: (value: string) => chrome.storage.local.set({ [STORAGE_KEYS.apiBaseUrl]: value }),
   getPresenceEnabled: () => localGet(STORAGE_KEYS.presenceEnabled, false),
   setPresenceEnabled: (value: boolean) => chrome.storage.local.set({ [STORAGE_KEYS.presenceEnabled]: value }),
   getPosition: () => localGet<PresencePosition | null>(STORAGE_KEYS.position, null),
@@ -39,6 +41,8 @@ export const extensionStorage = {
   setConversation: (value: ConversationMessage[]) => chrome.storage.local.set({ [STORAGE_KEYS.conversation]: value }),
   getMemories: () => localGet<MusicMemory[]>(STORAGE_KEYS.memories, []),
   setMemories: (value: MusicMemory[]) => chrome.storage.local.set({ [STORAGE_KEYS.memories]: value }),
+  getMusicPreference: () => localGet<MusicPreferenceProfile | null>(STORAGE_KEYS.musicPreference, null),
+  setMusicPreference: (value: MusicPreferenceProfile) => chrome.storage.local.set({ [STORAGE_KEYS.musicPreference]: value }),
   async getPlayback(): Promise<PlaybackState | null> {
     // Playback is a session snapshot, not a durable preference. Spotify remains the source of
     // truth after a browser restart, while local/session preferences survive separately.
@@ -49,9 +53,9 @@ export const extensionStorage = {
   async getLibraryCache(): Promise<SpotifyLibraryCache> {
     const result = await chrome.storage.session.get(STORAGE_KEYS.libraryCache)
     const cache = result[STORAGE_KEYS.libraryCache] as SpotifyLibraryCache | undefined
-    // Cache v3 guarantees that playlist accessibility was checked before the list was shown.
-    // Ignore older session data so unverified playlists cannot render as enabled buttons.
-    return cache?.version === 3 ? cache : { version: 3, tracks: {} }
+    // Cache v4 stores fully paginated playlists and tracks. Older snapshots may contain only the
+    // first 50 items, which would undercount the dynamic music-preference sample denominator.
+    return cache?.version === 4 ? cache : { version: 4, tracks: {} }
   },
   setLibraryCache: (value: SpotifyLibraryCache) => chrome.storage.session.set({ [STORAGE_KEYS.libraryCache]: value }),
   removeLibraryCache: () => chrome.storage.session.remove(STORAGE_KEYS.libraryCache),

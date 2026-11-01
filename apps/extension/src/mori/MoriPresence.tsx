@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { MoriCharacter } from './MoriCharacter'
 import { MiniPlayer, PlayerCard } from '../player/PlayerCard'
-import { INITIAL_PLAYBACK_STATE, type ConversationMessage, type MusicMemory, type MusicPlaylist, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
+import { INITIAL_PLAYBACK_STATE, type ConversationMessage, type MusicMemory, type MusicPlaylist, type MusicPreferenceAnalysisState, type MusicPreferenceProfile, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
 import type { TabMessage } from '../shared/messages'
 import { sendRuntimeRequest } from '../shared/runtime-client'
 
@@ -20,6 +20,7 @@ export function MoriPresence() {
   const [visible, setVisible] = useState(false)
   const [panelMode, setPanelMode] = useState<PanelMode>('closed')
   const [playback, setPlayback] = useState<PlaybackState>(INITIAL_PLAYBACK_STATE)
+  const [spotifyConnected, setSpotifyConnected] = useState(false)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [memories, setMemories] = useState<MusicMemory[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -35,16 +36,22 @@ export function MoriPresence() {
     // changed in another tab. Hydrate all independent snapshots before relying on broadcasts.
     void Promise.all([
       sendRuntimeRequest<{ state: PlaybackState }>({ type: 'MORI_GET_STATE' }),
+      sendRuntimeRequest<{ connected: boolean }>({ type: 'MORI_GET_SPOTIFY_CONNECTION' }),
       sendRuntimeRequest<{ visible: boolean; position: { x: number; y: number } | null }>({ type: 'MORI_GET_PRESENCE_STATE' }),
       sendRuntimeRequest<{ messages: ConversationMessage[]; memories: MusicMemory[] }>({ type: 'MORI_GET_COMPANION_DATA' }),
-    ]).then(([music, presence, companion]) => {
+    ]).then(([music, spotify, presence, companion]) => {
       setPlayback(music.state); setVisible(presence.visible); setMessages(companion.messages); setMemories(companion.memories)
+      setSpotifyConnected(spotify.connected)
       if (presence.position) setPosition({ left: clamp(presence.position.x * window.innerWidth, 8, window.innerWidth - 84), top: clamp(presence.position.y * window.innerHeight, 8, window.innerHeight - 84) })
     })
 
     const listener = (message: TabMessage) => {
       if (message.type === 'MORI_SET_VISIBILITY') setVisible(message.visible)
-      if (message.type === 'MORI_PLAYBACK_STATE') setPlayback(message.state)
+      if (message.type === 'MORI_PLAYBACK_STATE') {
+        setPlayback(message.state)
+        if (message.state.availability === 'needs-auth') setSpotifyConnected(false)
+        else setSpotifyConnected(true)
+      }
       if (message.type === 'MORI_COMPANION_DATA') { setMessages(message.messages); setMemories(message.memories) }
     }
     chrome.runtime.onMessage.addListener(listener)
@@ -176,6 +183,15 @@ export function MoriPresence() {
 
   async function playUri(uri: string, contextUri?: string, queueUris?: string[]) { await sendRuntimeRequest({ type: 'MORI_PLAY_URI', uri, contextUri, queueUris }) }
 
+  async function getMusicPreference() {
+    return sendRuntimeRequest<MusicPreferenceAnalysisState>({ type: 'MORI_GET_MUSIC_PREFERENCE' })
+  }
+
+  async function analyzeMusicPreference() {
+    const result = await sendRuntimeRequest<{ profile: MusicPreferenceProfile }>({ type: 'MORI_ANALYZE_MUSIC_PREFERENCE' })
+    return result.profile
+  }
+
   if (!visible) return null
   return <div ref={rootRef} className={`root ${playback.isPlaying ? 'playing' : ''}`} style={position ?? undefined}>
     <button ref={moriRef} className="mori" type="button" aria-label={panelMode === 'closed' ? '打开 Mori 播放器' : '收起 Mori 播放器'} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel}>
@@ -184,7 +200,7 @@ export function MoriPresence() {
     {panelMode !== 'closed' && <div ref={panelRef} className="panel-positioner" style={panelStyle ?? { visibility: 'hidden' }}>
       {panelMode === 'mini'
         ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSaveMemory={saveMemory} onOpenSettings={() => { setSettingsOpen(true); setPanelMode('full') }} onExpand={() => { setSettingsOpen(false); setPanelMode('full') }} />
-        : <PlayerCard playback={playback} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onClose={() => setPanelMode('mini')} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} />}
+        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onClose={() => setPanelMode('mini')} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
     </div>}
   </div>
 }
