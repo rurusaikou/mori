@@ -17,6 +17,7 @@ export function MoriPresence() {
   const [playback, setPlayback] = useState<PlaybackState>(INITIAL_PLAYBACK_STATE)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [memories, setMemories] = useState<MusicMemory[]>([])
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const moriRef = useRef<HTMLButtonElement>(null)
@@ -171,8 +172,8 @@ export function MoriPresence() {
     </button>
     {panelMode !== 'closed' && <div ref={panelRef} className="panel-positioner" style={panelStyle ?? { visibility: 'hidden' }}>
       {panelMode === 'mini'
-        ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSaveMemory={saveMemory} onExpand={() => setPanelMode('full')} />
-        : <PlayerCard playback={playback} messages={messages} memories={memories} onClose={() => setPanelMode('mini')} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} />}
+        ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSaveMemory={saveMemory} onOpenSettings={() => { setSettingsOpen(true); setPanelMode('full') }} onExpand={() => { setSettingsOpen(false); setPanelMode('full') }} />
+        : <PlayerCard playback={playback} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onClose={() => setPanelMode('mini')} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} />}
     </div>}
   </div>
 }

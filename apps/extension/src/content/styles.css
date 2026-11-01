@@ -24,8 +24,16 @@ button, input { font: inherit; }
 
 .panel-positioner { pointer-events: auto; position: absolute; z-index: 2; }
 .card { position: relative; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); width: min(320px, calc(100vw - 32px)); height: min(400px, calc(100vh - 32px)); min-height: min(380px, calc(100vh - 32px)); margin: 0; overflow: hidden; border: 1px solid rgb(220 198 255 / 22%); border-radius: 18px; background: linear-gradient(155deg, rgb(28 21 50 / 98%), rgb(16 16 38 / 98%)); box-shadow: 0 18px 52px rgb(5 3 17 / 45%), inset 0 1px rgb(255 255 255 / 5%); backdrop-filter: blur(22px); }
+.card.settings-open { grid-template-rows: auto minmax(0, 1fr); }
 .card-header { display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 13px; }
 .card-header strong { font-size: 14px; letter-spacing: .2px; }
+.card-header-actions { display: flex; align-items: center; gap: 2px; }
+.settings-title { display: flex; align-items: center; gap: 5px; }
+.settings-back { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 8px; background: rgb(255 255 255 / 6%); color: #fff; font-size: 18px; line-height: 1; cursor: pointer; }
+.settings-back:hover { background: rgb(183 123 255 / 14%); }
+.settings-button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #c9a7f5; cursor: pointer; }
+.settings-button:hover { background: rgb(183 123 255 / 12%); color: #fff; }
+.settings-button svg { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .panel-close { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #b77bff; font-size: 10px; cursor: pointer; }
 .panel-close:hover { background: rgb(183 123 255 / 12%); color: #e0c4ff; }
 .expanded-player { padding: 7px 13px 10px; }
@@ -102,6 +110,18 @@ button, input { font: inherit; }
 .empty-state strong { color: rgb(255 255 255 / 82%); font-size: 13px; }
 .empty-state p { margin: 7px 0 0; font-size: 10px; line-height: 1.55; }
 
+.settings-panel { min-height: 0; overflow: auto; padding: 7px 12px 14px; scrollbar-width: thin; scrollbar-color: rgb(185 149 255 / 45%) transparent; }
+.settings-group { margin-bottom: 14px; }
+.settings-group h2 { margin: 0 0 6px 3px; color: rgb(238 222 255 / 62%); font-size: 9px; font-weight: 650; letter-spacing: .5px; }
+.settings-group > div { overflow: hidden; border: 1px solid rgb(255 255 255 / 7%); border-radius: 12px; background: rgb(255 255 255 / 4%); }
+.settings-row { display: flex; align-items: center; justify-content: space-between; min-height: 52px; gap: 10px; padding: 8px 11px; border-bottom: 1px solid rgb(255 255 255 / 7%); }
+.settings-row:last-child { border-bottom: 0; }
+.settings-row > span:first-child { min-width: 0; }
+.settings-row strong, .settings-row small { display: block; }
+.settings-row strong { color: rgb(255 255 255 / 90%); font-size: 11px; }
+.settings-row small { margin-top: 4px; overflow: hidden; color: rgb(255 255 255 / 45%); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-badge { flex: none; padding: 3px 6px; border-radius: 999px; background: rgb(177 116 255 / 12%); color: #bd91f5; font-size: 8px; }
+
 .playback-progress { position: absolute; left: 0; right: 0; top: -1px; height: 2px; overflow: hidden; background: rgb(255 255 255 / 8%); }
 .playback-progress > span { display: block; height: 100%; border-radius: 0 999px 999px 0; background: linear-gradient(90deg, #8c50e1, #cf9dff); box-shadow: 0 0 7px rgb(190 128 255 / 70%); transition: width 300ms linear; }
 .playback-mode-control > button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; font-size: 10px; cursor: pointer; }
@@ -113,7 +133,8 @@ button, input { font: inherit; }
 .playback-mode-control svg text { fill: currentColor; stroke: none; font: 700 8px sans-serif; text-anchor: middle; }
 
 .mini-player { position: relative; width: min(300px, calc(100vw - 32px)); min-height: 130px; overflow: hidden; border: 1px solid rgb(220 198 255 / 22%); border-radius: 18px; background: linear-gradient(155deg, rgb(35 26 61 / 98%), rgb(24 19 45 / 98%)); box-shadow: 0 18px 52px rgb(5 3 17 / 42%), inset 0 1px rgb(255 255 255 / 5%); backdrop-filter: blur(22px); cursor: pointer; }
-.mini-track { display: grid; grid-template-columns: 50px minmax(0, 1fr); align-items: center; gap: 10px; padding: 14px 14px 10px; }
+.mini-settings { position: absolute; z-index: 1; top: 10px; right: 10px; }
+.mini-track { display: grid; grid-template-columns: 50px minmax(0, 1fr); align-items: center; gap: 10px; padding: 14px 44px 10px 14px; }
 .mini-cover { display: grid; place-items: center; width: 50px; height: 50px; overflow: hidden; border-radius: 11px; background: radial-gradient(circle, #171126 0 18%, #8d5ad5 19% 23%, #33224d 24% 100%); color: #d5adff; }
 .mini-cover img { width: 100%; height: 100%; object-fit: cover; }
 .mini-cover.spinning { border-radius: 50%; }

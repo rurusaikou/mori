@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode
 import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicTrack, PlaybackMode, PlaybackState } from '@mori/domain'
 import { ChatPanel } from '../chat/ChatPanel'
 import { MomentPanel } from '../companion/MomentPanel'
+import { SettingsPanel } from '../settings/SettingsPanel'
 import { PlaylistPanel } from './PlaylistPanel'
 
 type View = 'playlists' | 'chat' | 'moments'
@@ -10,6 +11,9 @@ type Props = {
   playback: PlaybackState
   messages: ConversationMessage[]
   memories: MusicMemory[]
+  settingsOpen: boolean
+  onOpenSettings: () => void
+  onCloseSettings: () => void
   onClose: () => void
   onToggle: () => Promise<void>
   onCommand: (command: 'previous' | 'next') => Promise<void>
@@ -23,7 +27,7 @@ type Props = {
   onPlayUri: (uri: string, contextUri?: string, queueUris?: string[]) => Promise<void>
 }
 
-export function PlayerCard({ playback, messages, memories, onClose, onToggle, onCommand, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onHasLibraryCache, onRefreshLibrary, onGetPlaylistTracks, onPlayUri }: Props) {
+export function PlayerCard({ playback, messages, memories, settingsOpen, onOpenSettings, onCloseSettings, onClose, onToggle, onCommand, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onHasLibraryCache, onRefreshLibrary, onGetPlaylistTracks, onPlayUri }: Props) {
   const [view, setView] = useState<View>('playlists')
   const [controlBusy, setControlBusy] = useState<'previous' | 'toggle' | 'next' | 'memory' | 'mode' | null>(null)
   const [feedback, setFeedback] = useState('')
@@ -51,9 +55,17 @@ export function PlayerCard({ playback, messages, memories, onClose, onToggle, on
     await runControl('mode', () => onSetPlaybackMode(nextMode))
   }
 
-  return <section className="card" aria-label="Mori 音乐伙伴">
-    <header className="card-header"><strong>Mori</strong><button type="button" className="panel-close" onClick={onClose} aria-label="收起到迷你播放器" title="收起">●</button></header>
-    <section className="expanded-player" aria-label="当前歌曲播放器">
+  return <section className={`card ${settingsOpen ? 'settings-open' : ''}`} aria-label="Mori 音乐伙伴">
+    <header className="card-header">
+      {settingsOpen
+        ? <span className="settings-title"><button type="button" className="settings-back" onClick={onCloseSettings} aria-label="返回播放器">‹</button><strong>设置</strong></span>
+        : <strong>Mori</strong>}
+      <span className="card-header-actions">
+        {!settingsOpen && <button type="button" className="settings-button" onClick={onOpenSettings} aria-label="打开 Mori 设置" title="设置"><SettingsIcon /></button>}
+        <button type="button" className="panel-close" onClick={onClose} aria-label="收起到迷你播放器" title="收起">●</button>
+      </span>
+    </header>
+    {settingsOpen ? <SettingsPanel playback={playback} /> : <><section className="expanded-player" aria-label="当前歌曲播放器">
       <div className="expanded-track-row">
         <span className={`expanded-cover ${playback.isPlaying ? 'spinning' : ''}`}>
           {playback.track?.artwork ? <img src={playback.track.artwork} alt="" /> : <span>♪</span>}
@@ -88,6 +100,7 @@ export function PlayerCard({ playback, messages, memories, onClose, onToggle, on
       {view === 'chat' && <ChatPanel messages={messages} onSend={onSend} />}
       {view === 'moments' && <MomentPanel memories={memories} />}
     </main>
+    </>}
   </section>
 }
 
@@ -96,10 +109,11 @@ type MiniPlayerProps = {
   onToggle: () => Promise<void>
   onCommand: (command: 'previous' | 'next') => Promise<void>
   onSaveMemory: () => Promise<void>
+  onOpenSettings: () => void
   onExpand: () => void
 }
 
-export function MiniPlayer({ playback, onToggle, onCommand, onSaveMemory, onExpand }: MiniPlayerProps) {
+export function MiniPlayer({ playback, onToggle, onCommand, onSaveMemory, onOpenSettings, onExpand }: MiniPlayerProps) {
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
 
@@ -113,6 +127,7 @@ export function MiniPlayer({ playback, onToggle, onCommand, onSaveMemory, onExpa
   }
 
   return <section className="mini-player" aria-label="Mori 迷你播放器" onClick={onExpand}>
+    <button type="button" className="mini-settings settings-button" onClick={(event) => { event.stopPropagation(); onOpenSettings() }} aria-label="打开 Mori 设置" title="设置"><SettingsIcon /></button>
     <div className="mini-track">
       <span className={`mini-cover ${playback.isPlaying ? 'spinning' : ''}`}>
         {playback.track?.artwork ? <img src={playback.track.artwork} alt="" /> : <span>♪</span>}
@@ -145,6 +160,10 @@ function ChatIcon() {
 
 function SparkleIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.55 4.45L18 9l-4.45 1.55L12 15l-1.55-4.45L6 9l4.45-1.55L12 3Zm6 11 .75 2.25L21 17l-2.25.75L18 20l-.75-2.25L15 17l2.25-.75L18 14Z" /></svg>
+}
+
+function SettingsIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20.3h-3v-.08a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.56-1.03H5.3v-3h.14A1.7 1.7 0 0 0 7 9.94a1.7 1.7 0 0 0-.34-1.88L6.6 8l2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34h.02A1.7 1.7 0 0 0 11.7 4.7v-.1h3v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 8l-.06.06a1.7 1.7 0 0 0-.34 1.88v.02a1.7 1.7 0 0 0 1.56 1.02h.04v3h-.04A1.7 1.7 0 0 0 19.4 15Z" /></svg>
 }
 
 function ModeIcon({ mode }: { mode: PlaybackMode }) {

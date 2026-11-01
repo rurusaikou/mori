@@ -18,6 +18,8 @@ Panel 定位不使用普通文档流。渲染后读取 Mori、Root 和 Panel 的
 
 Presence UI 有 `closed → mini → full` 三个层级。单击 Mori 只打开 Mini Player；Mini 的播放控件不会触发升级，点击其空白区域或更多按钮才进入 Full Panel。点击外部区域和 Full Panel 关闭按钮按层级逐步收回。Mini 与 Full 共用同一个定位容器，因此切换尺寸时重新碰撞计算但不改变锚点。
 
+Mini Player 与 Full Panel 右上角共用设置入口。Mini 中点击齿轮会原地升级为 Full Panel 的设置视图；Full Panel 中点击齿轮直接切换视图。设置页属于 Mori 内部 UI，不打开 Chrome Options 页面。未来的数据管理、音乐品味等日常设置继续扩展 `settings/`；`options/` 只保留 Spotify OAuth 与 Playback Host 等技术配置。
+
 网页切换只会销毁该页的 Content Script，不会销毁后台维护的播放链路。
 
 ## 2. 运行时分层
@@ -140,6 +142,8 @@ Playback Host 的 CSP 必须显式允许 `frame-src https://sdk.scdn.co`。官�
 
 - 调整 Mori 外观或手势：`apps/extension/src/mori/`
 - 调整主面板、播放条或功能页：`apps/extension/src/player/`、`chat/`、`companion/MomentPanel.tsx`
+- 增加数据管理、音乐品味等日常设置：`apps/extension/src/settings/`
+- 调整 OAuth、Client ID 或 Playback Host 技术配置：`apps/extension/src/options/`
 - 调整全局播放行为：先改 `MusicProvider` / `MusicController`，不要在组件内增加 Spotify 分支
 - 调整 Spotify API：`providers/spotify/spotify-web-api.ts`
 - 调整 SDK 生命周期：`apps/player-host/src/spotify-player.ts`

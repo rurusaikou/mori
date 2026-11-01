@@ -11,6 +11,7 @@
 - 删除独立的瞬间大按钮，将 `✦` 移到控制栏左侧，并把随机/循环模式移到下一首右侧。
 - 将 Panel 与 Mori 的锚点间距缩短为 6px；Spotify 开始播放后显式恢复 Host 本地音量，修复状态正常但没有声音的问题。
 - 清理未消费的 Provider capability、播放设备快照、对话/token 元数据、Panel 方向属性和重复 CSS；合并重复的生命周期及后端文档。
+- 在 Mini Player 与 Full Panel 右上角增加应用内设置入口，并将日常设置与 OAuth/Host 技术 Options 分离。
 
 ## 2026-10-31 — Playback consistency and implementation guide
 

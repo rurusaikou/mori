@@ -19,5 +19,5 @@ Extension 由四个运行上下文组成：
 Spotify SDK 不在 Extension 中执行；它属于同级独立前端 `apps/player-host/`。
 Spotify OAuth 与 REST API 都内聚在 `src/providers/spotify/`；Content 与 Options 通过 `src/shared/runtime-client.ts` 调用后台。
 
-UI 按产品能力拆分：`content/` 只注入 Shadow DOM，`mori/` 管理角色与手势，`player/` 管理播放和歌单，`chat/` 管理对话。
+UI 按产品能力拆分：`content/` 只注入 Shadow DOM，`mori/` 管理角色与手势，`player/` 管理播放和歌单，`chat/` 管理对话，`settings/` 管理 Mori 内部设置。`options/` 只承担 OAuth 与 Playback Host 等技术配置。
 

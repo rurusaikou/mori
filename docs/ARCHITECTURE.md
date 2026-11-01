@@ -50,6 +50,8 @@ Presence 开关和归一化位置存储在 `chrome.storage.local`。普通 HTTP(
 
 Mori 本体是固定 viewport 锚点，Panel 是相对锚点绝对定位的独立层。Panel 展开方向由锚点所在象限决定，并经过 16px viewport 边界碰撞修正；Panel 不进入 Mori 的布局盒，因此展开、收起和功能页变化不会改变锚点坐标。
 
+Mini Player 与 Full Panel 都提供设置入口，并在同一锚点内切换到 Mori 的应用设置视图。未来的数据管理和音乐品味属于 `settings/`；OAuth、Client ID 和 Playback Host 等开发配置仍属于独立 `options/`，两者不混用。
+
 ### 对话与记忆
 
 当前 `CompanionService` 是本地 fallback。对话和记忆保存在 `chrome.storage.local`；只有用户主动点击记忆操作时才保存音乐瞬间。未来 AI adapter 不得直接接触 OAuth Token 或 Spotify 音频。

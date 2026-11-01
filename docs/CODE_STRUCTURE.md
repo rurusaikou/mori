@@ -14,6 +14,7 @@ apps/
 │       ├── options/                 # Extension 设置
 │       ├── player/                  # 播放卡片与歌单面板
 │       ├── providers/spotify/       # Spotify OAuth、API、Provider
+│       ├── settings/                # Mori 内部应用设置
 │       ├── shared/                  # Extension 内消息与客户端
 │       └── storage/                 # Chrome Storage
 │
@@ -71,6 +72,7 @@ TypeScript 使用 `@mori/domain` 和 `@mori/contracts/playback-host`，避免应
 | `apps/extension/src/player/PlaylistPanel.tsx` | Spotify 歌单与歌曲 |
 | `apps/extension/src/chat/ChatPanel.tsx` | 对话记录与输入 |
 | `apps/extension/src/companion/MomentPanel.tsx` | 用户授权保存的音乐瞬间 |
+| `apps/extension/src/settings/SettingsPanel.tsx` | 数据、品味与隐私等应用设置入口 |
 | `apps/extension/src/offscreen/offscreen.ts` | Player Host 生命周期与消息转发 |
 | `apps/player-host/src/player.ts` | Host 协议与 Origin 锁定 |
 | `apps/player-host/src/spotify-player.ts` | Spotify SDK 与 Connect 设备 |
