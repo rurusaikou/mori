@@ -1,13 +1,32 @@
 # Changelog
 
+## 2026-11-03 — Music profile resilience
+
+- MeloData 网络错误与服务端错误增加退避重试；单曲重试耗尽后跳过，避免大型曲库因一次瞬时故障丢失整次分析结果。
+- API 与 Extension 转发日志改为 `xxx_YYYY-MM-DD.log` 日文件；当天首次写入自动创建，后续事件继续追加。
+- 日志落盘格式由纯 JSON 调整为带稳定事件标识的中文说明，音乐画像进度、播放、用户操作和错误可直接阅读。
+- 音乐画像从每批两首加固定等待调整为五首并发，并按实际 MeloData HTTP 请求执行每秒 4 次、每分钟 90 次的统一限速；缓存命中不再等待。
+- “我的音乐偏好”改为先展示自然语言音乐画像与五项可读听歌偏好；原始 BPM 和特征百分比降级到可展开的详细数据，并明确不从音乐特征推断人格。
+- 将“聚合指标 → 听歌偏好与画像”抽为独立 LLM 服务：只发送聚合音乐指标，校验结构化返回并写入 Profile；模型未配置或失败时自动使用本地规则回退。
+- MeloData 服务地址改为必填的 `MELODATA_BASE_URL` 注入，业务服务不再保留默认绝对地址，便于切换环境或代理。
+
 ## 2026-11-02 — Music preference profile
 
 - 从旧版 Mori 迁移音乐偏好画像的数据模型、Spotify 曲库采样策略和指标 UI。
-- 音乐画像样本上限改为完整曲库全局去重后的 50%；样本内我收藏的歌曲占 50%，其余 50% 在所有可读取歌单间平均分配。
+- 音乐偏好分析改为后台启动并通过短请求轮询状态，避免长任务被 Chrome 消息通道中断并显示内部英文错误。
+- 音乐画像样本上限调整为完整曲库全局去重后的 20%；样本内我收藏的歌曲占 50%，其余 50% 在所有可读取歌单间平均分配。
 - 新增本地 Mori API，通过 MeloData 聚合节奏、能量、律动、明亮度与原声感；第三方密钥不进入 Extension。
 - Mori API 按 ISRC 持久化歌曲特征，重新分析只请求缓存缺失项，并在每个请求批次后原子写盘。
 - 在应用设置中增加音乐品味入口、首次分析、重新分析和本地画像持久化。
 - 没有现有播放上下文时，中央播放键会从收藏歌曲和可读取歌单中随机选择可播放歌曲；Saved Tracks 保留可连续切歌的队列。
+- 增加 Extension 与 Mori API 结构化日志，覆盖 Spotify ready、当前歌曲、用户操作、音乐偏好批次进度、瞬间和对话，并排除 Token 与 API Key。
+- Extension 更新或开发模式重新加载后自动向已打开网页重新注入 Content Script，清除失效上下文；残余错误转换为可执行的刷新提示。
+- 完成 Runtime/依赖/播放状态架构审计；保持 Spotify 播放链路不动，将 Mori API 渐进拆分为 HTTP、Route、Music Profile 与 Feature Store 模块。
+- 收紧本地 API 边界：普通网页 Origin 返回 403，Extension Origin 按请求回显，JSON Body 限制为 2 MiB。
+- `dev:api` 改为 Node watch 模式，后端代码变化后自动重启，避免旧进程继续运行旧路由。
+- 播放日志忽略 Spotify SDK 初始化时的暂停旧曲目快照，只在歌曲真实开始播放后记录 `track_changed`。
+- 新增本地 `docs/LOGGING.md`，集中说明日志位置、输出前缀、事件、参数、隐私边界和常见排查方式。
+- 正常日志从终端迁移到按日期拆分的单行日志文件：API 写入 `apps/api/logs/api_YYYY-MM-DD.log`，Extension 转发日志写入 `backend_YYYY-MM-DD.log`；日志目录不上传 Git。
 
 ## 2026-11-01 — Anchored adaptive panel
 

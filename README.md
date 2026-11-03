@@ -44,13 +44,19 @@ pnpm dev:api      # 终端 3：从 .env.local 读取 MELODATA_API_KEY
 |---|---|
 | `pnpm dev` | 监听 Extension bundle |
 | `pnpm dev:host` | 监听并提供本地 Playback Host |
-| `pnpm dev:api` | 启动本地音乐偏好分析 API（需要 `MELODATA_API_KEY`） |
+| `pnpm dev:api` | 监听并启动本地 Mori API（需要 `MELODATA_API_KEY`） |
 | `pnpm build` | 构建 Extension 与 Playback Host |
 | `pnpm build:extension` | 只构建 Extension |
 | `pnpm build:host` | 只构建 Playback Host |
 | `pnpm check` | TypeScript 检查并构建 Extension 与 Playback Host |
 
 构建产物位于 `apps/extension/build/` 和 `apps/player-host/dist/`，均不提交 Git。
+
+## 开发日志
+
+- Mori API 自身日志按日期写入 `apps/api/logs/api_YYYY-MM-DD.log`；Extension 转发的 Spotify、当前歌曲、用户事件、瞬间和对话日志按日期写入 `apps/api/logs/backend_YYYY-MM-DD.log`。当天文件不存在时自动创建，存在时继续追加。
+- 两个文件均为一行一条的中文可读日志，并保留 `[category/event]` 标识方便检索；文件被 Git 忽略，可使用 `tail -f` 查看。Extension 日志同时保留在 `chrome://extensions` → Mori → “Service Worker”检查视图。
+- 日志不会输出 OAuth Token 或第三方 API Key；当前本地开发日志会包含对话和瞬间正文。
 
 ## 运行架构
 

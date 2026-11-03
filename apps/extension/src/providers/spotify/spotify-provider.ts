@@ -161,7 +161,7 @@ export class SpotifyMusicProvider implements MusicProvider {
     const allUnique = new Set<string>()
 
     // The percentage must be based on the complete de-duplicated library, not on Spotify's first
-    // page. Read every source before calculating the dynamic 50% sample ceiling.
+    // page. Read every source before calculating the dynamic 20% sample ceiling.
     for (const playlist of sources) {
       try {
         const tracks = await this.getPlaylistTracks(playlist.id)
@@ -172,7 +172,7 @@ export class SpotifyMusicProvider implements MusicProvider {
       }
     }
 
-    const sampleLimit = Math.ceil(allUnique.size * 0.5)
+    const sampleLimit = Math.ceil(allUnique.size * 0.2)
     const likedQuota = Math.ceil(sampleLimit * 0.5)
     const otherBudget = sampleLimit - likedQuota
     const unique = new Map<string, MusicTrack>()

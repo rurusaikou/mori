@@ -94,21 +94,29 @@ export class MusicController {
       artwork: event.track.album?.images?.[0]?.url,
       durationMs: event.duration,
     } : null
-    if (track?.uri && track.uri !== this.#loggedTrackUri) {
-      this.#loggedTrackUri = track.uri
-      logInfo('playback', 'track_changed', { uri: track.uri, title: track.title, artist: track.artist, durationMs: track.durationMs })
-    }
     return this.update({ availability: 'ready', isPlaying: !event.paused, track, progressMs: event.position, durationMs: event.duration, error: null })
   }
 
   private async replace(state: PlaybackState) {
     this.#state = state
+    this.logCurrentTrack()
     await this.persistAndBroadcast()
   }
 
   private async update(patch: Partial<PlaybackState>) {
     this.#state = { ...this.#state, ...patch }
+    this.logCurrentTrack()
     await this.persistAndBroadcast()
+  }
+
+  private logCurrentTrack() {
+    const track = this.#state.track
+    // Spotify SDK emits a paused snapshot while a newly initialized device restores its previous
+    // context. It is not a second play action, so only log a track after Spotify confirms playback.
+    if (!this.#state.isPlaying) { this.#loggedTrackUri = null; return }
+    if (!track?.uri || track.uri === this.#loggedTrackUri) return
+    this.#loggedTrackUri = track.uri
+    logInfo('playback', 'track_changed', { uri: track.uri, title: track.title, artist: track.artist, durationMs: track.durationMs, isPlaying: this.#state.isPlaying })
   }
 
   private async runProviderCommand(

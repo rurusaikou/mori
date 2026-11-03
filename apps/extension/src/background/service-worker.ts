@@ -10,6 +10,7 @@ import { extensionStorage } from '../storage/extension-storage'
 import { MusicController } from './music-controller'
 import { analyzeMusicPreference, getMusicPreferenceState } from './music-preference-service'
 import { PresenceController } from './presence-controller'
+import { logError, logInfo } from './logger'
 
 const music = new MusicController()
 const presence = new PresenceController()
@@ -20,6 +21,20 @@ const storageSecured = Promise.all([
   chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }),
 ])
 const restored = storageSecured.then(() => Promise.all([music.restore(), presence.restore()]))
+
+chrome.runtime.onInstalled.addListener(() => {
+  // Reloading or updating an unpacked extension invalidates the isolated worlds already injected
+  // into open pages. Reinject the new bundle so content/index.tsx can remove stale Shadow DOM and
+  // mount a runtime client connected to the current extension context without a manual page reload.
+  void chrome.tabs.query({}).then((tabs) => Promise.allSettled(
+    tabs
+      .filter((tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined && Boolean(tab.url && /^https?:/.test(tab.url)))
+      .map((tab) => chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['build/src/content/content.js'] })),
+  )).then((results) => {
+    const restoredTabs = results.filter((result) => result.status === 'fulfilled').length
+    logInfo('extension', 'content_contexts_reinjected', { restoredTabs, attemptedTabs: results.length })
+  }).catch((error) => logError('extension', 'content_reinjection_failed', error))
+})
 
 chrome.action.onClicked.addListener((tab) => {
   void restored
@@ -34,6 +49,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
 
   const handle = async () => {
     await restored
+    logUserEvent(message)
     switch (message?.type) {
       case 'MORI_GET_STATE':
         return { state: music.state }
@@ -81,18 +97,34 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         return getCompanionData()
       case 'MORI_SEND_MESSAGE': {
         const messages = await sendCompanionMessage(message.text, music.state)
+        const exchange = messages.slice(-2)
+        logInfo('conversation', 'message_exchange', {
+          userText: exchange.find((item) => item.role === 'user')?.text ?? message.text,
+          moriText: exchange.find((item) => item.role === 'mori')?.text ?? '',
+          trackUri: music.state.track?.uri ?? null,
+        })
         await broadcastCompanionData()
         return { messages }
       }
       case 'MORI_SAVE_MEMORY': {
         const memories = await saveMusicMemory(music.state)
+        const memory = memories[0]
+        logInfo('memory', 'moment_saved', {
+          id: memory?.id,
+          createdAt: memory?.createdAt,
+          note: memory?.note,
+          track: memory?.track ? { uri: memory.track.uri, title: memory.track.title, artist: memory.track.artist } : null,
+        })
         await broadcastCompanionData()
         return { memories }
       }
       case 'MORI_GET_MUSIC_PREFERENCE':
         return getMusicPreferenceState()
       case 'MORI_ANALYZE_MUSIC_PREFERENCE':
-        return { profile: await analyzeMusicPreference(music) }
+        // Sampling and metadata analysis can outlive a content-script message channel. Start the
+        // singleton task here and let the UI read progress through short status requests.
+        void analyzeMusicPreference(music).catch(() => undefined)
+        return { accepted: true }
       case 'PLAYBACK_EVENT':
         // Playback events are privileged state updates. Accept them only from Mori's own
         // offscreen document, never from a content script that shares runtime messaging.
@@ -106,7 +138,10 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
 
   void handle()
     .then((result) => sendResponse({ ok: true, result }))
-    .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Mori 后台操作失败' }))
+    .catch((error) => {
+      logError('runtime', 'request_failed', error, { type: message?.type ?? 'unknown' })
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Mori 后台操作失败' })
+    })
   return true
 })
 
@@ -114,4 +149,32 @@ async function broadcastCompanionData() {
   const data = await getCompanionData()
   const message: TabMessage = { type: 'MORI_COMPANION_DATA', ...data }
   await broadcastTabMessage(message)
+}
+
+function logUserEvent(message: RuntimeRequest & { target?: string }) {
+  switch (message?.type) {
+    case 'MORI_SAVE_POSITION':
+      logInfo('user_event', 'presence_moved', { position: message.position })
+      break
+    case 'MORI_CONNECT_SPOTIFY':
+    case 'MORI_DISCONNECT_SPOTIFY':
+    case 'MORI_TOGGLE_PLAYBACK':
+    case 'MORI_REFRESH_LIBRARY':
+    case 'MORI_SAVE_MEMORY':
+    case 'MORI_ANALYZE_MUSIC_PREFERENCE':
+      logInfo('user_event', message.type.toLowerCase())
+      break
+    case 'MORI_PLAYBACK_COMMAND':
+      logInfo('user_event', 'playback_command', { command: message.command })
+      break
+    case 'MORI_SET_PLAYBACK_MODE':
+      logInfo('user_event', 'playback_mode_changed', { mode: message.mode })
+      break
+    case 'MORI_PLAY_URI':
+      logInfo('user_event', 'track_selected', { uri: message.uri, contextUri: message.contextUri ?? null })
+      break
+    case 'MORI_SEND_MESSAGE':
+      logInfo('user_event', 'chat_submitted', { text: message.text })
+      break
+  }
 }

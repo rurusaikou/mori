@@ -6,6 +6,7 @@
 import type { TabMessage } from '../shared/messages'
 import { broadcastTabMessage } from '../shared/tab-messaging'
 import { extensionStorage } from '../storage/extension-storage'
+import { logInfo } from './logger'
 
 export class PresenceController {
   #enabled = false
@@ -31,6 +32,7 @@ export class PresenceController {
     }
 
     this.#enabled = !this.#enabled
+    logInfo('user_event', 'presence_toggled', { visible: this.#enabled, tabId: tab.id })
     await extensionStorage.setPresenceEnabled(this.#enabled)
     await chrome.action.setBadgeText({ text: '', tabId: tab.id })
     await this.ensureCurrentTab(tab.id)

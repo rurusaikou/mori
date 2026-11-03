@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { MoriCharacter } from './MoriCharacter'
 import { MiniPlayer, PlayerCard } from '../player/PlayerCard'
-import { INITIAL_PLAYBACK_STATE, type ConversationMessage, type MusicMemory, type MusicPlaylist, type MusicPreferenceAnalysisState, type MusicPreferenceProfile, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
+import { INITIAL_PLAYBACK_STATE, type ConversationMessage, type MusicMemory, type MusicPlaylist, type MusicPreferenceAnalysisState, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
 import type { TabMessage } from '../shared/messages'
 import { sendRuntimeRequest } from '../shared/runtime-client'
 
@@ -188,8 +188,15 @@ export function MoriPresence() {
   }
 
   async function analyzeMusicPreference() {
-    const result = await sendRuntimeRequest<{ profile: MusicPreferenceProfile }>({ type: 'MORI_ANALYZE_MUSIC_PREFERENCE' })
-    return result.profile
+    await sendRuntimeRequest<{ accepted: true }>({ type: 'MORI_ANALYZE_MUSIC_PREFERENCE' })
+    // Keep every runtime request short-lived. Chrome may discard one long-lived response channel
+    // while the user navigates even though the service-worker analysis itself is still healthy.
+    while (true) {
+      await delay(1_000)
+      const state = await getMusicPreference()
+      if (state.status === 'succeeded' && state.profile) return state.profile
+      if (state.status === 'failed') throw new Error(state.error || '音乐偏好分析失败')
+    }
   }
 
   if (!visible) return null
@@ -206,3 +213,4 @@ export function MoriPresence() {
 }
 
 function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)) }
+function delay(milliseconds: number) { return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds)) }
