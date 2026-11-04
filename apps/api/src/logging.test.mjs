@@ -25,6 +25,21 @@ test('formats music profile progress as readable Chinese text', () => {
   assert.match(line, /缓存命中 1 首/)
 })
 
+test('formats LLM portrait inputs and result as readable Chinese text', () => {
+  const started = formatLogLine({
+    timestamp: '2026-11-04T12:00:00.000Z', level: 'info', category: 'music_preference',
+    event: 'portrait_generation_started', model: 'deepseek-flash', rhythm: 63, energy: 72, groove: 39, mood: 50,
+  })
+  const generated = formatLogLine({
+    timestamp: '2026-11-04T12:00:01.000Z', level: 'info', category: 'music_preference',
+    event: 'portrait_generated', model: 'deepseek-flash', summary: '偏爱有推动力但不过分躁动的声音。',
+    traits: ['稳步推进', '沉浸聆听', '情绪开放'], keywords: ['推进感', '沉浸', '开放'],
+  })
+  assert.match(started, /节奏 63\/100，能量 72\/100，律动 39\/100，情绪 50\/100/)
+  assert.match(generated, /偏爱有推动力但不过分躁动/)
+  assert.match(generated, /稳步推进、沉浸聆听、情绪开放/)
+})
+
 test('keeps one physical line when user text contains a newline', () => {
   const line = formatLogLine({ timestamp: new Date().toISOString(), level: 'info', category: 'user_event', event: 'chat_submitted', text: '第一行\n第二行' })
   assert.equal(line.includes('\n'), false)

@@ -18,7 +18,16 @@ export type MusicPreferenceProfile = {
   valence: number | null
   acousticness: number | null
   instrumentalness: number | null
+  insight?: MusicProfileInsight
+  /** 兼容已保存在 Extension 本地的旧版画像。 */
   portrait?: MusicPreferencePortrait
+}
+
+export type MusicProfileInsight = {
+  summary: string
+  traits: Array<{ name: string; description: string }>
+  listeningStyle: string
+  keywords: string[]
 }
 
 export type MusicPreferenceAnalysisState = {

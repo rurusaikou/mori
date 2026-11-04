@@ -84,9 +84,10 @@ function describe(entry) {
     'music_preference/analysis_started': () => '音乐画像后台分析已开始。',
     'music_preference/analysis_reused': () => '音乐画像分析已在运行，本次操作继续等待现有任务。',
     'music_preference/library_sample_ready': () => `Spotify 曲库抽样完成，共选取 ${entry.sampledTracks} 首歌曲。`,
-    'music_preference/analysis_completed': () => `音乐画像分析完成，成功分析 ${entry.analyzedTracks ?? entry.trackCount}/${entry.requestedTracks ?? entry.requestedCount} 首，当前缓存 ${entry.cachedFeatures ?? '—'} 首。`,
+    'music_preference/analysis_completed': () => `音乐画像分析完成，成功分析 ${entry.analyzedTracks ?? entry.trackCount}/${entry.requestedTracks ?? entry.requestedCount} 首，当前缓存 ${entry.cachedFeatures ?? '—'} 首${metrics(entry)}${entry.portraitSource ? `；画像来源：${entry.portraitSource === 'llm' ? 'LLM' : '本地规则'}` : ''}。`,
     'music_preference/analysis_failed': () => `音乐画像分析失败：${safe(entry.error)}。`,
-    'music_preference/portrait_generated': () => `LLM 已生成用户听歌偏好与音乐画像（模型：${safe(entry.model)}）。`,
+    'music_preference/portrait_generation_started': () => `开始调用 LLM 生成音乐画像（模型：${safe(entry.model)}；节奏 ${entry.rhythm}/100，能量 ${entry.energy}/100，律动 ${entry.groove}/100，情绪 ${entry.mood}/100）。`,
+    'music_preference/portrait_generated': () => `LLM 音乐画像生成成功（模型：${safe(entry.model)}）：${safe(entry.summary)}；特征：${list(entry.traits)}；关键词：${list(entry.keywords)}。`,
     'music_preference/portrait_fallback': () => 'LLM 未配置，本次使用本地规则生成听歌偏好与音乐画像。',
     'music_preference/portrait_generation_failed': () => `LLM 画像生成失败，本次使用本地规则回退：${safe(entry.error)}。`,
     'music_preference/melodata_retry': () => `MeloData 请求暂时失败，正在进行第 ${entry.attempt} 次重试（原因：${reason(entry.reason)}${entry.status ? `，HTTP ${entry.status}` : ''}）。`,
@@ -121,6 +122,16 @@ function describe(entry) {
 
 function reason(value) {
   return ({ network: '网络异常', server_error: '服务端异常', network_retries_exhausted: '网络重试已耗尽', server_retries_exhausted: '服务端重试已耗尽' })[value] ?? safe(value)
+}
+
+function metrics(entry) {
+  if (entry.averageBpm === undefined) return ''
+  const percent = (value) => value === null || value === undefined ? '—' : `${Math.round(Number(value) * 100)}%`
+  return `；平均节奏 ${entry.averageBpm === null ? '—' : `${Math.round(Number(entry.averageBpm))} BPM`}，能量 ${percent(entry.energy)}，律动 ${percent(entry.groove)}，明亮度 ${percent(entry.mood)}，原声感 ${percent(entry.acousticness)}`
+}
+
+function list(value) {
+  return Array.isArray(value) ? value.map(safe).join('、') : '—'
 }
 
 function safe(value) {

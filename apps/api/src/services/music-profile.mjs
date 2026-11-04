@@ -101,9 +101,19 @@ export function createMusicProfileService({ featureStore, logInfo, generateMusic
     }
     if (!features.length) return null
     const profile = buildProfile(features, tracks.length)
-    const portrait = await generateMusicPortrait?.(profile)
-    const result = portrait ? { ...profile, portrait } : profile
-    logInfo('music_preference', 'analysis_completed', { analyzedTracks: profile.trackCount, requestedTracks: profile.requestedCount, cachedFeatures: featureStore.size, portraitSource: portrait ? 'llm' : 'fallback' })
+    const insight = await generateMusicPortrait?.(profile)
+    const result = insight ? { ...profile, insight } : profile
+    logInfo('music_preference', 'analysis_completed', {
+      analyzedTracks: profile.trackCount,
+      requestedTracks: profile.requestedCount,
+      cachedFeatures: featureStore.size,
+      averageBpm: profile.averageBpm,
+      energy: profile.energy,
+      groove: profile.danceability,
+      mood: profile.valence,
+      acousticness: profile.acousticness,
+      portraitSource: insight ? 'llm' : 'fallback',
+    })
     return result
   }
 }

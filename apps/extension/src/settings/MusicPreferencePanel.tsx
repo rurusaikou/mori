@@ -47,21 +47,23 @@ export function MusicPreferencePanel({ getState, analyze }: Props) {
     finally { setAnalyzing(false) }
   }
 
-  const portrait = profile ? profile.portrait ?? deriveMusicPreferencePortrait(profile) : null
+  // 五项刻度来自固定规则，保证同一组指标始终得到相同结果；LLM 只负责顶部叙事画像。
+  const portrait = profile ? deriveMusicPreferencePortrait(profile) : null
+  const profileSummary = profile?.insight?.summary ?? profile?.portrait?.musicProfileSummary ?? portrait?.musicProfileSummary
 
   return <section className="preference-panel" aria-label="音乐偏好">
     <div className="preference-portrait">
       <div className="preference-portrait-label"><SparklesIcon />你的音乐画像</div>
-      <p>{portrait?.musicProfileSummary ?? '分析喜欢的歌曲和可读取歌单，让 Mori 慢慢理解你偏爱的声音。'}</p>
+      <p>{profileSummary ?? '分析喜欢的歌曲和可读取歌单，让 Mori 慢慢理解你偏爱的声音。'}</p>
     </div>
     {loading ? <p className="preference-status">正在读取音乐画像…</p> : profile && portrait ? <>
       <h2 className="preference-section-title"><span />你的听歌偏好</h2>
       <div className="preference-list">
-        <PreferenceRow icon={<RhythmIcon />} title="节奏偏好" preference={portrait.rhythmPreference} />
-        <PreferenceRow icon={<EnergyIcon />} title="能量偏好" preference={portrait.energyPreference} />
-        <PreferenceRow icon={<GrooveIcon />} title="律动偏好" preference={portrait.groovePreference} />
-        <PreferenceRow icon={<MoodIcon />} title="情绪偏好" preference={portrait.moodPreference} />
-        <PreferenceRow icon={<SoundIcon />} title="声音偏好" preference={portrait.soundPreference} />
+        <PreferenceRow icon={<RhythmIcon />} title="节奏偏好" low="更慢" high="更快" preference={portrait.rhythmPreference} />
+        <PreferenceRow icon={<EnergyIcon />} title="能量偏好" low="更柔" high="更强" preference={portrait.energyPreference} />
+        <PreferenceRow icon={<GrooveIcon />} title="律动偏好" low="更弱" high="更强" preference={portrait.groovePreference} />
+        <PreferenceRow icon={<MoodIcon />} title="情绪偏好" low="更深" high="更明亮" preference={portrait.moodPreference} />
+        <PreferenceRow icon={<SoundIcon />} title="声音偏好" low="人声" high="乐器" preference={portrait.soundPreference} />
       </div>
       <button type="button" className="preference-details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((value) => !value)}>
         <span><InfoIcon />基于 {profile.trackCount} / {profile.requestedCount} 首歌曲的特征分析</span><strong>{detailsOpen ? '收起详细数据' : '查看详细数据'} <b>{detailsOpen ? '⌃' : '›'}</b></strong>
@@ -79,11 +81,16 @@ export function MusicPreferencePanel({ getState, analyze }: Props) {
   </section>
 }
 
-function PreferenceRow({ icon, title, preference }: { icon: React.ReactNode; title: string; preference: MusicPreferenceDimension }) {
+function PreferenceRow({ icon, title, low, high, preference }: { icon: React.ReactNode; title: string; low: string; high: string; preference: MusicPreferenceDimension }) {
   return <div className="preference-row">
     <span className="preference-row-icon" aria-hidden="true">{icon}</span>
-    <span className="preference-row-copy"><strong>{title}</strong><small>{preference.description}</small></span>
-    <span className="preference-scale"><span className="preference-scale-track"><i style={{ width: `${preference.position * 100}%` }} /><b style={{ left: `${preference.position * 100}%` }} /></span><em>{preference.status}</em></span>
+    <strong className="preference-row-title">{title}</strong>
+    <span className="preference-scale">
+      <span className="preference-scale-label">{low}</span>
+      <span className="preference-scale-track"><i style={{ width: `${preference.position * 100}%` }} /><b style={{ left: `${preference.position * 100}%` }} /></span>
+      <span className="preference-scale-label preference-scale-high">{high}</span>
+    </span>
+    <em className="preference-state">{preference.status}</em>
   </div>
 }
 

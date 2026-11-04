@@ -13,15 +13,15 @@ MELODATA_BASE_URL=https://melodata.voltenworks.com/api/v1
 MELODATA_API_KEY=your-server-side-key
 ```
 
-音乐指标聚合完成后，API 可调用兼容 Chat Completions JSON Mode 的 LLM 生成五项听歌偏好和音乐画像。在 `.env.local` 配置：
+音乐指标聚合完成后，API 可调用兼容 Responses API Structured Outputs 的 LLM 生成自然语言音乐画像。服务使用 `text.format.type=json_schema` 提交完整 Schema，不使用 Chat Completions。在 `.env.local` 配置完整 Responses Endpoint：
 
 ```dotenv
-MORI_LLM_ENDPOINT=https://your-llm-provider.example/v1/chat/completions
+MORI_LLM_ENDPOINT=https://api.deepseek.com/responses
 MORI_LLM_API_KEY=your-server-side-key
 MORI_LLM_MODEL=your-model-name
 ```
 
-只会向模型发送 BPM、Energy、Danceability、Valence、Acousticness、Instrumentalness 和样本数量，不发送歌曲列表、Spotify 标识或用户身份。模型返回值经过固定状态枚举和文本长度校验；未配置、超时或格式不合法时使用本地规则回退，不影响音乐特征分析结果。密钥只允许存在于 API 进程，不能放入 Extension。
+只会向模型发送由 BPM、Energy、Danceability、Valence 得到的四项 0～100 标准化维度，不发送歌曲列表、Spotify 标识或用户身份。Schema 固定返回 `summary`、三项 `traits`、`listeningStyle` 和三个 `keywords`，服务端还会校验数量与中文文案长度。页面五项偏好状态和刻度仍由本地规则确定；LLM 未配置、超时或格式不合法时只回退顶部画像文案，不影响音乐特征分析结果。密钥只允许存在于 API 进程，不能放入 Extension。
 
 API 自身的音乐分析日志按日期写入 `apps/api/logs/api_YYYY-MM-DD.log`；`POST /logs` 接收的 Extension 业务日志按日期写入 `apps/api/logs/backend_YYYY-MM-DD.log`。当天文件不存在时自动创建，存在时继续追加。文件使用“时间 + 级别 + category/event + 中文说明”的单行格式并被 Git 忽略。正常日志不再刷终端，只有文件写入失败才输出 stderr。日志不包含 `MELODATA_API_KEY`、OAuth Token 或 Authorization Header。
 
