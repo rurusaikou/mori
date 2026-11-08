@@ -60,7 +60,7 @@ export function deriveMusicPreferencePortrait(profile: MusicPreferenceProfile): 
     high: ['有能量', '比起安静舒缓，更容易被有力量感的音乐吸引'],
   })
   const groovePreference = scaled(profile.danceability, {
-    low: ['沉浸', '不太追求强烈舞感，更偏向沉浸地聆听'],
+    low: ['自然', '不太追求强烈舞感，更偏向自然、沉浸地聆听'],
     balanced: ['平衡', '会留意律动，但不需要每首歌都适合起舞'],
     high: ['动感', '更容易被鲜明节拍和流动的律动吸引'],
   })

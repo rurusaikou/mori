@@ -6,19 +6,22 @@
 import type { MusicPreferenceAnalysisState, MusicPreferenceProfile } from '@mori/domain'
 import type { ReactNode } from 'react'
 import { MusicPreferencePanel } from './MusicPreferencePanel'
+import type { MusicPreferenceView } from './MusicPreferencePanel'
 
 type Props = {
   spotifyConnected: boolean
   getMusicPreference: () => Promise<MusicPreferenceAnalysisState>
   analyzeMusicPreference: () => Promise<MusicPreferenceProfile>
   view: 'settings' | 'preference'
+  preferenceView: MusicPreferenceView
   onOpenPreference: () => void
+  onPreferenceViewChange: (view: MusicPreferenceView) => void
 }
 
-export function SettingsPanel({ spotifyConnected, getMusicPreference, analyzeMusicPreference, view, onOpenPreference }: Props) {
+export function SettingsPanel({ spotifyConnected, getMusicPreference, analyzeMusicPreference, view, preferenceView, onOpenPreference, onPreferenceViewChange }: Props) {
   const spotifyStatus = spotifyConnected ? '已连接' : '尚未连接'
 
-  if (view === 'preference') return <MusicPreferencePanel getState={getMusicPreference} analyze={analyzeMusicPreference} />
+  if (view === 'preference') return <MusicPreferencePanel getState={getMusicPreference} analyze={analyzeMusicPreference} view={preferenceView} onViewChange={onPreferenceViewChange} />
 
   return <section className="settings-panel" aria-label="Mori 设置">
     <SettingsGroup title="音乐服务">

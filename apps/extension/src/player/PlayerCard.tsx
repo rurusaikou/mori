@@ -8,6 +8,7 @@ import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicPreferenceAn
 import { ChatPanel } from '../chat/ChatPanel'
 import { MomentPanel } from '../companion/MomentPanel'
 import { SettingsPanel } from '../settings/SettingsPanel'
+import type { MusicPreferenceView } from '../settings/MusicPreferencePanel'
 import { PlaylistPanel } from './PlaylistPanel'
 
 type View = 'playlists' | 'chat' | 'moments'
@@ -38,12 +39,13 @@ type Props = {
 export function PlayerCard({ playback, spotifyConnected, messages, memories, settingsOpen, onOpenSettings, onCloseSettings, onClose, onToggle, onCommand, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onHasLibraryCache, onRefreshLibrary, onGetPlaylistTracks, onPlayUri, onGetMusicPreference, onAnalyzeMusicPreference }: Props) {
   const [view, setView] = useState<View>('playlists')
   const [settingsView, setSettingsView] = useState<'settings' | 'preference'>('settings')
+  const [preferenceView, setPreferenceView] = useState<MusicPreferenceView>('overview')
   const [controlBusy, setControlBusy] = useState<'previous' | 'toggle' | 'next' | 'memory' | 'mode' | null>(null)
   const [feedback, setFeedback] = useState('')
   const playbackMode: PlaybackMode = playback.shuffle ? 'shuffle' : playback.repeatMode
 
   useEffect(() => {
-    if (!settingsOpen) setSettingsView('settings')
+    if (!settingsOpen) { setSettingsView('settings'); setPreferenceView('overview') }
   }, [settingsOpen])
 
   async function runControl(action: typeof controlBusy, task: () => Promise<void>) {
@@ -72,17 +74,23 @@ export function PlayerCard({ playback, spotifyConnected, messages, memories, set
     await runControl('mode', () => onSetPlaybackMode(nextMode))
   }
 
+  function navigateBackFromSettings() {
+    if (settingsView === 'preference' && preferenceView === 'detail') { setPreferenceView('overview'); return }
+    if (settingsView === 'preference') { setSettingsView('settings'); return }
+    onCloseSettings()
+  }
+
   return <section className={`card ${settingsOpen ? 'settings-open' : ''}`} aria-label="Mori 音乐伙伴">
     <header className="card-header">
       {settingsOpen
-        ? <span className="settings-title"><button type="button" className="settings-back" onClick={() => settingsView === 'preference' ? setSettingsView('settings') : onCloseSettings()} aria-label={settingsView === 'preference' ? '返回设置' : '返回播放器'}>‹</button><strong>{settingsView === 'preference' ? '我的音乐偏好' : '设置'}</strong></span>
+        ? <span className="settings-title"><button type="button" className="settings-back" onClick={navigateBackFromSettings} aria-label={settingsView === 'preference' ? '返回上一页' : '返回播放器'}>‹</button><strong>{settingsView === 'preference' ? preferenceView === 'detail' ? '详细分析' : '我的音乐偏好' : '设置'}</strong></span>
         : <strong>Mori</strong>}
       <span className="card-header-actions">
         {!settingsOpen && <button type="button" className="settings-button" onClick={onOpenSettings} aria-label="打开 Mori 设置" title="设置"><SettingsIcon /></button>}
         <button type="button" className="panel-close" onClick={onClose} aria-label="收起到迷你播放器" title="收起">●</button>
       </span>
     </header>
-    {settingsOpen ? <SettingsPanel spotifyConnected={spotifyConnected} getMusicPreference={onGetMusicPreference} analyzeMusicPreference={onAnalyzeMusicPreference} view={settingsView} onOpenPreference={() => setSettingsView('preference')} /> : <><section className="expanded-player" aria-label="当前歌曲播放器">
+    {settingsOpen ? <SettingsPanel spotifyConnected={spotifyConnected} getMusicPreference={onGetMusicPreference} analyzeMusicPreference={onAnalyzeMusicPreference} view={settingsView} preferenceView={preferenceView} onPreferenceViewChange={setPreferenceView} onOpenPreference={() => { setSettingsView('preference'); setPreferenceView('overview') }} /> : <><section className="expanded-player" aria-label="当前歌曲播放器">
       <div className="expanded-track-row">
         <span className={`expanded-cover ${playback.isPlaying ? 'spinning' : ''}`}>
           {playback.track?.artwork ? <img src={playback.track.artwork} alt="" /> : <span>♪</span>}
