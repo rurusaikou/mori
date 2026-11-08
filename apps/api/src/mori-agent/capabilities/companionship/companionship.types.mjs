@@ -1,0 +1,6 @@
+/** Companionship 的独立 Schema 与边界校验，确保用户要求安静时不会继续追问。 */
+import { noExtra, object, text } from '../../shared/executor.mjs'
+const actions = ['SILENT', 'ACKNOWLEDGE', 'RESPOND', 'ASK', 'CONNECT', 'RECOMMEND']
+export const COMPANIONSHIP_SCHEMA = { type: 'object', properties: { action: { type: 'string', enum: actions }, reason: { type: 'string' }, responseGuidance: { anyOf: [{ type: 'null' }, { type: 'string' }] } }, required: ['action', 'reason', 'responseGuidance'], additionalProperties: false }
+export function validateCompanionshipInput(value) { object(value); noExtra(value, ['userMessage', 'understanding', 'relevantMemories', 'connection', 'interactionPreference', 'currentTrack'], 'Companionship input'); text(value.userMessage, 'userMessage'); return value }
+export function validateCompanionshipOutput(value, input) { object(value, 'Companionship output'); if (!actions.includes(value.action)) throw new Error('action 无效'); text(value.reason, 'reason'); if (value.responseGuidance !== null && value.responseGuidance !== undefined) text(value.responseGuidance, 'responseGuidance'); if (/不想(讲话|聊天)|别问|不要追问|陪我听/.test(input.userMessage) && value.action === 'ASK') throw new Error('用户要求安静时不能 ASK'); return { action: value.action, reason: value.reason, ...(value.responseGuidance ? { responseGuidance: value.responseGuidance } : {}) } }

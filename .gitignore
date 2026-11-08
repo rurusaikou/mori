@@ -8,3 +8,4 @@ apps/player-host/dist/
 apps/api/data/
 apps/api/logs/
 docs/*
+!docs/MORI_AGENT_V0_IMPLEMENTATION_2026-11-08.md

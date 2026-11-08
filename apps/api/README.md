@@ -25,6 +25,23 @@ MORI_LLM_MODEL=your-model-name
 
 API 自身的音乐分析日志按日期写入 `apps/api/logs/api_YYYY-MM-DD.log`；`POST /logs` 接收的 Extension 业务日志按日期写入 `apps/api/logs/backend_YYYY-MM-DD.log`。当天文件不存在时自动创建，存在时继续追加。文件使用“时间 + 级别 + category/event + 中文说明”的单行格式并被 Git 忽略。正常日志不再刷终端，只有文件写入失败才输出 stderr。日志不包含 `MELODATA_API_KEY`、OAuth Token 或 Authorization Header。
 
+## Mori Agent V0 Capability Lab
+
+非生产环境启动 API 后访问 `http://127.0.0.1:3211/capability-lab`。Lab 可分别编辑并运行 Memory、Understanding、Connection、Reflection、Companionship；每个模块使用自己的 Prompt、JSON Schema 和 `execute(input)`，不会自动串联。生产环境（`NODE_ENV=production`）不注册 Lab 与 Capability Debug 路由。
+
+独立 API：
+
+```text
+POST /agent/capabilities/memory
+POST /agent/capabilities/understanding
+POST /agent/capabilities/connection
+POST /agent/capabilities/reflection
+POST /agent/capabilities/companionship
+GET  /agent/capability-logs
+```
+
+Capability Run 的每个阶段写入 `apps/api/logs/capability_YYYY-MM-DD.log`，使用与其他 Mori 日志一致的“本地时间 + 级别 + 事件 + 中文说明”格式。内容保留 runId、模块、Prompt 版本、模型、输入/输出、延迟、Token 或错误，但不再以整行裸 JSON 展示。该 Debug Log 与用户 Memory、对话存储完全隔离。
+
 ## 结构
 
 ```text
@@ -36,7 +53,12 @@ apps/api/
     ├── logging.mjs               # 结构化日志
     ├── routes/
     │   ├── logs.mjs
-    │   └── music-profile.mjs
+    │   ├── music-profile.mjs
+    │   └── capabilities.mjs
+    ├── mori-agent/
+    │   ├── capabilities/            # 五个物理隔离的 V0 Capability
+    │   ├── shared/                  # execute、LLM transport、Debug logger
+    │   └── lab/                     # 仅开发环境的调试页面
     └── services/
         ├── feature-store.mjs
         ├── music-portrait.mjs
@@ -50,6 +72,7 @@ apps/api/
 ```bash
 tail -f apps/api/logs/api_$(date +%F).log
 tail -f apps/api/logs/backend_$(date +%F).log
+tail -f apps/api/logs/capability_$(date +%F).log
 ```
 
 未来后端负责：

@@ -9,6 +9,8 @@ import { isAllowedOrigin, json } from './http.mjs'
 import { logError, logInfo } from './logging.mjs'
 import { handleLogsRoute } from './routes/logs.mjs'
 import { createMusicProfileRoute } from './routes/music-profile.mjs'
+import { createCapabilityRegistry } from './mori-agent/index.mjs'
+import { createCapabilityRoutes } from './routes/capabilities.mjs'
 import { createFeatureStore } from './services/feature-store.mjs'
 import { createMusicProfileService } from './services/music-profile.mjs'
 import { createMusicPortraitService } from './services/music-portrait.mjs'
@@ -24,8 +26,11 @@ const analyzeMusicProfile = createMusicProfileService({
   melodataBaseUrl: process.env.MELODATA_BASE_URL?.trim(),
 })
 const handleMusicProfileRoute = createMusicProfileRoute(analyzeMusicProfile)
+const handleCapabilityRequest = createCapabilityRoutes(createCapabilityRegistry())
 
 createServer(async (request, response) => {
+  // Capability Lab is a same-origin, development-only surface and performs its own route gating.
+  if (await handleCapabilityRequest(request, response)) return
   if (!isAllowedOrigin(request)) { json(request, response, 403, { error: 'Origin is not allowed' }); return }
   if (request.method === 'OPTIONS') { json(request, response, 204, null); return }
   if (request.method === 'POST' && request.url === '/logs') { await handleLogsRoute(request, response); return }

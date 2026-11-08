@@ -1,0 +1,10 @@
+/** Capability Lab 客户端：切换模块、加载示例、提交单次 Run，并展示原始 Structured Output 与 Meta。 */
+const labels={memory:'Memory',understanding:'Understanding',connection:'Connection',reflection:'Reflection',companionship:'Companionship'}
+const state={active:'memory',examples:{},capabilities:[]}
+const $=(id)=>document.getElementById(id)
+async function init(){const response=await fetch('/agent/capabilities');const data=await response.json();state.examples=data.examples;state.capabilities=data.capabilities;renderTabs();loadExample()}
+function renderTabs(){$('tabs').replaceChildren(...state.capabilities.map(name=>{const button=document.createElement('button');button.textContent=labels[name];button.className=name===state.active?'active':'';button.onclick=()=>{state.active=name;renderTabs();loadExample();resetMeta()};return button}))}
+function loadExample(){$('input').value=JSON.stringify(state.examples[state.active],null,2);$('output').value=''}
+function resetMeta(){$('prompt').textContent=`${state.active}-v0.1`;$('model').textContent='—';$('latency').textContent='—';$('status').textContent='Ready'}
+async function run(){const button=$('run');button.disabled=true;$('status').textContent='Running…';$('output').value='';try{const input=JSON.parse($('input').value);const response=await fetch(`/agent/capabilities/${state.active}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input)});const result=await response.json();$('output').value=JSON.stringify(result,null,2);$('prompt').textContent=result.meta?.promptVersion??`${state.active}-v0.1`;$('model').textContent=result.meta?.model??'—';$('latency').textContent=result.meta?.latency===undefined?'—':`${result.meta.latency} ms`;$('status').textContent=result.success?'Completed':`Error: ${result.error}`}catch(error){$('output').value=JSON.stringify({error:error.message},null,2);$('status').textContent=`Error: ${error.message}`}finally{button.disabled=false}}
+$('example').onclick=loadExample;$('run').onclick=run;void init().then(resetMeta).catch(error=>{$('status').textContent=`Error: ${error.message}`})
