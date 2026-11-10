@@ -8,4 +8,8 @@ apps/player-host/dist/
 apps/api/data/
 apps/api/logs/
 docs/*
+!docs/ARCHITECTURE.md
+!docs/CODE_STRUCTURE.md
+!docs/IMPLEMENTATION.md
 !docs/MORI_AGENT_V0_IMPLEMENTATION_2026-11-08.md
+!docs/MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md

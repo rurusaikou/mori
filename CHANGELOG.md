@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-09 — Panel rendering stability
+
+- 移除 Full/Mini Panel 外框上的 `backdrop-filter`，避免 Chrome 在旋转封面和播放进度更新时反复重绘圆角模糊层造成边框闪烁；保留原背景、描边和阴影，并使用独立合成隔离稳定绘制。
+- 将正式对话从重复的本地模板回复切换到 Mori Agent V0.1 `/agent/run`：仅传递当前歌曲基本信息、最近对话和用户已保存 Moment 摘要，LLM Key 保持在 API；服务不可用时显示明确降级提示。
+- 清理旧版本遗留的空对话消息，取消只截取最后四条造成的跳变，并让对话区域稳定自动滚动到最新消息。
+- 隔离正式 Agent 与 Playground Tool 集合：Mock 音乐搜索不再进入产品回复；在没有播放 Tool 时禁止声称可控制播放器，并限制回复长度。聊天滚动改为同一布局帧直接定位到底部，避免旧长气泡被裁成空紫块。
+- 修复吉祥物按钮与 Mori 对话消息共用 `.mori` 类名导致的样式串扰；按钮尺寸规则限定到根节点直属元素，对话气泡恢复按文字内容自适应高度。
+- 为正式 Agent 增加真实曲库搜索与受约束播放动作：Agent 只能选择 Extension 提供的可播放候选，Extension 校验 URI 后复用 Spotify 播放控制；Playground Mock 搜索继续保持隔离。
+- 梳理 Agent/Capability 文档与代码职责：架构、代码结构和实现说明更新为真实聊天链路；Capability 与 Agent 详细文档去除重复；统一路由命名为 `agent.mjs`，音乐搜索配置收敛为互斥的 `mock / library / none` 模式。
+- LLM transport 同时支持 Responses API 与 Chat Completions；本地基础地址可自动补全 `/v1/chat/completions`，API Key 可选，并提供 `json_schema / json_object / prompt_only` 三种结构化输出兼容模式。音乐画像移除重复 HTTP 实现，改为复用统一 transport。
+- 统一 Mori 关闭语义：Panel 关闭按钮与浏览器工具栏关闭均进入后台 `MORI_CLOSE`，暂停当前 Spotify 播放、持久化全局 Presence 并广播全部页面；关闭时同步重置各页 Panel 状态。
+- 修复选歌后顶部仍显示上一首的问题：播放请求携带目标歌曲 metadata，Controller 在设备转移期间忽略旧曲暂停快照并即时展示目标；复用存活的嵌入式 Spotify Device，减少重复初始化等待。
+- 改善本地慢模型下的聊天发送体验：用户消息即时进入时间线，输入框立即清空并保持焦点，Mori 显示思考状态；请求失败时恢复草稿，单请求串行避免回复乱序。
+- 修复本地 qwen thinking 模型耗尽输出预算导致的伪“连接失败”：Chat Completions 支持配置 `reasoning_effort=none`，并区分输出截断与网络故障的用户提示。
+- 修复 Saved Tracks 点击目标歌曲后数秒自动跳到另一首：用户选歌只提交单个 Spotify URI，不再把整份收藏列表作为临时 `uris` 队列；普通歌单继续使用原生 context。
+
 ## 2026-11-03 — Music profile resilience
 
 - MeloData 网络错误与服务端错误增加退避重试；单曲重试耗尽后跳过，避免大型曲库因一次瞬时故障丢失整次分析结果。

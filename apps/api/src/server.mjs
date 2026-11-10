@@ -11,6 +11,9 @@ import { handleLogsRoute } from './routes/logs.mjs'
 import { createMusicProfileRoute } from './routes/music-profile.mjs'
 import { createCapabilityRegistry } from './mori-agent/index.mjs'
 import { createCapabilityRoutes } from './routes/capabilities.mjs'
+import { createAgentRoutes } from './routes/agent.mjs'
+import { createCapabilityLlm } from './mori-agent/shared/llm.mjs'
+import { createMoriAgent } from './mori-agent/agent/mori-agent.mjs'
 import { createFeatureStore } from './services/feature-store.mjs'
 import { createMusicProfileService } from './services/music-profile.mjs'
 import { createMusicPortraitService } from './services/music-portrait.mjs'
@@ -27,12 +30,22 @@ const analyzeMusicProfile = createMusicProfileService({
 })
 const handleMusicProfileRoute = createMusicProfileRoute(analyzeMusicProfile)
 const handleCapabilityRequest = createCapabilityRoutes(createCapabilityRegistry())
+const agentLlm = createCapabilityLlm()
+const handleAgentRequest = createAgentRoutes({
+  productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library' }),
+  playgroundAgent: createMoriAgent(agentLlm),
+})
 
 createServer(async (request, response) => {
+  const isDevelopmentAgentRoute = request.url?.startsWith('/agent-playground') || request.url === '/agent/playground/run'
+  // Playground is a same-origin development surface. The formal /agent/run endpoint deliberately
+  // continues through the extension Origin check below.
+  if (isDevelopmentAgentRoute && await handleAgentRequest(request, response)) return
   // Capability Lab is a same-origin, development-only surface and performs its own route gating.
   if (await handleCapabilityRequest(request, response)) return
   if (!isAllowedOrigin(request)) { json(request, response, 403, { error: 'Origin is not allowed' }); return }
   if (request.method === 'OPTIONS') { json(request, response, 204, null); return }
+  if (await handleAgentRequest(request, response)) return
   if (request.method === 'POST' && request.url === '/logs') { await handleLogsRoute(request, response); return }
   if (request.method === 'POST' && request.url === '/music-profile') { await handleMusicProfileRoute(request, response); return }
   json(request, response, 404, { error: 'Not found' })

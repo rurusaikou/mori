@@ -31,7 +31,7 @@ type Props = {
   onHasLibraryCache: (playlistId?: string) => Promise<boolean>
   onRefreshLibrary: () => Promise<MusicPlaylist[]>
   onGetPlaylistTracks: (playlistId: string) => Promise<MusicTrack[]>
-  onPlayUri: (uri: string, contextUri?: string, queueUris?: string[]) => Promise<void>
+  onPlayUri: (track: MusicTrack, contextUri?: string, queueUris?: string[]) => Promise<void>
   onGetMusicPreference: () => Promise<MusicPreferenceAnalysisState>
   onAnalyzeMusicPreference: () => Promise<MusicPreferenceProfile>
 }
@@ -87,7 +87,7 @@ export function PlayerCard({ playback, spotifyConnected, messages, memories, set
         : <strong>Mori</strong>}
       <span className="card-header-actions">
         {!settingsOpen && <button type="button" className="settings-button" onClick={onOpenSettings} aria-label="打开 Mori 设置" title="设置"><SettingsIcon /></button>}
-        <button type="button" className="panel-close" onClick={onClose} aria-label="收起到迷你播放器" title="收起">●</button>
+        <button type="button" className="panel-close" onClick={onClose} aria-label="关闭 Mori 并停止播放" title="关闭 Mori">●</button>
       </span>
     </header>
     {settingsOpen ? <SettingsPanel spotifyConnected={spotifyConnected} getMusicPreference={onGetMusicPreference} analyzeMusicPreference={onAnalyzeMusicPreference} view={settingsView} preferenceView={preferenceView} onPreferenceViewChange={setPreferenceView} onOpenPreference={() => { setSettingsView('preference'); setPreferenceView('overview') }} /> : <><section className="expanded-player" aria-label="当前歌曲播放器">

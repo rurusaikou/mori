@@ -12,6 +12,7 @@ import { canAccessPlaylist, getAvailableDevices, getPlaylistTracks as fetchPlayl
 const OFFSCREEN_PATH = 'src/offscreen/offscreen.html'
 const LIBRARY_CACHE_TTL_MS = 60 * 60 * 1_000
 let creatingOffscreen: Promise<void> | null = null
+let embeddedDeviceId: string | null = null
 let playlistsRequest: Promise<MusicPlaylist[]> | null = null
 const trackRequests = new Map<string, Promise<MusicTrack[]>>()
 let libraryGeneration = 0
@@ -20,6 +21,9 @@ async function ensureOffscreenDocument() {
   const url = chrome.runtime.getURL(OFFSCREEN_PATH)
   const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'], documentUrls: [url] })
   if (contexts.length) return
+  // A reclaimed offscreen document also destroys its SDK device. Drop the cached ID before
+  // recreating it; while the document is alive, repeated track selections can reuse the ID.
+  embeddedDeviceId = null
   if (!creatingOffscreen) {
     // Audio must live outside content scripts so navigation cannot stop playback. Chrome may close
     // this document after prolonged silence, so every command first recreates it when necessary.
@@ -40,12 +44,15 @@ async function sendToPlaybackHost(type: PlaybackHostRequest['type'], payload: Pl
 }
 
 async function ensureSpotifyDevice() {
+  await ensureOffscreenDocument()
+  if (embeddedDeviceId) return embeddedDeviceId
   const result = await sendToPlaybackHost('PLAYER_INIT', {
     token: await getValidAccessToken(),
     hostUrl: await extensionStorage.getPlaybackHostUrl(),
   })
   if (!result?.deviceId) throw new Error('Spotify Web Playback SDK 尚未返回设备')
-  return result.deviceId
+  embeddedDeviceId = result.deviceId
+  return embeddedDeviceId
 }
 
 export class SpotifyMusicProvider implements MusicProvider {

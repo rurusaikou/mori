@@ -4,7 +4,7 @@
  * 输出：更新后的 PlaybackState、Provider 调用结果，以及发送给各标签页的播放状态消息。
  */
 import { SpotifyMusicProvider } from '../providers/spotify/spotify-provider'
-import { INITIAL_PLAYBACK_STATE, type MusicProvider, type PlaybackMode, type PlaybackState } from '@mori/domain'
+import { INITIAL_PLAYBACK_STATE, type MusicProvider, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
 import type { PlaybackHostEvent, TabMessage } from '../shared/messages'
 import { broadcastTabMessage } from '../shared/tab-messaging'
 import { extensionStorage } from '../storage/extension-storage'
@@ -16,6 +16,7 @@ export class MusicController {
   // consumers from mutating state without persistence and cross-tab synchronization.
   #state: PlaybackState = { ...INITIAL_PLAYBACK_STATE }
   #loggedTrackUri: string | null = null
+  #pendingTrackUri: string | null = null
 
   get state() { return structuredClone(this.#state) }
 
@@ -41,6 +42,16 @@ export class MusicController {
 
   async toggle() {
     await this.runProviderCommand(() => this.provider.toggle(this.#state), { refreshDelayMs: 800 })
+  }
+
+  async pauseForShutdown() {
+    // Closing Mori means ending its active experience, not merely hiding the UI. Reuse the
+    // canonical playback snapshot so an already-paused account is left untouched.
+    if (!this.#state.isPlaying) return
+    await this.runProviderCommand(() => this.provider.toggle(this.#state), {
+      refreshDelayMs: 800,
+      onSuccess: () => this.update({ isPlaying: false }),
+    })
   }
 
   async command(command: 'next' | 'previous') {
@@ -70,11 +81,27 @@ export class MusicController {
 
   getPreferenceTracks() { return this.provider.getPreferenceTracks() }
 
-  async playUri(uri: string, contextUri?: string, queueUris?: string[]) {
-    await this.runProviderCommand(
-      () => this.provider.playUri(uri, contextUri, queueUris),
-      { refreshDelayMs: 800 },
-    )
+  async playUri(uri: string, contextUri?: string, queueUris?: string[], targetTrack?: MusicTrack) {
+    const previous = this.state
+    this.#pendingTrackUri = uri
+    // Reflect the user's target immediately. Spotify may emit a paused snapshot of the previous
+    // song while transferring devices; handleHostEvent ignores that stale snapshot below.
+    if (targetTrack) await this.update({ track: targetTrack, progressMs: 0, durationMs: targetTrack.durationMs, isPlaying: false, error: null })
+    try {
+      await this.provider.playUri(uri, contextUri, queueUris)
+      await this.update({ ...(targetTrack ? { track: targetTrack, durationMs: targetTrack.durationMs } : {}), progressMs: 0, isPlaying: true, availability: 'ready', error: null })
+      setTimeout(() => void this.refreshFromProvider(), 500)
+      setTimeout(() => {
+        if (this.#pendingTrackUri !== uri) return
+        this.#pendingTrackUri = null
+        void this.refreshFromProvider()
+      }, 5_000)
+    } catch (error) {
+      this.#pendingTrackUri = null
+      const message = readablePlaybackError(error)
+      await this.replace({ ...previous, availability: playbackAvailabilityFor(message), error: message })
+      throw error
+    }
   }
 
   async handleHostEvent(event: PlaybackHostEvent) {
@@ -87,6 +114,7 @@ export class MusicController {
       const availability = event.kind === 'account_error' ? 'needs-premium' : event.kind === 'autoplay_failed' ? 'autoplay-blocked' : 'provider-unavailable'
       return this.update({ availability, error: event.message })
     }
+    if (this.#pendingTrackUri && event.track?.uri !== this.#pendingTrackUri) return
     const track = event.track ? {
       uri: event.track.uri,
       title: event.track.name,
@@ -94,6 +122,7 @@ export class MusicController {
       artwork: event.track.album?.images?.[0]?.url,
       durationMs: event.duration,
     } : null
+    if (track?.uri === this.#pendingTrackUri) this.#pendingTrackUri = null
     return this.update({ availability: 'ready', isPlaying: !event.paused, track, progressMs: event.position, durationMs: event.duration, error: null })
   }
 
@@ -150,6 +179,8 @@ export class MusicController {
   private async refreshFromProvider() {
     try {
       const state = await this.provider.getPlaybackState()
+      if (this.#pendingTrackUri && state.track?.uri !== this.#pendingTrackUri) return
+      if (state.track?.uri === this.#pendingTrackUri) this.#pendingTrackUri = null
       await this.replace(state)
     } catch {
       // The command result remains authoritative; a delayed Web API refresh is best-effort only.

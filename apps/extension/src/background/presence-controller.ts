@@ -31,11 +31,19 @@ export class PresenceController {
       return
     }
 
-    this.#enabled = !this.#enabled
-    logInfo('user_event', 'presence_toggled', { visible: this.#enabled, tabId: tab.id })
-    await extensionStorage.setPresenceEnabled(this.#enabled)
+    await this.setEnabled(!this.#enabled, tab.id)
     await chrome.action.setBadgeText({ text: '', tabId: tab.id })
-    await this.ensureCurrentTab(tab.id)
+  }
+
+  async closeEverywhere() {
+    await this.setEnabled(false)
+  }
+
+  private async setEnabled(enabled: boolean, currentTabId?: number) {
+    this.#enabled = enabled
+    logInfo('user_event', 'presence_toggled', { visible: enabled, tabId: currentTabId ?? null })
+    await extensionStorage.setPresenceEnabled(enabled)
+    if (currentTabId !== undefined) await this.ensureCurrentTab(currentTabId)
     await this.broadcast()
   }
 

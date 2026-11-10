@@ -3,6 +3,8 @@
  * 输入：MusicPreferenceProfile、服务端 LLM 配置；不接收歌曲列表或用户身份。
  * 输出：符合 JSON Schema 的 MusicProfileInsight；未配置或生成失败时返回 null。
  */
+import { createCapabilityLlm, isLlmConfigured } from '../mori-agent/shared/llm.mjs'
+
 const MUSIC_INSIGHT_SCHEMA = {
   type: 'object',
   properties: {
@@ -34,11 +36,10 @@ const MUSIC_INSIGHT_SCHEMA = {
 }
 
 export function createMusicPortraitService({ logInfo, logError, fetchImpl = fetch, env = process.env }) {
+  const runStructured = createCapabilityLlm({ fetchImpl, env })
   return async function generateMusicPortrait(profile) {
-    const endpoint = env.MORI_LLM_ENDPOINT?.trim()
-    const apiKey = env.MORI_LLM_API_KEY?.trim()
     const model = env.MORI_LLM_MODEL?.trim()
-    if (!endpoint || !apiKey || !model) {
+    if (!isLlmConfigured(env)) {
       logInfo('music_preference', 'portrait_fallback', { reason: 'llm_not_configured' })
       return null
     }
@@ -46,36 +47,11 @@ export function createMusicPortraitService({ logInfo, logError, fetchImpl = fetc
     try {
       const scores = profileScores(profile)
       logInfo('music_preference', 'portrait_generation_started', { model, ...scores })
-      const response = await fetchImpl(endpoint, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          temperature: 0.55,
-          max_output_tokens: 900,
-          input: [
-            { role: 'system', content: systemPrompt() },
-            { role: 'user', content: inputPrompt(scores) },
-          ],
-          text: {
-            format: {
-              type: 'json_schema',
-              name: 'music_profile_insight',
-              schema: MUSIC_INSIGHT_SCHEMA,
-            },
-          },
-        }),
-        signal: AbortSignal.timeout(30_000),
+      const result = await runStructured({
+        prompt: systemPrompt(), input: inputPrompt(scores), schema: MUSIC_INSIGHT_SCHEMA,
+        schemaName: 'music_profile_insight', temperature: 0.55, maxTokens: 900,
       })
-      const result = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(result?.error?.message || `LLM 请求失败（${response.status}）`)
-      if (result?.status && result.status !== 'completed') {
-        const detail = result?.incomplete_details?.reason || result?.error?.message
-        throw new Error(`LLM 响应未完成（${result.status}${detail ? `：${detail}` : ''}）`)
-      }
-      const content = extractOutputText(result)
-      if (typeof content !== 'string') throw new Error('LLM 未返回画像内容')
-      const insight = validateInsight(JSON.parse(content))
+      const insight = validateInsight(result.data)
       logInfo('music_preference', 'portrait_generated', {
         model,
         summary: insight.summary,
@@ -124,17 +100,6 @@ function profileScores(profile) {
     groove: score(profile.danceability),
     mood: score(profile.valence),
   }
-}
-
-function extractOutputText(result) {
-  if (typeof result?.output_text === 'string') return result.output_text
-  for (const item of result?.output ?? []) {
-    if (item?.type !== 'message') continue
-    for (const part of item.content ?? []) {
-      if (part?.type === 'output_text' && typeof part.text === 'string') return part.text
-    }
-  }
-  return null
 }
 
 function validateInsight(value) {

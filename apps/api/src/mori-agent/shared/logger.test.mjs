@@ -15,3 +15,9 @@ test('formats a failed capability stage as readable Chinese error', () => {
   assert.match(line, /\[错误\]/)
   assert.match(line, /原因：临时状态不得覆盖长期理解/)
 })
+
+test('formats agent tool stages as readable Chinese text', () => {
+  const line = formatCapabilityLogLine({ timestamp: '2026-11-09T12:00:00.000Z', runId: 'agent-1', capability: 'agent_v0_1', promptVersion: 'mori-agent-v0.1', model: 'test', stage: 'agent_tool_call', name: 'search_memory' })
+  assert.match(line, /Agent 选择调用 Tool/)
+  assert.match(line, /search_memory/)
+})

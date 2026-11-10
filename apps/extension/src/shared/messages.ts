@@ -3,7 +3,7 @@
  * 输入：无运行时输入；类型由各 Extension 上下文引用。
  * 输出：RuntimeRequest、RuntimeResponse、TabMessage 和 PlaybackHostRequest 类型。
  */
-import type { ConversationMessage, MusicMemory, PlaybackMode, PlaybackState } from '@mori/domain'
+import type { ConversationMessage, MusicMemory, MusicTrack, PlaybackMode, PlaybackState } from '@mori/domain'
 import type { PlaybackHostCommand, PlaybackHostEvent, PlaybackHostPayload } from '@mori/contracts/playback-host'
 
 export type { PlaybackHostEvent, SpotifySdkTrack } from '@mori/contracts/playback-host'
@@ -11,6 +11,7 @@ export type { PlaybackHostEvent, SpotifySdkTrack } from '@mori/contracts/playbac
 export type RuntimeRequest =
   | { type: 'MORI_GET_STATE' }
   | { type: 'MORI_GET_PRESENCE_STATE' }
+  | { type: 'MORI_CLOSE' }
   | { type: 'MORI_SAVE_POSITION'; position: { x: number; y: number } }
   | { type: 'MORI_CONNECT_SPOTIFY' }
   | { type: 'MORI_DISCONNECT_SPOTIFY' }
@@ -22,7 +23,7 @@ export type RuntimeRequest =
   | { type: 'MORI_GET_LIBRARY_CACHE_STATUS'; playlistId?: string }
   | { type: 'MORI_REFRESH_LIBRARY' }
   | { type: 'MORI_GET_PLAYLIST_TRACKS'; playlistId: string }
-  | { type: 'MORI_PLAY_URI'; uri: string; contextUri?: string; queueUris?: string[] }
+  | { type: 'MORI_PLAY_URI'; track: MusicTrack; contextUri?: string; queueUris?: string[] }
   | { type: 'MORI_GET_COMPANION_DATA' }
   | { type: 'MORI_SEND_MESSAGE'; text: string }
   | { type: 'MORI_SAVE_MEMORY' }

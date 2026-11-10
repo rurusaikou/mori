@@ -38,7 +38,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.action.onClicked.addListener((tab) => {
   void restored
-    .then(() => presence.toggleFromToolbar(tab))
+    .then(() => presence.enabled ? closeMoriEverywhere('toolbar') : presence.toggleFromToolbar(tab))
     .catch((error) => console.error('Failed to toggle Mori presence:', error))
 })
 
@@ -55,6 +55,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         return { state: music.state }
       case 'MORI_GET_PRESENCE_STATE':
         return { visible: presence.enabled, position: await extensionStorage.getPosition() }
+      case 'MORI_CLOSE':
+        await closeMoriEverywhere('panel')
+        return { closed: true }
       case 'MORI_SAVE_POSITION':
         await extensionStorage.setPosition(message.position)
         return { saved: true }
@@ -91,12 +94,18 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
       case 'MORI_PLAY_URI':
         // Device/DRM initialization can take several seconds. Acknowledge the click now and
         // publish the eventual playback state or specific error through MusicController.
-        void music.playUri(message.uri, message.contextUri, message.queueUris).catch((error) => console.error('Failed to play Spotify URI:', error))
+        void music.playUri(message.track.uri, message.contextUri, message.queueUris, message.track).catch((error) => console.error('Failed to play Spotify URI:', error))
         return { accepted: true }
       case 'MORI_GET_COMPANION_DATA':
         return getCompanionData()
       case 'MORI_SEND_MESSAGE': {
-        const messages = await sendCompanionMessage(message.text, music.state)
+        // Library hydration can page through many Spotify playlists. Do it only for an explicit
+        // listening/play request; ordinary conversation should stay fast and avoid Spotify quota.
+        const catalog = hasMusicArrangementIntent(message.text) ? await getAgentMusicCatalog() : []
+        const messages = await sendCompanionMessage(message.text, music.state, catalog, async (track) => {
+          await music.playUri(track.uri, undefined, undefined, track)
+          logInfo('conversation', 'agent_track_played', { uri: track.uri, title: track.title, artist: track.artist })
+        })
         const exchange = messages.slice(-2)
         logInfo('conversation', 'message_exchange', {
           userText: exchange.find((item) => item.role === 'user')?.text ?? message.text,
@@ -151,10 +160,40 @@ async function broadcastCompanionData() {
   await broadcastTabMessage(message)
 }
 
+async function closeMoriEverywhere(source: 'toolbar' | 'panel') {
+  // Visibility must still close globally when Spotify is temporarily unavailable. A playback
+  // failure is logged, while the persisted Presence state and cross-tab broadcast always run.
+  try { await music.pauseForShutdown() }
+  catch (error) { logError('playback', 'close_pause_failed', error, { source }) }
+  await presence.closeEverywhere()
+  logInfo('user_event', 'mori_closed', { source, playbackStopped: !music.state.isPlaying })
+}
+
+async function getAgentMusicCatalog() {
+  const cache = await extensionStorage.getLibraryCache()
+  const unique = new Map<string, (typeof cache.tracks)[string]['data'][number]>()
+  for (const entry of Object.values(cache.tracks)) {
+    for (const track of entry.data) if (track.uri && track.isPlayable !== false) unique.set(track.uri, track)
+  }
+  // A fresh install may not have opened a playlist yet. Reuse the existing bounded library sampler
+  // once to populate enough real candidates instead of silently falling back to fabricated search.
+  if (!unique.size) {
+    for (const track of await music.getPreferenceTracks()) if (track.uri && track.isPlayable !== false) unique.set(track.uri, track)
+  }
+  return [...unique.values()].slice(0, 500)
+}
+
+function hasMusicArrangementIntent(text: string) {
+  return /想听|播放|放一首|来一首|来点|安排.{0,4}(歌|音乐)|听.{0,6}(歌|音乐|的)/u.test(text)
+}
+
 function logUserEvent(message: RuntimeRequest & { target?: string }) {
   switch (message?.type) {
     case 'MORI_SAVE_POSITION':
       logInfo('user_event', 'presence_moved', { position: message.position })
+      break
+    case 'MORI_CLOSE':
+      logInfo('user_event', 'mori_close_requested')
       break
     case 'MORI_CONNECT_SPOTIFY':
     case 'MORI_DISCONNECT_SPOTIFY':
@@ -171,7 +210,7 @@ function logUserEvent(message: RuntimeRequest & { target?: string }) {
       logInfo('user_event', 'playback_mode_changed', { mode: message.mode })
       break
     case 'MORI_PLAY_URI':
-      logInfo('user_event', 'track_selected', { uri: message.uri, contextUri: message.contextUri ?? null })
+      logInfo('user_event', 'track_selected', { uri: message.track.uri, title: message.track.title, artist: message.track.artist, contextUri: message.contextUri ?? null })
       break
     case 'MORI_SEND_MESSAGE':
       logInfo('user_event', 'chat_submitted', { text: message.text })

@@ -14,7 +14,7 @@ Input → Capability.execute → 独立 Prompt + 独立 Schema → Structured Ou
 
 统一接口不代表统一业务 Schema。Capability 不知道 Orchestrator 的存在，也不能直接调用其他 Capability。
 
-## 2. 实施前审计
+## 2. 实现环境
 
 ### 当前技术栈
 
@@ -25,24 +25,7 @@ Input → Capability.execute → 独立 Prompt + 独立 Schema → Structured Ou
 - Extension 数据保存在 `chrome.storage.local/session`；
 - API 日志按日期落盘。
 
-### 当前聊天数据流
-
-```text
-ChatPanel
-  → MoriPresence.send
-  → MORI_SEND_MESSAGE
-  → Service Worker
-  → CompanionService 本地 fallback
-  → chrome.storage.local conversation
-  → MORI_COMPANION_DATA
-  → React UI
-```
-
-聊天链路目前不是生产 AI。Agent V0 不接入该链路，避免把五个尚未编排的模块误当成一个 Agent。
-
-### 推荐接入位置
-
-Capability 位于 `apps/api/src/mori-agent/`：LLM Key 已在 API 边界内，Extension 无需也不得持有 Key。未来 Orchestrator 可从 API composition 显式调用单个 `capability.execute(input)`。
+Capability 位于 `apps/api/src/mori-agent/capabilities/`，只通过 Registry 和开发期路由独立运行。正式 Agent 与聊天链路见 [MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md](MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md)，本文件不重复描述。
 
 ## 3. 最终目录
 
@@ -52,7 +35,7 @@ apps/api/src/mori-agent/
 ├── shared/
 │   ├── executor.mjs                  # 统一 execute 结果和阶段日志
 │   ├── llm.mjs                       # Responses Structured Outputs transport
-│   └── logger.mjs                    # 独立 JSONL Debug Store
+│   └── logger.mjs                    # 独立中文可读阶段日志与内存 Debug Store
 ├── capabilities/
 │   ├── memory/
 │   │   ├── memory.prompt.mjs

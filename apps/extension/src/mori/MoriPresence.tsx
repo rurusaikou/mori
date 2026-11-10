@@ -46,7 +46,10 @@ export function MoriPresence() {
     })
 
     const listener = (message: TabMessage) => {
-      if (message.type === 'MORI_SET_VISIBILITY') setVisible(message.visible)
+      if (message.type === 'MORI_SET_VISIBILITY') {
+        setVisible(message.visible)
+        if (!message.visible) { setPanelMode('closed'); setSettingsOpen(false) }
+      }
       if (message.type === 'MORI_PLAYBACK_STATE') {
         setPlayback(message.state)
         if (message.state.availability === 'needs-auth') setSpotifyConnected(false)
@@ -142,6 +145,12 @@ export function MoriPresence() {
     catch (error) { setPlayback((state) => ({ ...state, error: error instanceof Error ? error.message : '播放失败' })); setPanelMode('mini'); throw error }
   }
 
+  async function closeMori() {
+    // The backend owns the global Presence and playback state. Do not locally hide first: waiting
+    // for the command prevents one tab from appearing closed while other tabs are still active.
+    await sendRuntimeRequest<{ closed: true }>({ type: 'MORI_CLOSE' })
+  }
+
   async function command(command: 'previous' | 'next') {
     try { await sendRuntimeRequest({ type: 'MORI_PLAYBACK_COMMAND', command }) }
     catch (error) { setPlayback((state) => ({ ...state, error: error instanceof Error ? error.message : '切歌失败' })); throw error }
@@ -181,7 +190,7 @@ export function MoriPresence() {
     return result.playlists
   }
 
-  async function playUri(uri: string, contextUri?: string, queueUris?: string[]) { await sendRuntimeRequest({ type: 'MORI_PLAY_URI', uri, contextUri, queueUris }) }
+  async function playUri(track: MusicTrack, contextUri?: string, queueUris?: string[]) { await sendRuntimeRequest({ type: 'MORI_PLAY_URI', track, contextUri, queueUris }) }
 
   async function getMusicPreference() {
     return sendRuntimeRequest<MusicPreferenceAnalysisState>({ type: 'MORI_GET_MUSIC_PREFERENCE' })
@@ -207,7 +216,7 @@ export function MoriPresence() {
     {panelMode !== 'closed' && <div ref={panelRef} className="panel-positioner" style={panelStyle ?? { visibility: 'hidden' }}>
       {panelMode === 'mini'
         ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSaveMemory={saveMemory} onOpenSettings={() => { setSettingsOpen(true); setPanelMode('full') }} onExpand={() => { setSettingsOpen(false); setPanelMode('full') }} />
-        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onClose={() => setPanelMode('mini')} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
+        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onClose={closeMori} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
     </div>}
   </div>
 }

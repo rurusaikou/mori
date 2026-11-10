@@ -13,7 +13,9 @@ MELODATA_BASE_URL=https://melodata.voltenworks.com/api/v1
 MELODATA_API_KEY=your-server-side-key
 ```
 
-音乐指标聚合完成后，API 可调用兼容 Responses API Structured Outputs 的 LLM 生成自然语言音乐画像。服务使用 `text.format.type=json_schema` 提交完整 Schema，不使用 Chat Completions。在 `.env.local` 配置完整 Responses Endpoint：
+音乐画像、Agent 与 Capability 共用同一个 Structured LLM transport。默认使用 Responses API；也可以连接仅支持 Chat Completions 的本地服务。
+
+Responses API：
 
 ```dotenv
 MORI_LLM_ENDPOINT=https://api.deepseek.com/responses
@@ -21,7 +23,21 @@ MORI_LLM_API_KEY=your-server-side-key
 MORI_LLM_MODEL=your-model-name
 ```
 
-只会向模型发送由 BPM、Energy、Danceability、Valence 得到的四项 0～100 标准化维度，不发送歌曲列表、Spotify 标识或用户身份。Schema 固定返回 `summary`、三项 `traits`、`listeningStyle` 和三个 `keywords`，服务端还会校验数量与中文文案长度。页面五项偏好状态和刻度仍由本地规则确定；LLM 未配置、超时或格式不合法时只回退顶部画像文案，不影响音乐特征分析结果。密钥只允许存在于 API 进程，不能放入 Extension。
+本机 `127.0.0.1:11434` Chat Completions（当前检测到模型 `qwen3.5:4b`）：
+
+```dotenv
+MORI_LLM_API_STYLE=chat_completions
+MORI_LLM_ENDPOINT=http://127.0.0.1:11434
+MORI_LLM_MODEL=qwen3.5:4b
+MORI_LLM_JSON_MODE=json_schema
+MORI_LLM_SEND_API_KEY=false
+MORI_LLM_TIMEOUT_MS=120000
+MORI_LLM_REASONING_EFFORT=none
+```
+
+基础地址会自动补成 `/v1/chat/completions`。本地服务不要求鉴权时可省略 `MORI_LLM_API_KEY`；如果同一 `.env.local` 还保留远程 Key，设置 `MORI_LLM_SEND_API_KEY=false` 可确保它不会发往本地服务。本地 thinking 模型通常比远程服务慢，可用 `MORI_LLM_TIMEOUT_MS` 覆盖默认 30 秒；兼容服务支持时，`MORI_LLM_REASONING_EFFORT=none` 可避免结构化任务把输出额度消耗在隐藏推理。若服务不支持 `response_format.json_schema`，将 JSON 模式改为 `json_object`；连 `response_format` 也不支持时使用 `prompt_only`。
+
+音乐画像只向模型发送四项标准化维度，不发送歌曲列表、Spotify 标识或用户身份；Agent 则按其最小上下文边界调用同一 transport。无论使用哪种协议，解析后仍执行现有 Schema/业务校验。页面确定性指标不受 LLM transport 影响；LLM 未配置、超时或格式不合法时继续使用现有降级逻辑。密钥只允许存在于 API 进程，不能放入 Extension。
 
 API 自身的音乐分析日志按日期写入 `apps/api/logs/api_YYYY-MM-DD.log`；`POST /logs` 接收的 Extension 业务日志按日期写入 `apps/api/logs/backend_YYYY-MM-DD.log`。当天文件不存在时自动创建，存在时继续追加。文件使用“时间 + 级别 + category/event + 中文说明”的单行格式并被 Git 忽略。正常日志不再刷终端，只有文件写入失败才输出 stderr。日志不包含 `MELODATA_API_KEY`、OAuth Token 或 Authorization Header。
 
@@ -42,6 +58,17 @@ GET  /agent/capability-logs
 
 Capability Run 的每个阶段写入 `apps/api/logs/capability_YYYY-MM-DD.log`，使用与其他 Mori 日志一致的“本地时间 + 级别 + 事件 + 中文说明”格式。内容保留 runId、模块、Prompt 版本、模型、输入/输出、延迟、Token 或错误，但不再以整行裸 JSON 展示。该 Debug Log 与用户 Memory、对话存储完全隔离。
 
+## Mori Agent V0.1
+
+正式产品与调试页面复用 Agent 执行器，但使用不同 Tool 配置：
+
+| 场景 | 入口 | `search_music` | 生产环境 |
+|---|---|---|---|
+| Extension 聊天 | `POST /agent/run` | Extension 真实曲库候选 | 保留，需 Extension Origin |
+| Agent Playground | `/agent-playground`、`POST /agent/playground/run` | Mock | 关闭 |
+
+Agent 一次最多执行一个 Tool；Moment 始终是用户操作，不是 Tool。正式上下文、播放动作校验、Trace 与限制统一记录在 [`docs/MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md`](../../docs/MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md)，本 README 只保留 API 运维入口。
+
 ## 结构
 
 ```text
@@ -54,11 +81,14 @@ apps/api/
     ├── routes/
     │   ├── logs.mjs
     │   ├── music-profile.mjs
-    │   └── capabilities.mjs
+    │   ├── capabilities.mjs
+    │   └── agent.mjs
     ├── mori-agent/
     │   ├── capabilities/            # 五个物理隔离的 V0 Capability
-    │   ├── shared/                  # execute、LLM transport、Debug logger
-    │   └── lab/                     # 仅开发环境的调试页面
+    │   ├── agent/、tools/、memory/   # Agent 闭环与显式 Tool
+    │   ├── shared/                   # execute、LLM transport、Debug logger
+    │   ├── lab/                      # Capability 调试页面
+    │   └── playground/               # Agent 调试页面
     └── services/
         ├── feature-store.mjs
         ├── music-portrait.mjs
