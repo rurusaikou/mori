@@ -3,8 +3,10 @@
  * 输入：用户文本、当前 PlaybackState，以及 ExtensionStorage 中的历史数据。
  * 输出：更新后的 ConversationMessage 或 MusicMemory 列表，并写入本地存储。
  */
-import type { ConversationMessage, MusicMemory, MusicTrack, PlaybackState } from '@mori/domain'
+import type { ConversationMessage, MusicMemory, MusicMomentInput, MusicTrack, PlaybackState } from '@mori/domain'
 import { extensionStorage } from '../storage/extension-storage'
+
+const musicMoods = new Set(['calm', 'happy', 'healing', 'moved', 'nostalgic', 'low'])
 
 const greeting: ConversationMessage = {
   id: 'mori-welcome',
@@ -26,11 +28,17 @@ export async function sendCompanionMessage(
   playback: PlaybackState,
   musicCatalog: MusicTrack[] = [],
   playTrack?: (track: MusicTrack) => Promise<void>,
+  onUserStored?: (messages: ConversationMessage[]) => Promise<void>,
 ) {
   const value = text.trim()
   if (!value) throw new Error('请输入想和 Mori 说的话')
   const { messages, memories } = await getCompanionData()
   const userMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'user', text: value }
+  // Persist the user's turn before waiting for a potentially slow local model. This makes the
+  // message survive chat-tab unmounts, page navigation and service-worker suspension.
+  const messagesWithUser = [...messages, userMessage].slice(-100)
+  await extensionStorage.setConversation(messagesWithUser)
+  await onUserStored?.(messagesWithUser)
 
   const agentResult = await requestAgentReply(value, playback, messages, memories, musicCatalog)
   let reply = agentResult.reply
@@ -50,17 +58,22 @@ export async function sendCompanionMessage(
   const moriMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'mori', text: reply }
   // Bound local history so long-lived profiles do not grow chrome.storage indefinitely before a
   // server-side conversation store exists.
-  const next = [...messages, userMessage, moriMessage].slice(-100)
+  const next = [...messagesWithUser, moriMessage].slice(-100)
   await extensionStorage.setConversation(next)
   return next
 }
 
-export async function saveMusicMemory(playback: PlaybackState) {
+export async function saveMusicMemory(playback: PlaybackState, input: MusicMomentInput) {
+  // Runtime messages can be forged or originate from an older content bundle. Enforce the
+  // persistence invariant here as well as in the UI so a Moment can never store an unknown mood.
+  if (!input || !musicMoods.has(input.mood)) throw new Error('请选择此刻的心情')
   const memories = await extensionStorage.getMemories()
+  const note = input.note?.trim().slice(0, 80)
   const memory: MusicMemory = {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
-    note: playback.track ? `记住和 Mori 一起听《${playback.track.title}》的这一刻。` : '记住这一刻。',
+    note: note || (playback.track ? `记住和 Mori 一起听《${playback.track.title}》的这一刻。` : '记住这一刻。'),
+    mood: input.mood,
     track: playback.track,
   }
   // Memories are user-triggered but still bounded locally; future export/sync can replace this
@@ -100,7 +113,7 @@ async function requestAgentReply(
         })),
         // The server receives a bounded, minimal catalogue and may only return one of these URIs.
         // OAuth credentials and playlist ownership remain inside the Extension.
-        musicCatalog: musicCatalog.slice(0, 500).map((track) => ({ uri: track.uri, title: track.title, artist: track.artist })),
+        musicCatalog: musicCatalog.slice(0, 500).map((track) => ({ uri: track.uri, isrc: track.isrc, title: track.title, artist: track.artist })),
       }),
     })
     const result = await response.json() as {

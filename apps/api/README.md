@@ -1,12 +1,12 @@
 # Mori API
 
-Mori 的服务端边界。当前包含本地开发使用的音乐特征代理；它让 `MELODATA_API_KEY` 保持在 Extension 之外。该服务不是生产后端，也不持久化用户画像。
+Mori 的服务端边界。当前包含音乐特征代理、画像生成、正式 Agent API、隔离 Capability 和开发调试页面；第三方密钥始终留在 Extension 之外。它仍是本地开发服务，不提供生产身份、数据库或跨设备同步，也不持久化用户画像与对话。
 
 ```bash
 pnpm dev:api
 ```
 
-启动脚本会从仓库根目录的 `.env.local` 读取必填的 `MELODATA_API_KEY` 和 `MELODATA_BASE_URL`，并使用 Node watch 模式在 API 源码变化时自动重启。服务代码不内置 MeloData 地址；缺少 Base URL 时启动直接失败并给出配置错误。API 默认监听 `http://127.0.0.1:3211`，提供 `POST /music-profile`。Extension 负责采样 Spotify 曲库和本地保存最终画像；服务按 ISRC 将歌曲特征持久化到忽略上传的 `apps/api/data/music-features.json`。重新分析时只请求缓存中不存在的歌曲，每批并发处理五首，并将实际第三方请求限制在每秒 4 次、每分钟 90 次。每完成一个小批次就原子写盘，避免重启或中途限流浪费已经消耗的查询次数。
+启动脚本从仓库根目录的 `.env.local` 读取配置，并使用 Node watch 模式在 API 源码变化后自动重启。`MELODATA_API_KEY` 和 `MELODATA_BASE_URL` 是音乐特征分析必填项；LLM 配置仅在画像叙事、Agent 或 Capability 运行时需要。服务代码不内置 MeloData 地址，缺少 Base URL 时相关服务启动失败并给出配置错误。API 默认监听 `http://127.0.0.1:3211`。Extension 负责采样 Spotify 曲库和本地保存最终画像；服务按 ISRC 将歌曲特征持久化到忽略上传的 `apps/api/data/music-features.json`。重新分析时只请求缓存中不存在的歌曲，每批并发处理五首，并将实际第三方请求限制在每秒 4 次、每分钟 90 次。每完成一个小批次就原子写盘，避免重启或中途限流浪费已经消耗的查询次数。
 
 ```dotenv
 MELODATA_BASE_URL=https://melodata.voltenworks.com/api/v1

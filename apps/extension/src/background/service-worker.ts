@@ -14,6 +14,7 @@ import { logError, logInfo } from './logger'
 
 const music = new MusicController()
 const presence = new PresenceController()
+let lastToolbarClickAt = 0
 // Content scripts normally share chrome.storage access with extension pages. Restricting both
 // stores makes OAuth tokens, conversations and memories inaccessible from the host-page context.
 const storageSecured = Promise.all([
@@ -37,6 +38,11 @@ chrome.runtime.onInstalled.addListener(() => {
 })
 
 chrome.action.onClicked.addListener((tab) => {
+  const now = Date.now()
+  // Chrome can deliver rapid duplicate action clicks from a double-click. Without a guard the
+  // first event shows Mori and the second immediately executes the global close path.
+  if (now - lastToolbarClickAt < 600) return
+  lastToolbarClickAt = now
   void restored
     .then(() => presence.enabled ? closeMoriEverywhere('toolbar') : presence.toggleFromToolbar(tab))
     .catch((error) => console.error('Failed to toggle Mori presence:', error))
@@ -76,9 +82,14 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         void music.toggle().catch((error) => console.error('Failed to toggle playback:', error))
         return { accepted: true }
       case 'MORI_PLAYBACK_COMMAND':
-        // Skip targets an already active device and should finish quickly. Await it so the UI
-        // receives the real Spotify success/error instead of an unconditional acknowledgement.
-        await music.command(message.command)
+        // Native Spotify skips are fast, but Saved Tracks navigation may initialize/transfer the
+        // Mori device and start an exact URI. Acknowledge the gesture immediately so controls do
+        // not remain disabled while the canonical PlaybackState carries completion or failure.
+        void music.command(message.command).catch((error) => console.error('Failed to change track:', error))
+        return { accepted: true }
+      case 'MORI_SEEK_PLAYBACK':
+        if (!Number.isFinite(message.positionMs) || message.positionMs < 0) throw new Error('无效的播放位置')
+        await music.seek(message.positionMs)
         return { changed: true }
       case 'MORI_SET_PLAYBACK_MODE':
         await music.setPlaybackMode(message.mode)
@@ -94,7 +105,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
       case 'MORI_PLAY_URI':
         // Device/DRM initialization can take several seconds. Acknowledge the click now and
         // publish the eventual playback state or specific error through MusicController.
-        void music.playUri(message.track.uri, message.contextUri, message.queueUris, message.track).catch((error) => console.error('Failed to play Spotify URI:', error))
+        void music.playUri(message.track.uri, message.contextUri, message.track, message.navigationQueue).catch((error) => console.error('Failed to play Spotify URI:', error))
         return { accepted: true }
       case 'MORI_GET_COMPANION_DATA':
         return getCompanionData()
@@ -103,9 +114,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         // listening/play request; ordinary conversation should stay fast and avoid Spotify quota.
         const catalog = hasMusicArrangementIntent(message.text) ? await getAgentMusicCatalog() : []
         const messages = await sendCompanionMessage(message.text, music.state, catalog, async (track) => {
-          await music.playUri(track.uri, undefined, undefined, track)
+          await music.playUri(track.uri, undefined, track)
           logInfo('conversation', 'agent_track_played', { uri: track.uri, title: track.title, artist: track.artist })
-        })
+        }, broadcastCompanionData)
         const exchange = messages.slice(-2)
         logInfo('conversation', 'message_exchange', {
           userText: exchange.find((item) => item.role === 'user')?.text ?? message.text,
@@ -116,12 +127,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         return { messages }
       }
       case 'MORI_SAVE_MEMORY': {
-        const memories = await saveMusicMemory(music.state)
+        const memories = await saveMusicMemory(music.state, message.moment)
         const memory = memories[0]
         logInfo('memory', 'moment_saved', {
           id: memory?.id,
           createdAt: memory?.createdAt,
           note: memory?.note,
+          mood: memory?.mood,
           track: memory?.track ? { uri: memory.track.uri, title: memory.track.title, artist: memory.track.artist } : null,
         })
         await broadcastCompanionData()
@@ -205,6 +217,9 @@ function logUserEvent(message: RuntimeRequest & { target?: string }) {
       break
     case 'MORI_PLAYBACK_COMMAND':
       logInfo('user_event', 'playback_command', { command: message.command })
+      break
+    case 'MORI_SEEK_PLAYBACK':
+      logInfo('user_event', 'playback_seeked', { positionMs: Math.round(message.positionMs) })
       break
     case 'MORI_SET_PLAYBACK_MODE':
       logInfo('user_event', 'playback_mode_changed', { mode: message.mode })

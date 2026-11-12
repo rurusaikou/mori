@@ -7,7 +7,7 @@ import { INITIAL_PLAYBACK_STATE, type MusicPlaylist, type MusicProvider, type Mu
 import type { PlaybackHostRequest, RuntimeResponse } from '../../shared/messages'
 import { extensionStorage } from '../../storage/extension-storage'
 import { connectSpotify, disconnectSpotify, getValidAccessToken } from './spotify-auth'
-import { canAccessPlaylist, getAvailableDevices, getPlaylistTracks as fetchPlaylistTracks, getRemotePlayback, getUserPlaylists as fetchUserPlaylists, LIKED_TRACKS_ID, nextPlayback, pausePlayback, previousPlayback, setRepeat, setShuffle, startPlayback, transferPlayback } from './spotify-web-api'
+import { canAccessPlaylist, getAvailableDevices, getPlaylistTracks as fetchPlaylistTracks, getRemotePlayback, getUserPlaylists as fetchUserPlaylists, LIKED_TRACKS_ID, nextPlayback, pausePlayback, previousPlayback, seekPlayback, setRepeat, setShuffle, startPlayback, transferPlayback } from './spotify-web-api'
 
 const OFFSCREEN_PATH = 'src/offscreen/offscreen.html'
 const LIBRARY_CACHE_TTL_MS = 60 * 60 * 1_000
@@ -110,6 +110,7 @@ export class SpotifyMusicProvider implements MusicProvider {
 
   async next() { await nextPlayback(await resolveActivePlaybackDevice()) }
   async previous() { await previousPlayback(await resolveActivePlaybackDevice()) }
+  async seek(positionMs: number) { await seekPlayback(await resolveActivePlaybackDevice(), positionMs) }
   async setPlaybackMode(mode: PlaybackMode) {
     const deviceId = await resolveActivePlaybackDevice()
     // Mori presents mutually exclusive modes even though Spotify models shuffle and repeat
@@ -149,11 +150,11 @@ export class SpotifyMusicProvider implements MusicProvider {
     return refreshPlaylists()
   }
 
-  async playUri(uri: string, contextUri?: string, queueUris?: string[]) {
+  async playUri(uri: string, contextUri?: string) {
     const { deviceId, embedded } = await resolvePlaybackDevice()
     if (embedded) await sendToPlaybackHost('PLAYER_ACTIVATE')
     await transferPlayback(deviceId, false)
-    await startPlayback(deviceId, uri, contextUri, queueUris)
+    await startPlayback(deviceId, uri, contextUri)
     // Spotify may reapply the device volume while transferring/starting playback. Restore the
     // local SDK output after the play command, not only before it, to avoid a playing-but-silent host.
     if (embedded) await sendToPlaybackHost('PLAYER_SET_VOLUME', { volume: 0.8 })

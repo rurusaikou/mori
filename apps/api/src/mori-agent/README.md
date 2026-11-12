@@ -1,5 +1,9 @@
 # Mori Agent V0 模块说明
 
+AI Agent 通用能力与当前代码的逐项映射、正式链路接入状态及缺口，见 [Mori Agent 模块映射说明](../../../../docs/MORI_AGENT_MODULE_MAPPING_2026-11-12.md)。
+
+当前优先建设的 Memory 模块，其职责、数据契约、阶段计划及评判标准见 [Mori Agent Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md)。
+
 ## 职责与边界
 
 该目录包含两套复用同一 LLM transport 和日志设施、但不互相调用的运行单元：
@@ -66,4 +70,4 @@ Lab：`http://127.0.0.1:3211/capability-lab`
 
 Agent Playground：`http://127.0.0.1:3211/agent-playground`
 
-V0.1 Agent 最多调用一次 `search_memory`、`get_music_context` 或 `search_music`。Moment 没有注册为 Tool，Agent 无法主动创建 Moment。`search_music` 通过单一 `musicSearchMode` 装配：Playground=`mock`、正式聊天=`library`、禁用=`none`。Playground 使用 `/agent/playground/run`；Extension 使用经过 Origin 校验的 `/agent/run`。
+V0.1 Agent 最多调用一次 `search_memory`、`get_music_context` 或 `search_music`。Moment 没有注册为 Tool，Agent 无法主动创建 Moment。`search_music` 通过单一 `musicSearchMode` 装配：Playground=`mock`、正式聊天=`library`、禁用=`none`；正式模式由 composition root 注入 ISRC Feature Store 读取器，支持歌名/歌手匹配和已有逐曲特征的听感排序，但 Tool 本身不执行播放。Playground 使用 `/agent/playground/run`；Extension 使用经过 Origin 校验的 `/agent/run`。

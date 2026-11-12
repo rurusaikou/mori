@@ -12,7 +12,7 @@ type Props = {
   hasLibraryCache: (playlistId?: string) => Promise<boolean>
   refreshLibrary: () => Promise<MusicPlaylist[]>
   getPlaylistTracks: (playlistId: string) => Promise<MusicTrack[]>
-  playUri: (track: MusicTrack, contextUri?: string, queueUris?: string[]) => Promise<void>
+  playUri: (track: MusicTrack, contextUri?: string, navigationQueue?: MusicTrack[]) => Promise<void>
 }
 
 export function PlaylistPanel({ playback, getPlaylists, hasLibraryCache, refreshLibrary, getPlaylistTracks, playUri }: Props) {
@@ -71,9 +71,9 @@ export function PlaylistPanel({ playback, getPlaylists, hasLibraryCache, refresh
     const isLikedTracks = activePlaylist?.uri === 'spotify:collection:tracks'
     // Saved Tracks is not a valid Spotify context_uri. Sending the whole collection as `uris`
     // allowed Spotify to skip to the next URI a few seconds after starting the selected track.
-    // Start exactly one URI here; accuracy of the user's explicit selection takes precedence over
-    // manufacturing a previous/next queue for a collection Spotify does not expose as a context.
-    try { await playUri(track, isLikedTracks ? undefined : activePlaylist?.uri) }
+    // Start exactly one URI in Spotify, but retain a trusted local queue for controls. Sending the
+    // whole collection as Spotify `uris` previously made it jump away from the selected song.
+    try { await playUri(track, isLikedTracks ? undefined : activePlaylist?.uri, isLikedTracks ? tracks?.filter((item) => item.isPlayable !== false) : undefined) }
     catch (reason) { setRequestedUri(null); setError(reason instanceof Error ? reason.message : '无法播放这首歌曲') }
   }
 

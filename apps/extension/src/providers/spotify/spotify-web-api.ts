@@ -159,5 +159,6 @@ export const startPlayback = (deviceId: string, uri?: string, contextUri?: strin
 export const pausePlayback = (deviceId: string) => spotifyFetch<never>(`/me/player/pause?device_id=${encodeURIComponent(deviceId)}`, { method: 'PUT' })
 export const nextPlayback = (deviceId: string) => spotifyFetch<never>(`/me/player/next?device_id=${encodeURIComponent(deviceId)}`, { method: 'POST' })
 export const previousPlayback = (deviceId: string) => spotifyFetch<never>(`/me/player/previous?device_id=${encodeURIComponent(deviceId)}`, { method: 'POST' })
+export const seekPlayback = (deviceId: string, positionMs: number) => spotifyFetch<never>(`/me/player/seek?position_ms=${Math.round(positionMs)}&device_id=${encodeURIComponent(deviceId)}`, { method: 'PUT' })
 export const setShuffle = (deviceId: string, enabled: boolean) => spotifyFetch<never>(`/me/player/shuffle?state=${enabled}&device_id=${encodeURIComponent(deviceId)}`, { method: 'PUT' })
 export const setRepeat = (deviceId: string, mode: 'off' | 'context' | 'track') => spotifyFetch<never>(`/me/player/repeat?state=${mode}&device_id=${encodeURIComponent(deviceId)}`, { method: 'PUT' })

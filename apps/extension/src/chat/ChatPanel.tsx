@@ -9,13 +9,12 @@ import type { ConversationMessage } from '@mori/domain'
 type Props = {
   messages: ConversationMessage[]
   onSend: (text: string) => Promise<void>
+  sending: boolean
+  sendError: string
 }
 
-export function ChatPanel({ messages, onSend }: Props) {
+export function ChatPanel({ messages, onSend, sending, sendError }: Props) {
   const [draft, setDraft] = useState('')
-  const [sending, setSending] = useState(false)
-  const [pendingText, setPendingText] = useState('')
-  const [sendError, setSendError] = useState('')
   const conversationRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const visibleMessages = useMemo(() => messages.filter((message) => message.text?.trim()), [messages])
@@ -26,7 +25,7 @@ export function ChatPanel({ messages, onSend }: Props) {
     // Set the final position in the same layout pass. Smooth scrolling was repeatedly interrupted
     // by panel renders and could leave an old, partially clipped bubble looking like an empty block.
     conversation.scrollTop = conversation.scrollHeight
-  }, [visibleMessages.length, pendingText, sending, sendError])
+  }, [visibleMessages.length, sending, sendError])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -34,14 +33,12 @@ export function ChatPanel({ messages, onSend }: Props) {
     if (!text || sending) return
     // Local models can take tens of seconds. Commit the user's intent to the visible timeline
     // immediately, then keep the composer focused while the single in-flight request completes.
-    setDraft(''); setPendingText(text); setSendError(''); setSending(true)
+    setDraft('')
     queueMicrotask(() => inputRef.current?.focus())
     try { await onSend(text) }
     catch (error) {
-      setSendError(error instanceof Error ? error.message : '消息发送失败，请重试。')
       setDraft((current) => current || text)
     } finally {
-      setPendingText(''); setSending(false)
       queueMicrotask(() => inputRef.current?.focus())
     }
   }
@@ -51,7 +48,6 @@ export function ChatPanel({ messages, onSend }: Props) {
       {visibleMessages.length
         ? visibleMessages.map((message) => <p key={message.id} className={message.role}>{message.text}</p>)
         : <p className="mori">我在。想聊聊现在听到的歌吗？</p>}
-      {pendingText && <p className="user pending">{pendingText}</p>}
       {sending && <p className="mori thinking" aria-label="Mori 正在思考"><span>正在想</span><i /><i /><i /></p>}
       {sendError && <p className="chat-error" role="alert">{sendError}</p>}
     </div>

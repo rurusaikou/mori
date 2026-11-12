@@ -12,7 +12,7 @@ Mori 是悬浮在浏览器中的 AI 音乐知音伙伴。Spotify 是当前 Music
 apps/
 ├── extension/       Chrome Manifest V3 前端
 ├── player-host/     Spotify Web Playback SDK 播放前端
-└── api/             Mori 生产后端边界（待实现）
+└── api/             Mori API、Agent、Capability 与音乐特征服务
 packages/
 ├── domain/          音乐、对话、记忆领域模型
 └── contracts/       跨应用播放协议
@@ -26,7 +26,7 @@ docs/                产品、前后端架构与 Spotify 文档
 pnpm install
 pnpm dev          # 终端 1：监听 Extension
 pnpm dev:host     # 终端 2：启动 http://127.0.0.1:3210/playback-host/
-pnpm dev:api      # 终端 3：从 .env.local 读取 MELODATA_API_KEY
+pnpm dev:api      # 终端 3：从 .env.local 读取音乐特征与 LLM 配置
 ```
 
 然后：
@@ -35,7 +35,7 @@ pnpm dev:api      # 终端 3：从 .env.local 读取 MELODATA_API_KEY
 2. 选择“加载已解压的扩展程序”，加载仓库中的 `apps/extension/`，不要加载 `apps/extension/build/`。
 3. 打开 Mori 设置，将显示的 Redirect URI 注册到 Spotify Developer Dashboard。
 4. 填写 Spotify Client ID；本地 Playback Host 保持默认地址；连接 Spotify Premium 账号。
-5. 如需音乐偏好分析，启动本地 Mori API；密钥只配置在 API 进程，不填写到 Extension。
+5. 如需音乐偏好分析、Agent 对话或 Capability 调试，启动本地 Mori API；第三方密钥只配置在 API 进程，不填写到 Extension。
 6. 打开任意普通 HTTP(S) 页面，点击工具栏 Mori 图标。
 
 代码更新后需要在 `chrome://extensions` 重新加载扩展，并刷新测试网页。
@@ -46,7 +46,7 @@ pnpm dev:api      # 终端 3：从 .env.local 读取 MELODATA_API_KEY
 |---|---|
 | `pnpm dev` | 监听 Extension bundle |
 | `pnpm dev:host` | 监听并提供本地 Playback Host |
-| `pnpm dev:api` | 监听并启动本地 Mori API（需要 `MELODATA_API_KEY`） |
+| `pnpm dev:api` | 监听并启动本地 Mori API（按使用功能配置 MeloData / LLM） |
 | `pnpm build` | 构建 Extension 与 Playback Host |
 | `pnpm build:extension` | 只构建 Extension |
 | `pnpm build:host` | 只构建 Playback Host |
@@ -83,5 +83,5 @@ Content Script 不读取 Spotify DOM，也不持有 OAuth Token。Background 是
 
 ## 文档
 
-`docs/` 保存本地开发文档，按“产品定义 → 系统边界 → 代码位置 → 实现流程 → 第三方约束”分层；该目录不纳入版本控制。后端尚未实现的公开边界说明保留在 [apps/api/README.md](apps/api/README.md)。
+`docs/` 保存本地开发文档，按“产品定义 → 系统边界 → 代码位置 → 实现流程 → 第三方约束”分层；该目录不纳入版本控制。API 运行配置和调试入口集中在 [apps/api/README.md](apps/api/README.md)，避免在根 README 重复维护环境变量细节。
 

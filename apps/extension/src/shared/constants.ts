@@ -7,6 +7,7 @@ export const STORAGE_KEYS = {
   clientId: 'mori.spotify.client-id',
   token: 'mori.spotify.token',
   playback: 'mori.playback.snapshot',
+  navigationQueue: 'mori.playback.navigation-queue',
   position: 'mori.presence.position',
   presenceEnabled: 'mori.presence.enabled',
   testUri: 'mori.spotify.test-uri',

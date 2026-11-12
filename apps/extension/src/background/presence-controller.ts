@@ -36,12 +36,14 @@ export class PresenceController {
   }
 
   async closeEverywhere() {
-    await this.setEnabled(false)
+    // The service worker records one source-aware `mori_closed` event for a global close. Avoid a
+    // second generic `presence_toggled=false` line that makes one action look like two transitions.
+    await this.setEnabled(false, undefined, false)
   }
 
-  private async setEnabled(enabled: boolean, currentTabId?: number) {
+  private async setEnabled(enabled: boolean, currentTabId?: number, logToggle = true) {
     this.#enabled = enabled
-    logInfo('user_event', 'presence_toggled', { visible: enabled, tabId: currentTabId ?? null })
+    if (logToggle) logInfo('user_event', 'presence_toggled', { visible: enabled, tabId: currentTabId ?? null })
     await extensionStorage.setPresenceEnabled(enabled)
     if (currentTabId !== undefined) await this.ensureCurrentTab(currentTabId)
     await this.broadcast()
@@ -49,13 +51,15 @@ export class PresenceController {
 
   private async ensureCurrentTab(tabId: number) {
     const message: TabMessage = { type: 'MORI_SET_VISIBILITY', visible: this.#enabled }
+    // Always execute the current bundle when the toolbar explicitly shows Mori. A stale content
+    // world can still accept messages after an unpacked-extension reload while rendering no host.
+    // The content entry replaces its marked host, so reinjection remains idempotent.
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['build/src/content/content.js'] })
     try {
       await chrome.tabs.sendMessage(tabId, message)
     } catch {
-      // Pages opened before installing/updating the extension do not have the static content script.
-      // Injecting once avoids forcing the user to refresh just because the extension was upgraded.
-      await chrome.scripting.executeScript({ target: { tabId }, files: ['build/src/content/content.js'] })
-      await chrome.tabs.sendMessage(tabId, message)
+      // React registers its listener in an effect after executeScript resolves. A missed first
+      // message is harmless because MoriPresence hydrates the persisted state on mount.
     }
   }
 

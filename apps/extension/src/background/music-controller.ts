@@ -17,14 +17,20 @@ export class MusicController {
   #state: PlaybackState = { ...INITIAL_PLAYBACK_STATE }
   #loggedTrackUri: string | null = null
   #pendingTrackUri: string | null = null
+  #navigationQueue: MusicTrack[] = []
+  #navigationTask: Promise<void> = Promise.resolve()
 
   get state() { return structuredClone(this.#state) }
 
   async restore() {
-    const [saved, token] = await Promise.all([extensionStorage.getPlayback(), extensionStorage.getToken()])
+    const [saved, token, navigationQueue] = await Promise.all([extensionStorage.getPlayback(), extensionStorage.getToken(), extensionStorage.getNavigationQueue()])
     // Session snapshots may outlive a manual token removal or an extension update. Authentication
     // state wins so the UI never advertises a controllable player without credentials.
     this.#state = token ? { ...INITIAL_PLAYBACK_STATE, ...(saved ?? {}) } : { ...INITIAL_PLAYBACK_STATE }
+    // Session storage survives service-worker suspension but not a browser session. Restore the
+    // Saved Tracks navigation context without turning it into a durable user preference.
+    this.#navigationQueue = token ? navigationQueue : []
+    if (!token && navigationQueue.length) await extensionStorage.removeNavigationQueue()
     if (this.#state.error) this.#state.error = readablePlaybackError(new Error(this.#state.error))
   }
 
@@ -36,6 +42,8 @@ export class MusicController {
 
   async disconnect() {
     await this.provider.disconnect()
+    this.#navigationQueue = []
+    await extensionStorage.removeNavigationQueue()
     await this.replace({ ...INITIAL_PLAYBACK_STATE, availability: 'needs-auth' })
     logInfo('spotify', 'authorization_disconnected')
   }
@@ -55,14 +63,50 @@ export class MusicController {
   }
 
   async command(command: 'next' | 'previous') {
+    // Runtime acknowledges immediately so the UI stays responsive. Serialize the actual writes in
+    // the controller so rapid clicks advance multiple positions instead of racing to one target.
+    const task = this.#navigationTask.then(() => this.executeNavigationCommand(command))
+    this.#navigationTask = task.catch(() => undefined)
+    return task
+  }
+
+  private async executeNavigationCommand(command: 'next' | 'previous') {
+    const currentIndex = this.#navigationQueue.findIndex((track) => track.uri === this.#state.track?.uri)
+    if (currentIndex >= 0) {
+      const offset = command === 'next' ? 1 : -1
+      const rawTarget = currentIndex + offset
+      const wraps = this.#state.repeatMode === 'context'
+      const shuffledTarget = this.#state.shuffle && this.#navigationQueue.length > 1
+        ? (currentIndex + 1 + Math.floor(Math.random() * (this.#navigationQueue.length - 1))) % this.#navigationQueue.length
+        : null
+      const targetIndex = shuffledTarget ?? (wraps ? (rawTarget + this.#navigationQueue.length) % this.#navigationQueue.length : rawTarget)
+      const target = this.#navigationQueue[targetIndex]
+      if (target) {
+        await this.playUri(target.uri, undefined, target, this.#navigationQueue)
+        return
+      }
+    }
     await this.runProviderCommand(() => this.provider[command](), { refreshDelayMs: 800 })
+  }
+
+  async seek(positionMs: number) {
+    const duration = this.#state.durationMs || this.#state.track?.durationMs || 0
+    const target = Math.round(Math.max(0, Math.min(positionMs, duration)))
+    // Update every tab immediately after Spotify accepts the seek. The delayed provider refresh
+    // then corrects small transport/network drift without making the slider jump while dragging.
+    await this.runProviderCommand(() => this.provider.seek(target), {
+      refreshDelayMs: 500,
+      onSuccess: () => this.update({ progressMs: target }),
+    })
   }
 
   async setPlaybackMode(mode: PlaybackMode) {
     await this.runProviderCommand(
       () => this.provider.setPlaybackMode(mode),
       {
-        refreshDelayMs: 500,
+        // Both Spotify mode writes have completed when the provider resolves. An immediate remote
+        // refresh can still return the previous shuffle/repeat snapshot and visually undo success.
+        // Keep the accepted state authoritative until the next normal playback snapshot.
         onSuccess: () => this.update({
           shuffle: mode === 'shuffle',
           repeatMode: mode === 'context' ? 'context' : mode === 'track' ? 'track' : 'off',
@@ -81,14 +125,19 @@ export class MusicController {
 
   getPreferenceTracks() { return this.provider.getPreferenceTracks() }
 
-  async playUri(uri: string, contextUri?: string, queueUris?: string[], targetTrack?: MusicTrack) {
+  async playUri(uri: string, contextUri?: string, targetTrack?: MusicTrack, navigationQueue?: MusicTrack[]) {
     const previous = this.state
+    const previousNavigationQueue = this.#navigationQueue
+    // Saved Tracks has no Spotify context URI. Keep its navigation list in the controller while
+    // still submitting one exact URI to Spotify, preserving both selection accuracy and controls.
+    this.#navigationQueue = navigationQueue?.length ? navigationQueue : []
+    await extensionStorage.setNavigationQueue(this.#navigationQueue)
     this.#pendingTrackUri = uri
     // Reflect the user's target immediately. Spotify may emit a paused snapshot of the previous
     // song while transferring devices; handleHostEvent ignores that stale snapshot below.
     if (targetTrack) await this.update({ track: targetTrack, progressMs: 0, durationMs: targetTrack.durationMs, isPlaying: false, error: null })
     try {
-      await this.provider.playUri(uri, contextUri, queueUris)
+      await this.provider.playUri(uri, contextUri)
       await this.update({ ...(targetTrack ? { track: targetTrack, durationMs: targetTrack.durationMs } : {}), progressMs: 0, isPlaying: true, availability: 'ready', error: null })
       setTimeout(() => void this.refreshFromProvider(), 500)
       setTimeout(() => {
@@ -98,6 +147,8 @@ export class MusicController {
       }, 5_000)
     } catch (error) {
       this.#pendingTrackUri = null
+      this.#navigationQueue = previousNavigationQueue
+      await extensionStorage.setNavigationQueue(previousNavigationQueue)
       const message = readablePlaybackError(error)
       await this.replace({ ...previous, availability: playbackAvailabilityFor(message), error: message })
       throw error

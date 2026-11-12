@@ -21,3 +21,5 @@ Spotify OAuth 与 REST API 都内聚在 `src/providers/spotify/`；Content 与 O
 
 UI 按产品能力拆分：`content/` 只注入 Shadow DOM，`mori/` 管理角色与手势，`player/` 管理播放和歌单，`chat/` 管理对话，`settings/` 管理 Mori 内部设置。`options/` 只承担 OAuth 与 Playback Host 等技术配置。
 
+播放控制遵循 `UI → RuntimeRequest → MusicController → MusicProvider`。UI 不直接调用 Spotify；耗时的播放/切歌请求先快速确认，最终结果通过 PlaybackState 广播。普通歌单使用 Spotify context，Saved Tracks 的前后导航队列保存在 `chrome.storage.session`，进度拖动只在松手时提交一次 seek。
+

@@ -50,6 +50,12 @@ export const extensionStorage = {
     return (result[STORAGE_KEYS.playback] as PlaybackState | undefined) ?? null
   },
   setPlayback: (value: PlaybackState) => chrome.storage.session.set({ [STORAGE_KEYS.playback]: value }),
+  async getNavigationQueue(): Promise<MusicTrack[]> {
+    const result = await chrome.storage.session.get(STORAGE_KEYS.navigationQueue)
+    return (result[STORAGE_KEYS.navigationQueue] as MusicTrack[] | undefined) ?? []
+  },
+  setNavigationQueue: (value: MusicTrack[]) => chrome.storage.session.set({ [STORAGE_KEYS.navigationQueue]: value }),
+  removeNavigationQueue: () => chrome.storage.session.remove(STORAGE_KEYS.navigationQueue),
   async getLibraryCache(): Promise<SpotifyLibraryCache> {
     const result = await chrome.storage.session.get(STORAGE_KEYS.libraryCache)
     const cache = result[STORAGE_KEYS.libraryCache] as SpotifyLibraryCache | undefined

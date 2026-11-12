@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { MoriCharacter } from './MoriCharacter'
 import { MiniPlayer, PlayerCard } from '../player/PlayerCard'
-import { INITIAL_PLAYBACK_STATE, type ConversationMessage, type MusicMemory, type MusicPlaylist, type MusicPreferenceAnalysisState, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
+import { INITIAL_PLAYBACK_STATE, type ConversationMessage, type MusicMemory, type MusicMomentInput, type MusicPlaylist, type MusicPreferenceAnalysisState, type MusicTrack, type PlaybackMode, type PlaybackState } from '@mori/domain'
 import type { TabMessage } from '../shared/messages'
 import { sendRuntimeRequest } from '../shared/runtime-client'
 
@@ -156,6 +156,11 @@ export function MoriPresence() {
     catch (error) { setPlayback((state) => ({ ...state, error: error instanceof Error ? error.message : '切歌失败' })); throw error }
   }
 
+  async function seekPlayback(positionMs: number) {
+    try { await sendRuntimeRequest({ type: 'MORI_SEEK_PLAYBACK', positionMs }) }
+    catch (error) { setPlayback((state) => ({ ...state, error: error instanceof Error ? error.message : '无法调整播放进度' })); throw error }
+  }
+
   async function setPlaybackMode(mode: PlaybackMode) {
     try { await sendRuntimeRequest({ type: 'MORI_SET_PLAYBACK_MODE', mode }) }
     catch (error) { setPlayback((state) => ({ ...state, error: error instanceof Error ? error.message : '无法切换播放模式' })); throw error }
@@ -166,8 +171,8 @@ export function MoriPresence() {
     setMessages(result.messages)
   }
 
-  async function saveMemory() {
-    await sendRuntimeRequest({ type: 'MORI_SAVE_MEMORY' })
+  async function saveMemory(moment: MusicMomentInput) {
+    await sendRuntimeRequest({ type: 'MORI_SAVE_MEMORY', moment })
   }
 
   async function getPlaylists() {
@@ -190,7 +195,7 @@ export function MoriPresence() {
     return result.playlists
   }
 
-  async function playUri(track: MusicTrack, contextUri?: string, queueUris?: string[]) { await sendRuntimeRequest({ type: 'MORI_PLAY_URI', track, contextUri, queueUris }) }
+  async function playUri(track: MusicTrack, contextUri?: string, navigationQueue?: MusicTrack[]) { await sendRuntimeRequest({ type: 'MORI_PLAY_URI', track, contextUri, navigationQueue }) }
 
   async function getMusicPreference() {
     return sendRuntimeRequest<MusicPreferenceAnalysisState>({ type: 'MORI_GET_MUSIC_PREFERENCE' })
@@ -215,8 +220,8 @@ export function MoriPresence() {
     </button>
     {panelMode !== 'closed' && <div ref={panelRef} className="panel-positioner" style={panelStyle ?? { visibility: 'hidden' }}>
       {panelMode === 'mini'
-        ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSaveMemory={saveMemory} onOpenSettings={() => { setSettingsOpen(true); setPanelMode('full') }} onExpand={() => { setSettingsOpen(false); setPanelMode('full') }} />
-        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onClose={closeMori} onToggle={togglePlayback} onCommand={command} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
+        ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSeek={seekPlayback} onSaveMemory={saveMemory} onOpenSettings={() => { setSettingsOpen(true); setPanelMode('full') }} onExpand={() => { setSettingsOpen(false); setPanelMode('full') }} />
+        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onClose={closeMori} onToggle={togglePlayback} onCommand={command} onSeek={seekPlayback} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
     </div>}
   </div>
 }

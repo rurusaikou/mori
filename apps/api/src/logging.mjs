@@ -97,6 +97,7 @@ function describe(entry) {
     'spotify/playback_host_ready': () => 'Spotify 播放设备已准备就绪。',
     'playback/track_changed': () => `开始播放《${safe(entry.title)}》— ${safe(entry.artist)}。`,
     'user_event/presence_toggled': () => `用户${entry.visible ? '显示' : '隐藏'}了 Mori。`,
+    'user_event/mori_closed': () => `用户通过${entry.source === 'toolbar' ? '工具栏' : entry.source === 'panel' ? '面板' : '未知入口'}关闭了 Mori${entry.playbackStopped === false ? '；播放暂停失败' : ''}。`,
     'user_event/presence_moved': () => '用户移动了 Mori 的悬浮位置。',
     'user_event/mori_connect_spotify': () => '用户点击连接 Spotify。',
     'user_event/mori_disconnect_spotify': () => '用户点击断开 Spotify。',
@@ -108,7 +109,7 @@ function describe(entry) {
     'user_event/playback_mode_changed': () => `用户将播放模式切换为 ${safe(entry.mode)}。`,
     'user_event/track_selected': () => `用户选择播放歌曲 ${safe(entry.uri)}。`,
     'user_event/chat_submitted': () => `用户提交对话：“${safe(entry.text)}”。`,
-    'memory/moment_saved': () => `音乐瞬间已保存${entry.track?.title ? `，歌曲《${safe(entry.track.title)}》` : ''}。`,
+    'memory/moment_saved': () => `音乐瞬间已保存${entry.track?.title ? `，歌曲《${safe(entry.track.title)}》` : ''}${entry.mood ? `，心情“${moodName(entry.mood)}”` : ''}。`,
     'conversation/message_exchange': () => `对话完成：用户“${safe(entry.userText)}”，Mori“${safe(entry.moriText)}”。`,
     'extension/content_contexts_reinjected': () => `扩展更新后已恢复 ${entry.restoredTabs}/${entry.attemptedTabs} 个网页。`,
     'extension/content_reinjection_failed': () => `扩展网页恢复失败：${safe(entry.error)}。`,
@@ -122,6 +123,10 @@ function describe(entry) {
 
 function reason(value) {
   return ({ network: '网络异常', server_error: '服务端异常', network_retries_exhausted: '网络重试已耗尽', server_retries_exhausted: '服务端重试已耗尽' })[value] ?? safe(value)
+}
+
+function moodName(value) {
+  return ({ calm: '平静', happy: '开心', healing: '治愈', moved: '感动', nostalgic: '怀念', low: '低落' })[value] ?? safe(value)
 }
 
 function metrics(entry) {

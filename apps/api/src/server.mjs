@@ -32,7 +32,7 @@ const handleMusicProfileRoute = createMusicProfileRoute(analyzeMusicProfile)
 const handleCapabilityRequest = createCapabilityRoutes(createCapabilityRegistry())
 const agentLlm = createCapabilityLlm()
 const handleAgentRequest = createAgentRoutes({
-  productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library' }),
+  productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library', resolveMusicFeatures: (isrc) => featureStore.get(isrc) }),
   playgroundAgent: createMoriAgent(agentLlm),
 })
 

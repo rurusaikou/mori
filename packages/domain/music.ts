@@ -45,12 +45,13 @@ export type MusicProvider = {
   toggle(current: PlaybackState): Promise<void>
   next(): Promise<void>
   previous(): Promise<void>
+  seek(positionMs: number): Promise<void>
   setPlaybackMode(mode: PlaybackMode): Promise<void>
   getUserPlaylists(): Promise<MusicPlaylist[]>
   getPlaylistTracks(playlistId: string): Promise<MusicTrack[]>
   hasLibraryCache(playlistId?: string): Promise<boolean>
   refreshLibrary(): Promise<MusicPlaylist[]>
-  playUri(uri: string, contextUri?: string, queueUris?: string[]): Promise<void>
+  playUri(uri: string, contextUri?: string): Promise<void>
   getPreferenceTracks(): Promise<MusicTrack[]>
 }
 

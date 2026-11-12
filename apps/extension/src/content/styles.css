@@ -50,8 +50,7 @@ button, input { font: inherit; }
 .expanded-track-info > strong, .expanded-track-info > small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .expanded-track-info > strong { font-size: 13px; }
 .expanded-track-info > small { margin-top: 4px; color: rgb(255 255 255 / 48%); font-size: 9px; }
-.expanded-player .playback-progress { position: relative; inset: auto; height: 4px; margin-top: 10px; border-radius: 999px; }
-.expanded-player .playback-progress > span { border-radius: 999px; }
+.expanded-player .playback-progress { position: relative; inset: auto; margin-top: 10px; }
 .expanded-controls { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .expanded-controls > button, .expanded-controls .playback-mode-control, .expanded-controls .playback-mode-control > button { width: 30px; height: 30px; }
 .expanded-controls > button { display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; font-size: 11px; cursor: pointer; }
@@ -96,7 +95,6 @@ button, input { font: inherit; }
 .conversation p { width: fit-content; max-width: 84%; margin: 0 0 7px; padding: 7px 10px; border-radius: 11px; color: rgb(255 255 255 / 90%); font-size: 10px; line-height: 1.45; }
 .conversation .mori { background: rgb(185 149 255 / 13%); }
 .conversation .user { margin-left: auto; background: linear-gradient(135deg, #7544d6, #6337c5); }
-.conversation .pending { opacity: .82; }
 .conversation .thinking { display: flex; align-items: center; gap: 3px; color: rgb(255 255 255 / 58%); }
 .conversation .thinking span { margin-right: 2px; }
 .conversation .thinking i { width: 3px; height: 3px; border-radius: 50%; background: #c18aff; animation: chat-thinking 900ms ease-in-out infinite; }
@@ -114,7 +112,8 @@ button, input { font: inherit; }
 
 .moment-list { height: 100%; overflow: auto; padding-right: 3px; scrollbar-width: thin; scrollbar-color: rgb(185 149 255 / 45%) transparent; }
 .moment-card { position: relative; margin-bottom: 7px; padding: 9px; border: 1px solid rgb(255 255 255 / 7%); border-radius: 12px; background: rgb(255 255 255 / 5%); }
-.moment-card time { display: block; margin-bottom: 8px; color: #aa9bbb; font-size: 9px; }
+.moment-card time { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: #aa9bbb; font-size: 9px; }
+.moment-card time b { padding: 2px 6px; border-radius: 999px; background: rgb(178 112 244 / 12%); color: #c69afa; font-size: 8px; font-weight: 600; }
 .moment-track { display: flex; align-items: center; gap: 9px; }
 .moment-track img, .moment-track .media-placeholder { width: 34px; height: 34px; flex: none; border-radius: 8px; object-fit: cover; }
 .moment-track strong { font-size: 10px; }
@@ -124,6 +123,21 @@ button, input { font: inherit; }
 .empty-state > span { display: grid; place-items: center; width: 54px; height: 54px; margin-bottom: 13px; border-radius: 17px; background: rgb(170 108 255 / 14%); color: #bd8eff; font-size: 24px; }
 .empty-state strong { color: rgb(255 255 255 / 82%); font-size: 13px; }
 .empty-state p { margin: 7px 0 0; font-size: 10px; line-height: 1.55; }
+
+.moment-composer-backdrop { position: absolute; z-index: 20; inset: 0; display: grid; place-items: center; padding: 18px; background: rgb(10 7 22 / 72%); backdrop-filter: blur(5px); }
+.moment-composer { width: 100%; max-width: 280px; padding: 15px; border: 1px solid rgb(215 177 255 / 18%); border-radius: 16px; background: linear-gradient(155deg, rgb(43 32 72 / 99%), rgb(25 21 48 / 99%)); box-shadow: 0 18px 45px rgb(5 3 17 / 48%); }
+.moment-composer header { display: flex; align-items: center; justify-content: space-between; }
+.moment-composer header > span { display: flex; align-items: center; gap: 7px; }
+.moment-composer header b { color: #c688ff; font-size: 14px; }.moment-composer header strong { color: rgb(255 255 255 / 92%); font-size: 13px; }
+.moment-composer header button { width: 25px; height: 25px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: rgb(255 255 255 / 50%); font-size: 18px; cursor: pointer; }
+.moment-composer > p { margin: 13px 0 9px; color: rgb(255 255 255 / 64%); font-size: 10px; }
+.moment-moods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.moment-moods button { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 0 6px; border: 1px solid rgb(255 255 255 / 7%); border-radius: 10px; background: rgb(255 255 255 / 4%); color: rgb(255 255 255 / 62%); font-size: 9px; cursor: pointer; }
+.moment-moods button span { color: #c48ef9; font-size: 12px; }.moment-moods button.active { border-color: rgb(198 139 255 / 30%); background: rgb(151 84 222 / 22%); color: #fff; }
+.moment-composer > input { box-sizing: border-box; width: 100%; height: 32px; margin-top: 9px; padding: 0 10px; border: 1px solid rgb(255 255 255 / 8%); border-radius: 9px; outline: none; background: rgb(8 7 18 / 24%); color: rgb(255 255 255 / 84%); font-size: 9px; }
+.moment-composer > input:focus { border-color: rgb(190 129 248 / 40%); }.moment-composer > input::placeholder { color: rgb(255 255 255 / 32%); }
+.moment-confirm { width: 100%; height: 32px; margin-top: 9px; border: 0; border-radius: 999px; background: linear-gradient(135deg, #c697f7, #9f68e8); color: #28163f; font-size: 9.5px; font-weight: 700; cursor: pointer; }
+.moment-confirm:disabled, .moment-composer button:disabled { opacity: .42; cursor: default; }
 
 .settings-panel { min-height: 0; overflow: auto; padding: 7px 12px 14px; scrollbar-width: thin; scrollbar-color: rgb(185 149 255 / 45%) transparent; }
 .settings-group { margin-bottom: 14px; }
@@ -235,8 +249,11 @@ button, input { font: inherit; }
 .insight-feedback > p { margin: 6px 0 0; color: rgb(225 208 242 / 45%); font-size: 7px; text-align: center; }
 
 
-.playback-progress { position: absolute; left: 0; right: 0; top: -1px; height: 2px; overflow: hidden; background: rgb(255 255 255 / 8%); }
-.playback-progress > span { display: block; height: 100%; border-radius: 0 999px 999px 0; background: linear-gradient(90deg, #8c50e1, #cf9dff); box-shadow: 0 0 7px rgb(190 128 255 / 70%); transition: width 300ms linear; }
+.playback-progress { --playback-progress: 0%; position: absolute; left: 0; right: 0; top: -1px; width: 100%; height: 4px; margin: 0; padding: 0; border: 0; border-radius: 999px; appearance: none; background: linear-gradient(90deg, #a563ed 0 var(--playback-progress), rgb(255 255 255 / 9%) var(--playback-progress) 100%); cursor: pointer; }
+.playback-progress::-webkit-slider-thumb { width: 10px; height: 10px; border: 1px solid rgb(255 255 255 / 72%); border-radius: 50%; appearance: none; background: #f4e8ff; box-shadow: 0 0 6px rgb(190 128 255 / 48%); }
+.playback-progress::-moz-range-thumb { width: 10px; height: 10px; border: 1px solid rgb(255 255 255 / 72%); border-radius: 50%; background: #f4e8ff; box-shadow: 0 0 6px rgb(190 128 255 / 48%); }
+.playback-progress:focus-visible { outline: 2px solid rgb(202 150 255 / 72%); outline-offset: 3px; }
+.playback-progress:disabled { cursor: default; opacity: .55; }
 .playback-mode-control > button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; font-size: 10px; cursor: pointer; }
 .playback-mode-control > button:hover { background: rgb(255 255 255 / 8%); }
 .playback-mode-control > button:disabled { opacity: .48; cursor: wait; }
@@ -256,8 +273,7 @@ button, input { font: inherit; }
 .mini-track strong, .mini-track small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mini-track strong { color: #fff; font-size: 13px; }
 .mini-track small { margin-top: 4px; color: rgb(255 255 255 / 48%); font-size: 9px; }
-.mini-player > .playback-progress { position: relative; inset: auto; height: 4px; margin: 0 14px; border-radius: 999px; }
-.mini-player > .playback-progress > span { border-radius: 999px; }
+.mini-player > .playback-progress { position: relative; inset: auto; width: calc(100% - 28px); margin: 0 14px; }
 .mini-controls { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px 12px; }
 .mini-controls button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; font-size: 11px; cursor: pointer; }
 .mini-controls button:hover { background: rgb(255 255 255 / 8%); }
