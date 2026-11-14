@@ -4,6 +4,7 @@
  * 输出：统一 RuntimeResponse、状态持久化操作，以及向标签页广播的业务状态。
  */
 import { getCompanionData, saveMusicMemory, sendCompanionMessage } from '../companion/companion-service'
+import { syncListeningTransition } from '../companion/memory-client'
 import type { RuntimeRequest, RuntimeResponse, TabMessage } from '../shared/messages'
 import { broadcastTabMessage } from '../shared/tab-messaging'
 import { extensionStorage } from '../storage/extension-storage'
@@ -15,6 +16,7 @@ import { logError, logInfo } from './logger'
 const music = new MusicController()
 const presence = new PresenceController()
 let lastToolbarClickAt = 0
+let pendingListeningSource: 'user_selected' | 'agent_selected' | 'autoplay' | 'unknown' = 'unknown'
 // Content scripts normally share chrome.storage access with extension pages. Restricting both
 // stores makes OAuth tokens, conversations and memories inaccessible from the host-page context.
 const storageSecured = Promise.all([
@@ -105,6 +107,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
       case 'MORI_PLAY_URI':
         // Device/DRM initialization can take several seconds. Acknowledge the click now and
         // publish the eventual playback state or specific error through MusicController.
+        pendingListeningSource = 'user_selected'
         void music.playUri(message.track.uri, message.contextUri, message.track, message.navigationQueue).catch((error) => console.error('Failed to play Spotify URI:', error))
         return { accepted: true }
       case 'MORI_GET_COMPANION_DATA':
@@ -114,6 +117,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         // listening/play request; ordinary conversation should stay fast and avoid Spotify quota.
         const catalog = hasMusicArrangementIntent(message.text) ? await getAgentMusicCatalog() : []
         const messages = await sendCompanionMessage(message.text, music.state, catalog, async (track) => {
+          pendingListeningSource = 'agent_selected'
           await music.playUri(track.uri, undefined, track)
           logInfo('conversation', 'agent_track_played', { uri: track.uri, title: track.title, artist: track.artist })
         }, broadcastCompanionData)
@@ -150,7 +154,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         // Playback events are privileged state updates. Accept them only from Mori's own
         // offscreen document, never from a content script that shares runtime messaging.
         if (sender.url !== chrome.runtime.getURL('src/offscreen/offscreen.html')) throw new Error('拒绝非播放服务发送的状态事件')
-        await music.handleHostEvent(message.event)
+        {
+          const previous = music.state
+          await music.handleHostEvent(message.event)
+          const source = pendingListeningSource
+          if (previous.track?.uri !== music.state.track?.uri && music.state.track) pendingListeningSource = 'unknown'
+          void syncListeningTransition(previous, music.state, source).catch((error) => logError('memory', 'listening_sync_failed', error))
+        }
         return { accepted: true }
       default:
         return null

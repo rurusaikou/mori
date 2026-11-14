@@ -26,6 +26,17 @@ test('searches mock memory and makes a final model call', async () => {
   assert.equal(result.trace.find((step) => step.type === 'TOOL_RESULT').data.result.matches[0].id, 'm1')
 })
 
+test('formal agent searches the injected user-scoped memory repository', async () => {
+  let searchInput
+  let calls = 0
+  const repository = { available: true, search: async (input) => { searchInput = input; return [{ id: 'server-memory', content: '用户常在晚间听克制的人声作品' }] } }
+  const result = await createMoriAgent(async () => ++calls === 1
+    ? response({ action: 'tool', reason: '需要记忆', response: null, toolCall: { name: 'search_memory', arguments: { query: '晚间听歌' } } })
+    : response({ response: '你以前更常在晚间选择克制的人声作品。' }), { memoryRepository: repository, memoryUserId: 'user-1' }).execute(base)
+  assert.equal(result.success, true)
+  assert.deepEqual(searchInput, { userId: 'user-1', query: '晚间听歌', limit: 5 })
+})
+
 test('gets manually supplied current track', async () => {
   let calls = 0
   const result = await createMoriAgent(async () => ++calls === 1

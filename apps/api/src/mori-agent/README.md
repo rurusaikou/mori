@@ -20,7 +20,7 @@ capabilities/*     各模块独立 Prompt、Schema、Service、Test
 lab/*              非生产环境调试页面
 agent/*            Agent V0.1 单次 Tool 闭环与状态
 tools/*            Memory、当前歌曲和按模式装配的音乐搜索 Tool
-memory/*           每次 Run 隔离的请求内 Repository
+memory/*           Mock 与 PostgreSQL/pgvector Repository、Embedding Provider、Memory Graph
 playground/*       独立 Agent Playground
 ```
 
@@ -71,3 +71,31 @@ Lab：`http://127.0.0.1:3211/capability-lab`
 Agent Playground：`http://127.0.0.1:3211/agent-playground`
 
 V0.1 Agent 最多调用一次 `search_memory`、`get_music_context` 或 `search_music`。Moment 没有注册为 Tool，Agent 无法主动创建 Moment。`search_music` 通过单一 `musicSearchMode` 装配：Playground=`mock`、正式聊天=`library`、禁用=`none`；正式模式由 composition root 注入 ISRC Feature Store 读取器，支持歌名/歌手匹配和已有逐曲特征的听感排序，但 Tool 本身不执行播放。Playground 使用 `/agent/playground/run`；Extension 使用经过 Origin 校验的 `/agent/run`。
+
+## 正式 Memory Repository
+
+正式链路在配置数据库后使用 PostgreSQL 保存事实、pgvector 进行语义检索，并用 `memory_nodes / memory_edges` 保存可追溯关系。未配置时 API 仍可启动，Playground 继续使用 Mock，正式 Agent 保持原有的请求内本地 Moment 摘要回退，但不会把这些摘要冒充已写入服务端的长期 Memory。
+
+```bash
+MORI_MEMORY_DATABASE_URL=postgresql://mori:password@127.0.0.1:5432/mori
+MORI_MEMORY_USER_ID=local-development-user
+
+# 可选：本地 Ollama Embedding。维度必须与模型真实输出一致。
+MORI_EMBEDDING_ENDPOINT=http://127.0.0.1:11434
+MORI_EMBEDDING_API_STYLE=ollama
+MORI_EMBEDDING_MODEL=nomic-embed-text
+MORI_EMBEDDING_DIMENSIONS=768
+```
+
+首次连接会执行 `memory/schema.sql`，数据库账号需要创建 `vector`、`pg_trgm` 扩展和表的权限。向量维度属于数据库 Schema，已有数据后不可只改环境变量；更换维度必须走显式迁移。
+
+服务端接口：
+
+- `GET /memory/health`：查看仓储与 pgvector 状态；
+- `POST /memory/moments`：接收用户主动保存的瞬间；
+- `POST /memory/events/listening`：接收播放开始、暂停、跳过和完成事实；
+- `GET /memory/memories`：列出当前用户尚未删除的长期记忆；
+- `DELETE /memory/memories/:id`：按用户边界软删除记忆并移出向量检索；
+- `POST /agent/run`：对话消息会在调用 LLM 前归档，成功后归档 Mori 回复并异步提炼候选记忆。
+
+`MORI_MEMORY_USER_ID` 是 V0.1 本地开发身份，只能由服务端环境变量提供。请求体中的 `userId` 会被忽略；正式多用户部署前必须替换为真实认证结果。

@@ -4,6 +4,8 @@ export type ConversationMessage = {
   id: string
   role: 'user' | 'mori'
   text: string
+  /** 客户端本地会话按自然日切分；可选用于兼容升级前已经保存的消息。 */
+  createdAt?: string
 }
 
 export type MusicMemory = {

@@ -25,7 +25,7 @@ export function createMoriAgent(llm, options = {}) {
       try {
         push('INPUT', input)
         const state = createAgentState(input)
-        const tools = createTools(state, musicSearchMode, resolveMusicFeatures)
+        const tools = createTools(state, musicSearchMode, resolveMusicFeatures, options.memoryRepository, options.memoryUserId)
         const context = contextForModel(state)
         push('CONTEXT_ASSEMBLY', context)
 
@@ -70,9 +70,11 @@ export function createMoriAgent(llm, options = {}) {
   }
 }
 
-function createTools(state, musicSearchMode, resolveMusicFeatures) {
-  const repository = createMockMemoryRepository(state.fakeMemory)
-  const tools = [createSearchMemoryTool(repository), createGetMusicContextTool(state)]
+function createTools(state, musicSearchMode, resolveMusicFeatures, memoryRepository, memoryUserId) {
+  // 正式 Agent 只在 composition root 注入服务端仓储；Playground 才读取 fakeMemory。
+  const usesServerMemory = Boolean(memoryRepository?.available && memoryUserId)
+  const repository = usesServerMemory ? memoryRepository : createMockMemoryRepository(state.fakeMemory)
+  const tools = [createSearchMemoryTool(repository, usesServerMemory ? { userId: memoryUserId } : undefined), createGetMusicContextTool(state)]
   // search_music remains useful for exercising Tool traces in Playground, but its Mock result must
   // never enter the formal product conversation as if it were a real music catalogue.
   if (musicSearchMode === 'library') tools.push(createSearchMusicTool(state.musicCatalog, resolveMusicFeatures))

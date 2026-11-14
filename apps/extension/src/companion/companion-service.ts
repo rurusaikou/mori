@@ -5,22 +5,20 @@
  */
 import type { ConversationMessage, MusicMemory, MusicMomentInput, MusicTrack, PlaybackState } from '@mori/domain'
 import { extensionStorage } from '../storage/extension-storage'
+import { syncMoment } from './memory-client'
 
 const musicMoods = new Set(['calm', 'happy', 'healing', 'moved', 'nostalgic', 'low'])
 
-const greeting: ConversationMessage = {
-  id: 'mori-welcome',
-  role: 'mori',
-  text: '我在。想聊聊现在听到的歌吗？',
-}
+const GREETING_ID = 'mori-welcome'
 
 export async function getCompanionData() {
   const [storedMessages, memories] = await Promise.all([extensionStorage.getConversation(), extensionStorage.getMemories()])
-  const messages = storedMessages.filter((message) => message.text?.trim())
-  // Earlier local-chat builds could persist empty replies. Remove those records once so the UI
-  // does not render blank bubbles and future Agent context is not polluted by empty turns.
+  const now = new Date()
+  const messages = storedMessages.filter((message) => message.text?.trim() && isSameLocalDay(message.createdAt, now))
+  // 浏览器只缓存当天会话。历史事实已经由服务端按自然日归档，不再回填聊天窗口。
+  // 没有 createdAt 的旧版消息无法可靠判断日期，因此升级后也按历史消息清理。
   if (messages.length !== storedMessages.length) await extensionStorage.setConversation(messages)
-  return { messages: messages.length ? messages : [greeting], memories }
+  return { messages: messages.length ? messages : [greeting(now)], memories }
 }
 
 export async function sendCompanionMessage(
@@ -33,7 +31,7 @@ export async function sendCompanionMessage(
   const value = text.trim()
   if (!value) throw new Error('请输入想和 Mori 说的话')
   const { messages, memories } = await getCompanionData()
-  const userMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'user', text: value }
+  const userMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'user', text: value, createdAt: new Date().toISOString() }
   // Persist the user's turn before waiting for a potentially slow local model. This makes the
   // message survive chat-tab unmounts, page navigation and service-worker suspension.
   const messagesWithUser = [...messages, userMessage].slice(-100)
@@ -55,7 +53,7 @@ export async function sendCompanionMessage(
       }
     }
   }
-  const moriMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'mori', text: reply }
+  const moriMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'mori', text: reply, createdAt: new Date().toISOString() }
   // Bound local history so long-lived profiles do not grow chrome.storage indefinitely before a
   // server-side conversation store exists.
   const next = [...messagesWithUser, moriMessage].slice(-100)
@@ -80,6 +78,8 @@ export async function saveMusicMemory(playback: PlaybackState, input: MusicMomen
   // limit without changing the UI contract.
   const next = [memory, ...memories].slice(0, 200)
   await extensionStorage.setMemories(next)
+  // 本地写入保证即时 UI；服务端是长期 Memory 事实库。网络失败不应让“记录瞬间”看起来失败。
+  void syncMoment(memory).catch((error) => console.error('Mori Memory moment sync failed:', error))
   return next
 }
 
@@ -99,9 +99,9 @@ async function requestAgentReply(
         userMessage,
         // Only the fields needed for conversation are sent. Spotify identifiers and artwork stay
         // inside the extension because the Agent has no reason to receive them.
-        currentTrack: playback.track ? { title: playback.track.title, artist: playback.track.artist } : null,
+        currentTrack: playback.track ? { uri: playback.track.uri, title: playback.track.title, artist: playback.track.artist } : null,
         conversationHistory: messages
-          .filter((message) => message.id !== greeting.id && message.text?.trim())
+          .filter((message) => message.id !== GREETING_ID && message.text?.trim())
           .slice(-12)
           .map((message) => ({ role: message.role === 'mori' ? 'assistant' : 'user', content: message.text.trim() })),
         // Moment remains user-created product data, never an Agent action. The Agent receives only
@@ -114,6 +114,7 @@ async function requestAgentReply(
         // The server receives a bounded, minimal catalogue and may only return one of these URIs.
         // OAuth credentials and playlist ownership remain inside the Extension.
         musicCatalog: musicCatalog.slice(0, 500).map((track) => ({ uri: track.uri, isrc: track.isrc, title: track.title, artist: track.artist })),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       }),
     })
     const result = await response.json() as {
@@ -134,4 +135,15 @@ async function requestAgentReply(
       ? `我暂时连不上理解服务，但还在陪你听《${playback.track.title}》。连接恢复后，我再认真回答你。`
       : '我暂时连不上理解服务，但我还在。连接恢复后，我们再继续聊。' }
   }
+}
+
+function greeting(now: Date): ConversationMessage {
+  return { id: GREETING_ID, role: 'mori', text: '我在。想聊聊现在听到的歌吗？', createdAt: now.toISOString() }
+}
+
+function isSameLocalDay(value: string | undefined, now: Date) {
+  if (!value) return false
+  const date = new Date(value)
+  if (Number.isNaN(date.valueOf())) return false
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
 }

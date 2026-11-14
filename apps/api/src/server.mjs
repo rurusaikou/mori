@@ -17,6 +17,10 @@ import { createMoriAgent } from './mori-agent/agent/mori-agent.mjs'
 import { createFeatureStore } from './services/feature-store.mjs'
 import { createMusicProfileService } from './services/music-profile.mjs'
 import { createMusicPortraitService } from './services/music-portrait.mjs'
+import { createEmbeddingProvider } from './mori-agent/memory/embedding-provider.mjs'
+import { createPostgresMemoryRepository } from './mori-agent/memory/postgres-repository.mjs'
+import { createMemoryRoutes } from './routes/memory.mjs'
+import { createMemoryCapability } from './mori-agent/capabilities/memory/memory.service.mjs'
 
 const port = Number(process.env.MORI_API_PORT || 3211)
 const dataDirectory = fileURLToPath(new URL('../data/', import.meta.url))
@@ -31,10 +35,24 @@ const analyzeMusicProfile = createMusicProfileService({
 const handleMusicProfileRoute = createMusicProfileRoute(analyzeMusicProfile)
 const handleCapabilityRequest = createCapabilityRoutes(createCapabilityRegistry())
 const agentLlm = createCapabilityLlm()
-const handleAgentRequest = createAgentRoutes({
-  productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library', resolveMusicFeatures: (isrc) => featureStore.get(isrc) }),
-  playgroundAgent: createMoriAgent(agentLlm),
+const memoryEmbedding = createEmbeddingProvider({ env: process.env })
+const memoryRepository = await createPostgresMemoryRepository({
+  connectionString: process.env.MORI_MEMORY_DATABASE_URL?.trim(),
+  embeddingProvider: memoryEmbedding,
+  logInfo,
+  logError,
 })
+// V0.1 暂无账号系统；开发身份必须由服务端环境变量固定，不能相信 Extension 请求体。
+const memoryUserId = process.env.MORI_MEMORY_USER_ID?.trim() || null
+const memoryCandidateCapability = createMemoryCapability(agentLlm)
+const handleAgentRequest = createAgentRoutes({
+  productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library', resolveMusicFeatures: (isrc) => featureStore.get(isrc), memoryRepository, memoryUserId }),
+  playgroundAgent: createMoriAgent(agentLlm),
+  memoryRepository,
+  memoryUserId,
+  detectMemoryCandidate: (input) => memoryCandidateCapability.execute(input),
+})
+const handleMemoryRequest = createMemoryRoutes({ repository: memoryRepository, userId: memoryUserId })
 
 createServer(async (request, response) => {
   const isDevelopmentAgentRoute = request.url?.startsWith('/agent-playground') || request.url === '/agent/playground/run'
@@ -46,6 +64,7 @@ createServer(async (request, response) => {
   if (!isAllowedOrigin(request)) { json(request, response, 403, { error: 'Origin is not allowed' }); return }
   if (request.method === 'OPTIONS') { json(request, response, 204, null); return }
   if (await handleAgentRequest(request, response)) return
+  if (await handleMemoryRequest(request, response)) return
   if (request.method === 'POST' && request.url === '/logs') { await handleLogsRoute(request, response); return }
   if (request.method === 'POST' && request.url === '/music-profile') { await handleMusicProfileRoute(request, response); return }
   json(request, response, 404, { error: 'Not found' })

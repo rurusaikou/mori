@@ -167,8 +167,19 @@ export function MoriPresence() {
   }
 
   async function send(text: string) {
-    const result = await sendRuntimeRequest<{ messages: ConversationMessage[] }>({ type: 'MORI_SEND_MESSAGE', text })
-    setMessages(result.messages)
+    const optimisticId = `pending-${crypto.randomUUID()}`
+    const optimisticMessage: ConversationMessage = { id: optimisticId, role: 'user', text, createdAt: new Date().toISOString() }
+    // Runtime/LLM 可能需要数十秒；发送页必须先显示用户原话，不能只留下“正在想”。
+    // 后台广播或最终响应随后用已持久化的正式消息列表替换这条临时记录。
+    setMessages((current) => [...current.filter((message) => message.id !== optimisticId), optimisticMessage])
+    try {
+      const result = await sendRuntimeRequest<{ messages: ConversationMessage[] }>({ type: 'MORI_SEND_MESSAGE', text })
+      setMessages(result.messages)
+    } catch (error) {
+      // 若后台已完成“用户消息先落库”并发出广播，正式 ID 会保留；只移除本页临时 ID。
+      setMessages((current) => current.filter((message) => message.id !== optimisticId))
+      throw error
+    }
   }
 
   async function saveMemory(moment: MusicMomentInput) {

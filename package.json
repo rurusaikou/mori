@@ -15,6 +15,7 @@
     "check": "tsc --noEmit && node scripts/build-extension.mjs && node scripts/build-playback-host.mjs"
   },
   "dependencies": {
+    "pg": "^8.23.1",
     "react": "^19",
     "react-dom": "^19"
   },

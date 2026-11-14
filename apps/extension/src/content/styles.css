@@ -95,12 +95,15 @@ button, input { font: inherit; }
 .conversation p { width: fit-content; max-width: 84%; margin: 0 0 7px; padding: 7px 10px; border-radius: 11px; color: rgb(255 255 255 / 90%); font-size: 10px; line-height: 1.45; }
 .conversation .mori { background: rgb(185 149 255 / 13%); }
 .conversation .user { margin-left: auto; background: linear-gradient(135deg, #7544d6, #6337c5); }
+.conversation .typing-caret { display: inline-block; margin-left: 1px; color: #c792ff; animation: typing-caret 650ms ease-in-out infinite; }
 .conversation .thinking { display: flex; align-items: center; gap: 3px; color: rgb(255 255 255 / 58%); }
 .conversation .thinking span { margin-right: 2px; }
 .conversation .thinking i { width: 3px; height: 3px; border-radius: 50%; background: #c18aff; animation: chat-thinking 900ms ease-in-out infinite; }
 .conversation .thinking i:nth-of-type(2) { animation-delay: 120ms; }
 .conversation .thinking i:nth-of-type(3) { animation-delay: 240ms; }
 .conversation .chat-error { background: rgb(212 84 114 / 14%); color: #f1a9ca; }
+@keyframes typing-caret { 50% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .conversation .typing-caret { display: none; animation: none; } }
 .chat-form { display: flex; gap: 8px; padding-top: 8px; }
 .chat-form input { min-width: 0; height: 34px; flex: 1; border: 1px solid rgb(220 198 255 / 24%); border-radius: 999px; padding: 0 12px; outline: none; background: rgb(255 255 255 / 5%); color: #fff; font-size: 10px; }
 .chat-form input:focus { border-color: #ae7bf4; box-shadow: 0 0 0 3px rgb(174 123 244 / 12%); }
