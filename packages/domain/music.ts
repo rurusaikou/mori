@@ -16,6 +16,8 @@ export type MusicTrack = {
   artwork?: string
   durationMs: number
   isPlayable?: boolean
+  /** 仅用于 Agent 本次候选溯源，不改变 Spotify 播放语义。 */
+  catalogSource?: 'user_library' | 'spotify_search'
 }
 
 export type MusicPlaylist = {
@@ -53,6 +55,7 @@ export type MusicProvider = {
   refreshLibrary(): Promise<MusicPlaylist[]>
   playUri(uri: string, contextUri?: string): Promise<void>
   getPreferenceTracks(): Promise<MusicTrack[]>
+  searchTracks(query: string, limit?: number): Promise<MusicTrack[]>
 }
 
 export const INITIAL_PLAYBACK_STATE: PlaybackState = {

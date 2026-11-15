@@ -72,6 +72,8 @@ Agent Playground：`http://127.0.0.1:3211/agent-playground`
 
 V0.1 Agent 最多调用一次 `search_memory`、`get_music_context` 或 `search_music`。Moment 没有注册为 Tool，Agent 无法主动创建 Moment。`search_music` 通过单一 `musicSearchMode` 装配：Playground=`mock`、正式聊天=`library`、禁用=`none`；正式模式由 composition root 注入 ISRC Feature Store 读取器，支持歌名/歌手匹配和已有逐曲特征的听感排序，但 Tool 本身不执行播放。Playground 使用 `/agent/playground/run`；Extension 使用经过 Origin 校验的 `/agent/run`。
 
+正式选歌遵循固定顺序：Extension 先遍历并缓存用户收藏与可读歌单，歌名/歌手命中时只把个人曲库结果交给 Agent；本地没有文字命中时才调用 Spotify Search，并为每个候选标记 `user_library` 或 `spotify_search` 来源。Agent 只能播放这批可信候选中的 URI，不能执行模型自行生成的 URI。
+
 ## 正式 Memory Repository
 
 正式链路在配置数据库后使用 PostgreSQL 保存事实、pgvector 进行语义检索，并用 `memory_nodes / memory_edges` 保存可追溯关系。未配置时 API 仍可启动，Playground 继续使用 Mock，正式 Agent 保持原有的请求内本地 Moment 摘要回退，但不会把这些摘要冒充已写入服务端的长期 Memory。

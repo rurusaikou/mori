@@ -93,15 +93,17 @@ function mergeUsage(first, second) { if (!first && !second) return null; return 
 // play request into text-only advice after the candidate catalogue has already arrived.
 function hasListeningIntent(text) { return /想听|播放|放一首|来一首|来点|安排.{0,4}(歌|音乐)|听.{0,6}(歌|音乐|的)/u.test(text) }
 function clientAction(toolResult) {
-  const track = toolResult?.source === 'user_library' ? toolResult.results?.[0] : null
-  return track?.uri ? { type: 'play_track', track } : null
+  const track = ['user_library', 'spotify_search'].includes(toolResult?.source) ? toolResult.results?.[0] : null
+  return track?.uri ? { type: 'play_track', track: { uri: track.uri, title: track.title, artist: track.artist } } : null
 }
 function safeToolResponse(toolResult, modelResponse) {
   // A local model may offer to play or recommend something after the trusted library search found
   // nothing. No candidate means no executable URI, so use a deterministic response rather than
   // letting fluent text imply an action Mori cannot perform.
-  if (toolResult?.source === 'user_library' && !toolResult.results?.length) {
-    return '你的曲库里暂时没有找到符合这个条件的歌曲。可以换个歌手、歌名或听感描述再试试。'
+  if (toolResult?.searchScope && !toolResult.results?.length) {
+    return toolResult.searchScope === 'library_then_spotify'
+      ? '我先查了你的曲库，也尝试了 Spotify 搜索，但暂时没有找到符合这个条件的歌曲。可以换个歌手、歌名或听感描述再试试。'
+      : '你的曲库里暂时没有找到符合这个条件的歌曲。可以换个歌手、歌名或听感描述再试试。'
   }
   return modelResponse
 }

@@ -7,7 +7,7 @@ import { INITIAL_PLAYBACK_STATE, type MusicPlaylist, type MusicProvider, type Mu
 import type { PlaybackHostRequest, RuntimeResponse } from '../../shared/messages'
 import { extensionStorage } from '../../storage/extension-storage'
 import { connectSpotify, disconnectSpotify, getValidAccessToken } from './spotify-auth'
-import { canAccessPlaylist, getAvailableDevices, getPlaylistTracks as fetchPlaylistTracks, getRemotePlayback, getUserPlaylists as fetchUserPlaylists, LIKED_TRACKS_ID, nextPlayback, pausePlayback, previousPlayback, seekPlayback, setRepeat, setShuffle, startPlayback, transferPlayback } from './spotify-web-api'
+import { canAccessPlaylist, getAvailableDevices, getPlaylistTracks as fetchPlaylistTracks, getRemotePlayback, getUserPlaylists as fetchUserPlaylists, LIKED_TRACKS_ID, nextPlayback, pausePlayback, previousPlayback, searchTracks as searchSpotifyTracks, seekPlayback, setRepeat, setShuffle, startPlayback, transferPlayback } from './spotify-web-api'
 
 const OFFSCREEN_PATH = 'src/offscreen/offscreen.html'
 const LIBRARY_CACHE_TTL_MS = 60 * 60 * 1_000
@@ -209,6 +209,8 @@ export class SpotifyMusicProvider implements MusicProvider {
     }
     return [...unique.values()]
   }
+
+  async searchTracks(query: string, limit = 10) { return searchSpotifyTracks(query, limit) }
 
   private async getRandomLibraryTrack() {
     const playlists = shuffled(await this.getUserPlaylists()).filter((playlist) => playlist.isAccessible !== false && playlist.trackCount > 0)

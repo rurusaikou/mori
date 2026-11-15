@@ -139,6 +139,24 @@ export async function getPlaylistTracks(playlistId: string): Promise<MusicTrack[
   return tracks
 }
 
+export async function searchTracks(query: string, limit = 10): Promise<MusicTrack[]> {
+  const value = query.trim()
+  if (!value) return []
+  const result = await spotifyFetch<{ tracks?: { items?: SpotifyPlaylistTrack[] } }>(`/search?q=${encodeURIComponent(value)}&type=track&limit=${Math.max(1, Math.min(limit, 20))}`)
+  return (result?.tracks?.items ?? [])
+    .filter((track) => track.uri && !track.is_local && track.is_playable !== false && !track.restrictions)
+    .map((track) => ({
+      uri: track.uri,
+      isrc: track.external_ids?.isrc,
+      title: track.name,
+      artist: track.artists?.map((artist) => artist.name).join('、') || '',
+      artwork: track.album?.images?.[0]?.url,
+      durationMs: track.duration_ms,
+      isPlayable: true,
+      catalogSource: 'spotify_search',
+    }))
+}
+
 export const transferPlayback = (deviceId: string, play = false) => spotifyFetch<never>('/me/player', {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device_ids: [deviceId], play }),
 })

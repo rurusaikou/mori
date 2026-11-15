@@ -113,7 +113,7 @@ async function requestAgentReply(
         })),
         // The server receives a bounded, minimal catalogue and may only return one of these URIs.
         // OAuth credentials and playlist ownership remain inside the Extension.
-        musicCatalog: musicCatalog.slice(0, 500).map((track) => ({ uri: track.uri, isrc: track.isrc, title: track.title, artist: track.artist })),
+        musicCatalog: musicCatalog.slice(0, 500).map((track) => ({ uri: track.uri, isrc: track.isrc, title: track.title, artist: track.artist, catalogSource: track.catalogSource })),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       }),
     })

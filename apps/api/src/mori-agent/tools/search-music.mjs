@@ -7,12 +7,14 @@ export function createSearchMusicTool(catalog = null, resolveFeatures = null) {
   const productMode = Array.isArray(catalog)
   return {
     name: 'search_music',
-    description: productMode ? '在用户可播放曲库中搜索歌曲；命中后由 Extension 播放首个结果' : '搜索歌曲、艺人或相关音乐信息',
+    description: productMode ? '优先在用户曲库候选中搜索；曲库未命中时可使用 Extension 提供的 Spotify Search 候选，命中后播放首个结果' : '搜索歌曲、艺人或相关音乐信息',
     async execute(args) {
       const query = requiredQuery(args)
-      return productMode
-        ? { query, source: 'user_library', results: searchCatalog(catalog, query, resolveFeatures) }
-        : { query, source: 'mock', results: mockResults(query) }
+      if (productMode) {
+        const results = searchCatalog(catalog, query, resolveFeatures)
+        return { query, source: results[0]?.catalogSource ?? 'user_library', searchScope: catalog.some((track) => track.catalogSource === 'spotify_search') ? 'library_then_spotify' : 'user_library', results }
+      }
+      return { query, source: 'mock', results: mockResults(query) }
     },
   }
 }
@@ -22,7 +24,11 @@ function searchCatalog(catalog, query, resolveFeatures) {
   const terms = query.toLocaleLowerCase().split(/[\s·、，,《》「」]+/u).filter(Boolean)
   if (terms.length && terms.every((term) => /^(任意|随便|随机|一首|歌曲?|音乐|安排)$/u.test(term))) return catalog.slice(0, 5)
   return catalog
-    .map((track) => ({ track, score: scoreTrack(track, terms, query) + scoreFeatures(resolveFeatures?.(track.isrc), query) }))
+    .map((track) => {
+      const baseScore = scoreTrack(track, terms, query) + scoreFeatures(resolveFeatures?.(track.isrc), query)
+      // 来源加权只能解决两个已匹配候选的先后顺序，不能让无关的曲库歌曲凭空命中。
+      return { track, score: baseScore > 0 ? baseScore + (track.catalogSource === 'user_library' ? 0.5 : 0) : 0 }
+    })
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score)
     .slice(0, 5)

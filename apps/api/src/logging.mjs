@@ -122,6 +122,8 @@ function describe(entry) {
     'memory/listening_graph_refresh_failed': () => `听歌事实已保存，但频繁收听关系刷新失败：${safe(entry.error)}。`,
     'memory/memory_deleted': () => entry.deleted ? '用户记忆已软删除，不再参与检索。' : '未找到需要删除的用户记忆。',
     'conversation/message_exchange': () => `对话完成：用户“${safe(entry.userText)}”，Mori“${safe(entry.moriText)}”。`,
+    'conversation/music_search_catalog_ready': () => `选歌候选已准备：个人曲库共 ${entry.libraryTracks ?? 0} 首，本地命中 ${entry.libraryMatches ?? 0} 首${entry.spotifyFallback ? `；本地未命中，已请求 Spotify Search，返回 ${entry.spotifyMatches ?? 0} 首` : '；未请求 Spotify Search'}。查询：“${safe(entry.query)}”。`,
+    'conversation/spotify_search_failed': () => `个人曲库未命中后请求 Spotify Search 失败：${safe(entry.error)}。查询：“${safe(entry.query)}”。`,
     'extension/content_contexts_reinjected': () => `扩展更新后已恢复 ${entry.restoredTabs}/${entry.attemptedTabs} 个网页。`,
     'extension/content_reinjection_failed': () => `扩展网页恢复失败：${safe(entry.error)}。`,
     'runtime/request_failed': () => `扩展请求 ${safe(entry.type)} 处理失败：${safe(entry.error)}。`,

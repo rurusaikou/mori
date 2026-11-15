@@ -125,6 +125,8 @@ export class MusicController {
 
   getPreferenceTracks() { return this.provider.getPreferenceTracks() }
 
+  searchTracks(query: string, limit = 10) { return this.provider.searchTracks(query, limit) }
+
   async playUri(uri: string, contextUri?: string, targetTrack?: MusicTrack, navigationQueue?: MusicTrack[]) {
     const previous = this.state
     const previousNavigationQueue = this.#navigationQueue

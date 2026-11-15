@@ -4,6 +4,7 @@
  * 输出：统一 RuntimeResponse、状态持久化操作，以及向标签页广播的业务状态。
  */
 import { getCompanionData, saveMusicMemory, sendCompanionMessage } from '../companion/companion-service'
+import type { MusicTrack } from '@mori/domain'
 import { syncListeningTransition } from '../companion/memory-client'
 import type { RuntimeRequest, RuntimeResponse, TabMessage } from '../shared/messages'
 import { broadcastTabMessage } from '../shared/tab-messaging'
@@ -115,7 +116,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
       case 'MORI_SEND_MESSAGE': {
         // Library hydration can page through many Spotify playlists. Do it only for an explicit
         // listening/play request; ordinary conversation should stay fast and avoid Spotify quota.
-        const catalog = hasMusicArrangementIntent(message.text) ? await getAgentMusicCatalog() : []
+        const catalog = hasMusicArrangementIntent(message.text) ? await getAgentMusicCatalog(message.text) : []
         const messages = await sendCompanionMessage(message.text, music.state, catalog, async (track) => {
           pendingListeningSource = 'agent_selected'
           await music.playUri(track.uri, undefined, track)
@@ -191,18 +192,61 @@ async function closeMoriEverywhere(source: 'toolbar' | 'panel') {
   logInfo('user_event', 'mori_closed', { source, playbackStopped: !music.state.isPlaying })
 }
 
-async function getAgentMusicCatalog() {
+async function getAgentMusicCatalog(userText: string) {
+  // getPreferenceTracks 会遍历并缓存完整收藏/歌单；返回值本身只是听感排序所需的代表样本。
+  // 先完成这一步，避免“已经缓存过一张歌单”导致其他个人曲库内容永远不参与精确搜索。
+  const preferenceSample = await music.getPreferenceTracks()
   const cache = await extensionStorage.getLibraryCache()
-  const unique = new Map<string, (typeof cache.tracks)[string]['data'][number]>()
+  const library = new Map<string, MusicTrack>()
   for (const entry of Object.values(cache.tracks)) {
-    for (const track of entry.data) if (track.uri && track.isPlayable !== false) unique.set(track.uri, track)
+    for (const track of entry.data) if (track.uri && track.isPlayable !== false) library.set(track.uri, { ...track, catalogSource: 'user_library' })
   }
-  // A fresh install may not have opened a playlist yet. Reuse the existing bounded library sampler
-  // once to populate enough real candidates instead of silently falling back to fabricated search.
-  if (!unique.size) {
-    for (const track of await music.getPreferenceTracks()) if (track.uri && track.isPlayable !== false) unique.set(track.uri, track)
+  const query = musicSearchQuery(userText)
+  const exactLibraryMatches = rankTextMatches([...library.values()], query).slice(0, 30)
+  if (exactLibraryMatches.length) {
+    logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.size, libraryMatches: exactLibraryMatches.length, spotifyFallback: false, spotifyMatches: 0 })
+    return exactLibraryMatches
   }
-  return [...unique.values()].slice(0, 500)
+
+  // 个人曲库没有歌名/歌手命中时才访问 Spotify Search。代表样本仍随请求发送，
+  // 让“有节奏、安静”等听感请求优先由用户自己的曲库特征匹配。
+  const localSample = preferenceSample
+    .filter((track) => track.uri && track.isPlayable !== false)
+    .map((track) => ({ ...track, catalogSource: 'user_library' as const }))
+  let spotifyMatches: MusicTrack[] = []
+  try { spotifyMatches = await music.searchTracks(query, 10) }
+  catch (error) { logError('conversation', 'spotify_search_failed', error, { query }) }
+  const combined = new Map<string, MusicTrack>()
+  // Agent 请求上限为 500；为兜底结果预留位置，避免大型曲库样本把 Spotify 命中截掉。
+  for (const track of localSample.slice(0, Math.max(0, 500 - spotifyMatches.length))) combined.set(track.uri, track)
+  for (const track of spotifyMatches) combined.set(track.uri, track)
+  logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.size, libraryMatches: 0, spotifyFallback: true, spotifyMatches: spotifyMatches.length })
+  return [...combined.values()].slice(0, 500)
+}
+
+function musicSearchQuery(text: string) {
+  const stripped = text
+    .replace(/[《》「」“”]/gu, ' ')
+    .replace(/(?:我)?(?:想要听|想听|要听|播放|放一首|来一首|来点|帮我找|给我放)/gu, ' ')
+    .replace(/(?:的)?(?:歌曲?|音乐)$/u, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  return stripped || text.trim()
+}
+
+function rankTextMatches(tracks: MusicTrack[], query: string) {
+  const normalized = query.toLocaleLowerCase()
+  const terms = normalized.split(/[\s·、，,]+/u).filter((term) => term.length > 1)
+  return tracks
+    .map((track) => {
+      const title = track.title.toLocaleLowerCase(); const artist = track.artist.toLocaleLowerCase()
+      const score = (title && normalized.includes(title) ? 12 : 0) + (artist && normalized.includes(artist) ? 10 : 0)
+        + terms.reduce((sum, term) => sum + (title.includes(term) ? 6 : 0) + (artist.includes(term) ? 5 : 0), 0)
+      return { track, score }
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .map((item) => item.track)
 }
 
 function hasMusicArrangementIntent(text: string) {

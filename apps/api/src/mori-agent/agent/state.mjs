@@ -26,5 +26,6 @@ function conversationItem(value) { object(value, 'conversation item'); if (!['us
 function memoryItem(value, index) { object(value, `fakeMemory[${index}]`); return { id: value.id ? String(value.id) : `memory-${index + 1}`, content: text(value.content, `fakeMemory[${index}].content`), ...(value.context ? { context: String(value.context) } : {}) } }
 function catalogItem(value, index) {
   object(value, `musicCatalog[${index}]`)
-  return { uri: text(value.uri, `musicCatalog[${index}].uri`), ...(value.isrc ? { isrc: String(value.isrc).replaceAll('-', '').toUpperCase() } : {}), title: text(value.title, `musicCatalog[${index}].title`), artist: text(value.artist, `musicCatalog[${index}].artist`) }
+  const catalogSource = value.catalogSource === 'spotify_search' ? 'spotify_search' : 'user_library'
+  return { uri: text(value.uri, `musicCatalog[${index}].uri`), ...(value.isrc ? { isrc: String(value.isrc).replaceAll('-', '').toUpperCase() } : {}), title: text(value.title, `musicCatalog[${index}].title`), artist: text(value.artist, `musicCatalog[${index}].artist`), catalogSource }
 }

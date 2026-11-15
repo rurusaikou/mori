@@ -76,6 +76,20 @@ test('returns a validated play action for a track found in the supplied library'
   assert.deepEqual(result.action, { type: 'play_track', track: { uri: 'spotify:track:real-track', title: '言不由衷', artist: '徐佳莹' } })
 })
 
+test('accepts a trusted Spotify fallback candidate when the user library did not match', async () => {
+  let calls = 0
+  const result = await createMoriAgent(async () => ++calls === 1
+    ? response({ action: 'tool', reason: '搜索指定歌曲', response: null, toolCall: { name: 'search_music', arguments: { query: '言不由衷' } } })
+    : response({ response: '你的曲库没有这首歌，我从 Spotify 找到了，给你播放。' }), { musicSearchMode: 'library' }).execute({
+      ...base,
+      userMessage: '我想听言不由衷',
+      musicCatalog: [{ uri: 'spotify:track:external', title: '言不由衷', artist: '徐佳莹', catalogSource: 'spotify_search' }],
+    })
+  assert.equal(result.success, true)
+  assert.deepEqual(result.action, { type: 'play_track', track: { uri: 'spotify:track:external', title: '言不由衷', artist: '徐佳莹' } })
+  assert.equal(result.trace.find((step) => step.type === 'TOOL_RESULT').data.result.source, 'spotify_search')
+})
+
 test('ranks a playable library track from natural-language feature intent', async () => {
   let calls = 0
   const features = new Map([
