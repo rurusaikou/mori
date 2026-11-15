@@ -55,7 +55,7 @@ function describeStage(entry) {
 }
 
 function capabilityName(value) {
-  return ({ memory: '记忆候选检测', understanding: '用户表达理解', connection: '历史关联发现', reflection: '旧理解反思', companionship: '陪伴行动决策', agent_v0_1: 'Mori Agent V0.1' })[value] ?? value
+  return ({ memory: '记忆候选检测', understanding: '用户表达理解', connection: '历史关联发现', reflection: '旧理解反思', companionship: '陪伴行动决策', conversation_agent: 'Mori 对话 Agent' })[value] ?? value
 }
 function eventData(entry) { const { timestamp, runId, capability, promptVersion, model, stage, ...data } = entry; return data }
 function tokens(value) { return value?.total_tokens ?? value?.totalTokens ?? '—' }

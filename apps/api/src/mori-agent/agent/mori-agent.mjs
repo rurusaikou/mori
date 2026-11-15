@@ -10,6 +10,7 @@ import { createMockMemoryRepository } from '../memory/mock-repository.mjs'
 import { createSearchMemoryTool } from '../tools/search-memory.mjs'
 import { createGetMusicContextTool } from '../tools/get-music-context.mjs'
 import { createSearchMusicTool } from '../tools/search-music.mjs'
+import { createGetTrackInsightTool } from '../tools/get-track-insight.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 
@@ -20,12 +21,12 @@ export function createMoriAgent(llm, options = {}) {
   return {
     async execute(input) {
       const runId = randomUUID(); const started = Date.now(); const trace = []
-      const logRun = { runId, capability: 'agent_v0_1', promptVersion: MORI_AGENT_PROMPT_VERSION, model: 'unresolved' }
+      const logRun = { runId, capability: 'conversation_agent', promptVersion: MORI_AGENT_PROMPT_VERSION, model: 'unresolved' }
       const push = (type, data) => { const step = agentStep(runId, type, data); trace.push(step); capabilityStage(logRun, `agent_${type.toLowerCase()}`, data); return step }
       try {
         push('INPUT', input)
         const state = createAgentState(input)
-        const tools = createTools(state, musicSearchMode, resolveMusicFeatures, options.memoryRepository, options.memoryUserId)
+        const tools = createTools(state, musicSearchMode, resolveMusicFeatures, options.memoryRepository, options.memoryUserId, options.songUnderstandingAgent)
         const context = contextForModel(state)
         push('CONTEXT_ASSEMBLY', context)
 
@@ -70,11 +71,12 @@ export function createMoriAgent(llm, options = {}) {
   }
 }
 
-function createTools(state, musicSearchMode, resolveMusicFeatures, memoryRepository, memoryUserId) {
+function createTools(state, musicSearchMode, resolveMusicFeatures, memoryRepository, memoryUserId, songUnderstandingAgent) {
   // 正式 Agent 只在 composition root 注入服务端仓储；Playground 才读取 fakeMemory。
   const usesServerMemory = Boolean(memoryRepository?.available && memoryUserId)
   const repository = usesServerMemory ? memoryRepository : createMockMemoryRepository(state.fakeMemory)
   const tools = [createSearchMemoryTool(repository, usesServerMemory ? { userId: memoryUserId } : undefined), createGetMusicContextTool(state)]
+  if (songUnderstandingAgent) tools.push(createGetTrackInsightTool(state, songUnderstandingAgent))
   // search_music remains useful for exercising Tool traces in Playground, but its Mock result must
   // never enter the formal product conversation as if it were a real music catalogue.
   if (musicSearchMode === 'library') tools.push(createSearchMusicTool(state.musicCatalog, resolveMusicFeatures))

@@ -2,7 +2,7 @@
 
 Mori 是悬浮在浏览器中的 AI 音乐知音伙伴。Spotify 是当前 Music Provider；Mori 提供跨网页常驻角色、播放控制、歌单浏览、对话和经用户允许保存的音乐记忆。
 
-文档入口：产品边界见 [PRODUCT.md](docs/PRODUCT.md)，系统架构见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)，代码导航见 [CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md)，运行逻辑见 [IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。Agent 闭环见 [MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md](docs/MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md)，独立 Capability 见 [MORI_AGENT_V0_IMPLEMENTATION_2026-11-08.md](docs/MORI_AGENT_V0_IMPLEMENTATION_2026-11-08.md)。
+文档入口：产品边界见 [PRODUCT.md](docs/PRODUCT.md)，系统架构见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)，代码导航见 [CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md)，运行逻辑见 [IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。Conversation Agent 闭环见 [MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md](docs/MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md)，歌曲四层理解见 [MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md](docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md)，独立 Capability 见 [MORI_AGENT_V0_IMPLEMENTATION_2026-11-08.md](docs/MORI_AGENT_V0_IMPLEMENTATION_2026-11-08.md)。
 
 本仓库按前端应用、后端边界和共享包分类，不再包含 Electron、Desktop UI、Soloist 或 Next.js 应用。
 
@@ -83,5 +83,5 @@ Content Script 不读取 Spotify DOM，也不持有 OAuth Token。Background 是
 
 ## 文档
 
-`docs/` 保存本地开发文档，按“产品定义 → 系统边界 → 代码位置 → 实现流程 → 第三方约束”分层；该目录不纳入版本控制。API 运行配置和调试入口集中在 [apps/api/README.md](apps/api/README.md)，避免在根 README 重复维护环境变量细节。
+`docs/` 按三类管理：`PRODUCT / ARCHITECTURE / CODE_STRUCTURE / IMPLEMENTATION` 是入口文档；`MORI_AGENT_*` 和 `MORI_SONG_*` 是模块设计；带 `RESEARCH / AUDIT / GUIDE` 的文件是调研与历史决策。当前正在实施的模块文档进入版本控制，其余本地研究资料默认忽略。API 运行配置和调试入口集中在 [apps/api/README.md](apps/api/README.md)，避免在根 README 重复维护环境变量细节。
 

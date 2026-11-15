@@ -99,7 +99,7 @@ async function requestAgentReply(
         userMessage,
         // Only the fields needed for conversation are sent. Spotify identifiers and artwork stay
         // inside the extension because the Agent has no reason to receive them.
-        currentTrack: playback.track ? { uri: playback.track.uri, title: playback.track.title, artist: playback.track.artist } : null,
+        currentTrack: playback.track ? { uri: playback.track.uri, isrc: playback.track.isrc, title: playback.track.title, artist: playback.track.artist } : null,
         conversationHistory: messages
           .filter((message) => message.id !== GREETING_ID && message.text?.trim())
           .slice(-12)

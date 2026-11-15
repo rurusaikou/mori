@@ -80,6 +80,7 @@ export class SpotifyMusicProvider implements MusicProvider {
       durationMs: remote.item.duration_ms,
       track: {
         uri: remote.item.uri,
+        isrc: remote.item.external_ids?.isrc,
         title: remote.item.name,
         artist: remote.item.artists?.map((artist) => artist.name).join('、') || '',
         artwork: remote.item.album?.images?.[0]?.url,

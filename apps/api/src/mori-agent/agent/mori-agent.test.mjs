@@ -45,6 +45,25 @@ test('gets manually supplied current track', async () => {
   assert.equal(result.trace.find((step) => step.type === 'TOOL_RESULT').data.result.track.title, '测试歌曲')
 })
 
+test('delegates song meaning questions to the Song Understanding Agent', async () => {
+  let calls = 0
+  let analyzedTrack
+  const songUnderstandingAgent = { analyze: async (track) => {
+    analyzedTrack = track
+    return { integratedInsight: '声音推进明显；歌词主题资料暂缺。', missingLayers: ['lyrics', 'creation', 'reception'], sound: { available: true }, lyrics: { available: false } }
+  } }
+  const result = await createMoriAgent(async () => ++calls === 1
+    ? response({ action: 'tool', reason: '需要歌曲四层证据', response: null, toolCall: { name: 'get_track_insight', arguments: { query: '为什么是这种感觉' } } })
+    : response({ response: '从声音上能确认它有推进感；但我还没有可靠歌词资料，不想凭歌名猜。' }), { songUnderstandingAgent }).execute({
+      ...base,
+      userMessage: '为什么这首歌让我觉得很压抑？',
+      currentTrack: { uri: 'spotify:track:1', isrc: 'TEST-ISRC', title: '测试歌曲', artist: '测试歌手' },
+    })
+  assert.equal(result.success, true)
+  assert.equal(analyzedTrack.isrc, 'TESTISRC')
+  assert.equal(result.trace.find((step) => step.type === 'TOOL_RESULT').data.result.insight.missingLayers[0], 'lyrics')
+})
+
 test('returns mock music search result', async () => {
   let calls = 0
   const result = await createMoriAgent(async () => ++calls === 1

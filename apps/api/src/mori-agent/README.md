@@ -4,11 +4,15 @@ AI Agent 通用能力与当前代码的逐项映射、正式链路接入状态�
 
 当前优先建设的 Memory 模块，其职责、数据契约、阶段计划及评判标准见 [Mori Agent Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md)。
 
+歌曲四层理解与 Conversation Agent 的协作契约见 [Mori Song Understanding Agent V0.1](../../../../docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md)。
+Conversation、Song Understanding 与 Memory 的全部已知不足统一记录在该文档“缺口台账”，不要在代码注释或新文档中重复维护 TODO 清单。
+
 ## 职责与边界
 
-该目录包含两套复用同一 LLM transport 和日志设施、但不互相调用的运行单元：
+该目录包含三类复用同一 LLM transport、但职责不同的运行单元：
 
-- Agent：`Context → Decision → Optional Tool → Final Response`，服务正式聊天和 Playground；
+- Conversation Agent：`Context → Decision → Optional Tool → Final Response`，服务正式聊天和 Playground；
+- Song Understanding Agent：由 `get_track_insight` 受控委派，输出歌曲四层公共知识，不直接面向用户；
 - Capability：五个独立 `Input → Structured Output` 模块，仅供 Lab/单独 API 调试，尚未编排进 Agent。
 
 ```text
@@ -18,8 +22,9 @@ shared/llm         Responses API Structured Outputs transport
 shared/logger      中文可读阶段日志与 Lab 内存 Debug Store
 capabilities/*     各模块独立 Prompt、Schema、Service、Test
 lab/*              非生产环境调试页面
-agent/*            Agent V0.1 单次 Tool 闭环与状态
-tools/*            Memory、当前歌曲和按模式装配的音乐搜索 Tool
+agent/*            Conversation Agent 单次 Tool 闭环与状态
+tools/*            Agent 间边界、Memory、当前歌曲和音乐搜索 Tool
+song-understanding 独立歌曲理解 Agent、四层 Schema、Provider 与缓存
 memory/*           Mock 与 PostgreSQL/pgvector Repository、Embedding Provider、Memory Graph
 playground/*       独立 Agent Playground
 ```
@@ -27,15 +32,15 @@ playground/*       独立 Agent Playground
 依赖方向必须保持：
 
 ```text
-API Route ──→ Agent ──→ Tool
-    │            └────→ Shared LLM / Logger
+API Route ──→ Conversation Agent ──→ Tool ──→ Song Understanding Agent
+    │                    └─────────→ Shared LLM / Logger
     └──────→ Capability Registry → Capability Service
                                       ├── 自己的 Prompt
                                       ├── 自己的 Types/Schema
                                       └── Shared Executor / LLM / Logger
 ```
 
-Capability 之间禁止直接 import，Agent 也不直接调用 Capability。未来编排层只能通过公开执行接口组合它们。
+Capability 之间禁止直接 import。Conversation Agent 只能通过 Tool 使用其他运行单元，不能 import Song Understanding 内部 Provider；这样 Trace、超时、证据边界和替换实现都有统一入口。
 
 ## 单模块修改
 
@@ -70,7 +75,7 @@ Lab：`http://127.0.0.1:3211/capability-lab`
 
 Agent Playground：`http://127.0.0.1:3211/agent-playground`
 
-V0.1 Agent 最多调用一次 `search_memory`、`get_music_context` 或 `search_music`。Moment 没有注册为 Tool，Agent 无法主动创建 Moment。`search_music` 通过单一 `musicSearchMode` 装配：Playground=`mock`、正式聊天=`library`、禁用=`none`；正式模式由 composition root 注入 ISRC Feature Store 读取器，支持歌名/歌手匹配和已有逐曲特征的听感排序，但 Tool 本身不执行播放。Playground 使用 `/agent/playground/run`；Extension 使用经过 Origin 校验的 `/agent/run`。
+Conversation Agent 每次最多调用一次 `search_memory`、`get_music_context`、`get_track_insight` 或 `search_music`。Moment 没有注册为 Tool，Agent 无法主动创建 Moment。`get_track_insight` 只在正式 composition root 注入；Playground 不连接外部歌曲证据源。`search_music` 通过 `musicSearchMode` 装配：Playground=`mock`、正式聊天=`library`、禁用=`none`。Playground 使用 `/agent/playground/run`；Extension 使用经过 Origin 校验的 `/agent/run`。
 
 正式选歌遵循固定顺序：Extension 先遍历并缓存用户收藏与可读歌单，歌名/歌手命中时只把个人曲库结果交给 Agent；本地没有文字命中时才调用 Spotify Search，并为每个候选标记 `user_library` 或 `spotify_search` 来源。Agent 只能播放这批可信候选中的 URI，不能执行模型自行生成的 URI。
 

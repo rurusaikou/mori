@@ -21,6 +21,8 @@ import { createEmbeddingProvider } from './mori-agent/memory/embedding-provider.
 import { createPostgresMemoryRepository } from './mori-agent/memory/postgres-repository.mjs'
 import { createMemoryRoutes } from './routes/memory.mjs'
 import { createMemoryCapability } from './mori-agent/capabilities/memory/memory.service.mjs'
+import { createSongUnderstandingAgent } from './mori-agent/song-understanding/song-understanding-agent.mjs'
+import { createSongEvidenceProviders } from './mori-agent/song-understanding/providers.mjs'
 
 const port = Number(process.env.MORI_API_PORT || 3211)
 const dataDirectory = fileURLToPath(new URL('../data/', import.meta.url))
@@ -45,8 +47,15 @@ const memoryRepository = await createPostgresMemoryRepository({
 // V0.1 暂无账号系统；开发身份必须由服务端环境变量固定，不能相信 Extension 请求体。
 const memoryUserId = process.env.MORI_MEMORY_USER_ID?.trim() || null
 const memoryCandidateCapability = createMemoryCapability(agentLlm)
+const songUnderstandingAgent = createSongUnderstandingAgent({
+  llm: agentLlm,
+  resolveFeatures: (isrc) => featureStore.get(isrc),
+  providers: createSongEvidenceProviders(),
+  logInfo,
+  logError,
+})
 const handleAgentRequest = createAgentRoutes({
-  productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library', resolveMusicFeatures: (isrc) => featureStore.get(isrc), memoryRepository, memoryUserId }),
+  productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library', resolveMusicFeatures: (isrc) => featureStore.get(isrc), memoryRepository, memoryUserId, songUnderstandingAgent }),
   playgroundAgent: createMoriAgent(agentLlm),
   memoryRepository,
   memoryUserId,

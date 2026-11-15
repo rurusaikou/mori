@@ -5,8 +5,7 @@
  */
 import { object, text } from './executor.mjs'
 
-export const AGENT_VERSION = 'mori-agent-v0.1'
-export const TOOL_NAMES = ['search_memory', 'get_music_context', 'search_music']
+export const TOOL_NAMES = ['search_memory', 'get_music_context', 'get_track_insight', 'search_music']
 
 export const AGENT_DECISION_SCHEMA = {
   type: 'object',

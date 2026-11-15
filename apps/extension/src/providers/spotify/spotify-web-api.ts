@@ -15,6 +15,7 @@ type SpotifyPlayback = {
     uri: string
     name: string
     duration_ms: number
+    external_ids?: { isrc?: string }
     artists?: { name: string }[]
     album?: { images?: { url: string }[] }
   }
