@@ -7,14 +7,32 @@ import { noExtra, object, text } from '../shared/executor.mjs'
 
 export function createAgentState(input) {
   object(input)
-  noExtra(input, ['userMessage', 'currentTrack', 'conversationHistory', 'fakeMemory', 'musicCatalog', 'timeZone'], 'Agent input')
+  noExtra(input, ['userMessage', 'currentTrack', 'playbackState', 'worldState', 'conversationHistory', 'fakeMemory', 'musicCatalog', 'timeZone'], 'Agent input')
   const userMessage = text(input.userMessage, 'userMessage')
   const currentTrack = optionalTrack(input.currentTrack)
   const conversationHistory = Array.isArray(input.conversationHistory) ? input.conversationHistory.map(conversationItem) : []
   const fakeMemory = Array.isArray(input.fakeMemory) ? input.fakeMemory.map(memoryItem) : []
-  const musicCatalog = Array.isArray(input.musicCatalog) ? input.musicCatalog.slice(0, 500).map(catalogItem) : []
+  const musicCatalog = normalizeMusicCatalog(input.musicCatalog)
   const timeZone = typeof input.timeZone === 'string' && input.timeZone.trim() ? input.timeZone.trim() : 'UTC'
-  return Object.freeze({ userMessage, currentTrack, conversationHistory, fakeMemory, musicCatalog, timeZone })
+  const playbackState = normalizePlaybackState(input.playbackState, currentTrack)
+  const worldState = normalizeWorldState(input.worldState, timeZone)
+  return Object.freeze({ userMessage, currentTrack: playbackState.currentTrack, playbackState, worldState, conversationHistory, fakeMemory, musicCatalog, timeZone })
+}
+
+function normalizePlaybackState(value, legacyTrack) {
+  if (value === undefined) return Object.freeze({ status: legacyTrack ? 'paused' : 'none', currentTrack: legacyTrack })
+  object(value, 'playbackState')
+  const status = ['playing', 'paused', 'none'].includes(value.status) ? value.status : null
+  if (!status) throw new Error('playbackState.status 无效')
+  const currentTrack = optionalTrack(value.currentTrack)
+  if (status === 'none' && currentTrack) throw new Error('playbackState.status=none 时不能包含 currentTrack')
+  if (status !== 'none' && !currentTrack) throw new Error('播放或暂停状态必须包含 currentTrack')
+  return Object.freeze({ status, currentTrack, availability: typeof value.availability === 'string' ? value.availability : 'ready' })
+}
+function normalizeWorldState(value, timeZone) {
+  if (value === undefined) return Object.freeze({ timeZone })
+  object(value, 'worldState')
+  return Object.freeze({ timeZone: typeof value.timeZone === 'string' && value.timeZone.trim() ? value.timeZone.trim() : timeZone })
 }
 
 function optionalTrack(value) {
@@ -28,4 +46,21 @@ function catalogItem(value, index) {
   object(value, `musicCatalog[${index}]`)
   const catalogSource = value.catalogSource === 'spotify_search' ? 'spotify_search' : 'user_library'
   return { uri: text(value.uri, `musicCatalog[${index}].uri`), ...(value.isrc ? { isrc: String(value.isrc).replaceAll('-', '').toUpperCase() } : {}), title: text(value.title, `musicCatalog[${index}].title`), artist: text(value.artist, `musicCatalog[${index}].artist`), catalogSource }
+}
+
+function normalizeMusicCatalog(value) {
+  if (!Array.isArray(value)) return []
+  const catalog = []
+  for (const [index, item] of value.entries()) {
+    if (catalog.length >= 500) break
+    try {
+      catalog.push(catalogItem(item, index))
+    }
+    catch {
+      // Catalogue entries are optional search candidates, not playback facts. Spotify can return
+      // unavailable or partially removed tracks without artist metadata; discarding one candidate
+      // is safer than failing the user's entire conversation turn.
+    }
+  }
+  return catalog
 }

@@ -1,7 +1,7 @@
 /** Mock Repository 测试：确保搜索只返回相关项且不修改输入数据。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createMockMemoryRepository } from './mock-repository.mjs'
+import { createMockMemoryRepository } from '../../../src/mori-agent/memory/mock-repository.mjs'
 
 test('returns related mock memories in score order', () => {
   const source = [{ id: 'a', content: '旅行时听过这首歌', context: '毕业旅行' }, { id: 'b', content: '不喜欢吵闹音乐' }]

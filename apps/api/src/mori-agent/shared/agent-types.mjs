@@ -5,12 +5,16 @@
  */
 import { object, text } from './executor.mjs'
 
-export const TOOL_NAMES = ['search_memory', 'get_music_context', 'get_track_insight', 'search_music']
+export const TOOL_NAMES = ['search_memory', 'get_music_context', 'get_track_insight', 'search_music', 'recommend_music']
+export const INTENT_NAMES = ['CHAT', 'SEARCH', 'RECOMMEND', 'CONTROL', 'FEEDBACK']
+export const CONVERSATION_MOVES = ['ANSWER', 'FOLLOW_UP', 'ACKNOWLEDGE', 'CLARIFY', 'CONNECT', 'PLAYFUL']
 
 export const AGENT_DECISION_SCHEMA = {
   type: 'object',
   properties: {
     action: { type: 'string', enum: ['respond', 'tool'] },
+    intent: { type: 'string', enum: INTENT_NAMES },
+    conversationMove: { type: 'string', enum: CONVERSATION_MOVES },
     reason: { type: 'string' },
     response: { anyOf: [{ type: 'null' }, { type: 'string' }] },
     toolCall: {
@@ -22,8 +26,11 @@ export const AGENT_DECISION_SCHEMA = {
             name: { type: 'string', enum: TOOL_NAMES },
             arguments: {
               type: 'object',
-              properties: { query: { anyOf: [{ type: 'null' }, { type: 'string' }] } },
-              required: ['query'],
+              properties: {
+                query: { anyOf: [{ type: 'null' }, { type: 'string' }] },
+                excludeUris: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['query', 'excludeUris'],
               additionalProperties: false,
             },
           },
@@ -33,7 +40,7 @@ export const AGENT_DECISION_SCHEMA = {
       ],
     },
   },
-  required: ['action', 'reason', 'response', 'toolCall'],
+  required: ['action', 'intent', 'conversationMove', 'reason', 'response', 'toolCall'],
   additionalProperties: false,
 }
 
@@ -48,11 +55,13 @@ export function validateDecision(value) {
   object(value, 'model decision')
   if (!['respond', 'tool'].includes(value.action)) throw new Error('Agent decision action 无效')
   text(value.reason, 'decision.reason')
-  if (value.action === 'respond') return { action: 'respond', reason: value.reason, response: text(value.response, 'decision.response'), toolCall: null }
+  const intent = INTENT_NAMES.includes(value.intent) ? value.intent : null
+  const conversationMove = CONVERSATION_MOVES.includes(value.conversationMove) ? value.conversationMove : 'ANSWER'
+  if (value.action === 'respond') return { action: 'respond', intent, conversationMove, reason: value.reason, response: text(value.response, 'decision.response'), toolCall: null }
   const toolCall = object(value.toolCall, 'decision.toolCall')
   if (!TOOL_NAMES.includes(toolCall.name)) throw new Error(`Agent 请求了未注册 Tool：${toolCall.name}`)
   object(toolCall.arguments, 'decision.toolCall.arguments')
-  return { action: 'tool', reason: value.reason, response: null, toolCall }
+  return { action: 'tool', intent, conversationMove, reason: value.reason, response: null, toolCall: { ...toolCall, arguments: { ...toolCall.arguments, excludeUris: Array.isArray(toolCall.arguments.excludeUris) ? toolCall.arguments.excludeUris : [] } } }
 }
 
 export function validateFinalResponse(value) { return { response: text(object(value, 'final response').response, 'final response.response') } }

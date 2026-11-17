@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createSongUnderstandingAgent } from './song-understanding-agent.mjs'
-import { createTrackInsightRepository } from './insight-repository.mjs'
-import { createSongEvidenceProviders } from './providers.mjs'
-import { validateSongInsight } from './song-understanding.types.mjs'
+import { createSongUnderstandingAgent } from '../../../src/mori-agent/song-understanding/song-understanding-agent.mjs'
+import { createTrackInsightRepository } from '../../../src/mori-agent/song-understanding/insight-repository.mjs'
+import { createSongEvidenceProviders } from '../../../src/mori-agent/song-understanding/providers.mjs'
+import { validateSongInsight } from '../../../src/mori-agent/song-understanding/song-understanding.types.mjs'
 
 const layer = (extra = {}) => ({ available: false, summary: '', confidence: 0, sources: [], ...extra })
 const completeInsight = {

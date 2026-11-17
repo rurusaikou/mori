@@ -1,5 +1,5 @@
 /** Connection 行为测试：覆盖有效对比、延续、无关联、坏输入和人生解释边界。 */
-import assert from 'node:assert/strict'; import test from 'node:test'; import { createConnectionCapability } from './connection.service.mjs'
+import assert from 'node:assert/strict'; import test from 'node:test'; import { createConnectionCapability } from '../../../../src/mori-agent/capabilities/connection/connection.service.mjs'
 const input=(current='现在觉得一个人在外面生活其实也挺自由。',past='一个人在国外生活有时候挺孤独。')=>({current:{message:current},candidates:[{id:'m1',content:past}]})
 const yes={shouldConnect:true,connection:{pastEvidence:'过去觉得孤独',currentEvidence:'现在觉得自由',observation:'对独居感受可能出现变化',confidence:.82}}
 const run=(output,value=input())=>createConnectionCapability(async()=>({data:output,model:'test',tokenUsage:null})).execute(value)

@@ -10,10 +10,10 @@ export function createCapabilityExecutor({ capability, promptVersion, prompt, sc
   return {
     capability,
     promptVersion,
-    async execute(input) {
+    async execute(input, execution = {}) {
       const runId = randomUUID()
       const started = Date.now()
-      const run = { runId, capability, promptVersion, model: 'unresolved' }
+      const run = { runId, capability, promptVersion, model: 'unresolved', logSource: execution.logSource }
       capabilityStage(run, 'received', { input })
       try {
         // Prompt 不能替代边界校验：坏输入在消耗模型配额前就应失败。

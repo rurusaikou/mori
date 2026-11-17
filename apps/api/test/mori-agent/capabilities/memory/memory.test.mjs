@@ -1,5 +1,5 @@
 /** Memory 行为测试：覆盖长期经历、稳定偏好、命令、坏输入和临时状态边界。 */
-import assert from 'node:assert/strict'; import test from 'node:test'; import { createMemoryCapability } from './memory.service.mjs'
+import assert from 'node:assert/strict'; import test from 'node:test'; import { createMemoryCapability } from '../../../../src/mori-agent/capabilities/memory/memory.service.mjs'
 const candidate=(type='experience')=>({shouldCreate:true,candidate:{content:'长期信息',type,confidence:.9,evidence:'用户明确说“一直”'}})
 const run=(output,input)=>createMemoryCapability(async()=>({data:output,model:'test',tokenUsage:null})).execute(input)
 test('experience creates candidate',async()=>assert.equal((await run(candidate(),{userMessage:'我第一次听这首歌是在毕业旅行。'})).data.candidate.type,'experience'))

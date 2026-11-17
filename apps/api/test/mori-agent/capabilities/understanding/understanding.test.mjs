@@ -1,5 +1,5 @@
 /** Understanding 行为测试：验证事实/解释分层，并覆盖无依据心理推断边界。 */
-import assert from 'node:assert/strict'; import test from 'node:test'; import { createUnderstandingCapability } from './understanding.service.mjs'
+import assert from 'node:assert/strict'; import test from 'node:test'; import { createUnderstandingCapability } from '../../../../src/mori-agent/capabilities/understanding/understanding.service.mjs'
 const empty={facts:[],interpretations:[],unsupportedInferences:[]}; const item=(content)=>({content,confidence:.8,evidence:'用户原话'})
 const run=(output,input)=>createUnderstandingCapability(async()=>({data:output,model:'test',tokenUsage:null})).execute(input)
 test('separates fact and interpretation',async()=>{const r=await run({facts:[item('最近更喜欢安静音乐')],interpretations:[item('低刺激偏好可能增加')],unsupportedInferences:[]},{userMessage:'最近越来越喜欢这种安静的歌。'});assert.equal(r.data.facts.length,1)})

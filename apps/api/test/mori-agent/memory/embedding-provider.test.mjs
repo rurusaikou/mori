@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createEmbeddingProvider } from './embedding-provider.mjs'
+import { createEmbeddingProvider } from '../../../src/mori-agent/memory/embedding-provider.mjs'
 
 test('returns no provider when embedding is not configured', () => {
   assert.equal(createEmbeddingProvider({ env: {} }), null)

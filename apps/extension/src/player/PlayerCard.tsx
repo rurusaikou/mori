@@ -22,7 +22,7 @@ type Props = {
   settingsOpen: boolean
   onOpenSettings: () => void
   onCloseSettings: () => void
-  onClose: () => void
+  onCollapse: () => void
   onToggle: () => Promise<void>
   onCommand: (command: 'previous' | 'next') => Promise<void>
   onSeek: (positionMs: number) => Promise<void>
@@ -38,7 +38,7 @@ type Props = {
   onAnalyzeMusicPreference: () => Promise<MusicPreferenceProfile>
 }
 
-export function PlayerCard({ playback, spotifyConnected, messages, memories, settingsOpen, onOpenSettings, onCloseSettings, onClose, onToggle, onCommand, onSeek, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onHasLibraryCache, onRefreshLibrary, onGetPlaylistTracks, onPlayUri, onGetMusicPreference, onAnalyzeMusicPreference }: Props) {
+export function PlayerCard({ playback, spotifyConnected, messages, memories, settingsOpen, onOpenSettings, onCloseSettings, onCollapse, onToggle, onCommand, onSeek, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onHasLibraryCache, onRefreshLibrary, onGetPlaylistTracks, onPlayUri, onGetMusicPreference, onAnalyzeMusicPreference }: Props) {
   const [view, setView] = useState<View>('playlists')
   const [settingsView, setSettingsView] = useState<'settings' | 'preference'>('settings')
   const [preferenceView, setPreferenceView] = useState<MusicPreferenceView>('overview')
@@ -107,7 +107,7 @@ export function PlayerCard({ playback, spotifyConnected, messages, memories, set
         : <strong>Mori</strong>}
       <span className="card-header-actions">
         {!settingsOpen && <button type="button" className="settings-button" onClick={onOpenSettings} aria-label="打开 Mori 设置" title="设置"><SettingsIcon /></button>}
-        <button type="button" className="panel-close" onClick={onClose} aria-label="关闭 Mori 并停止播放" title="关闭 Mori">●</button>
+        <button type="button" className="panel-close" onClick={onCollapse} aria-label="收起 Mori 面板" title="收起面板">●</button>
       </span>
     </header>
     {settingsOpen ? <SettingsPanel spotifyConnected={spotifyConnected} getMusicPreference={onGetMusicPreference} analyzeMusicPreference={onAnalyzeMusicPreference} view={settingsView} preferenceView={preferenceView} onPreferenceViewChange={setPreferenceView} onOpenPreference={() => { setSettingsView('preference'); setPreferenceView('overview') }} /> : <><section className="expanded-player" aria-label="当前歌曲播放器">

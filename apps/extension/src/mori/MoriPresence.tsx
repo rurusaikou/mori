@@ -145,10 +145,11 @@ export function MoriPresence() {
     catch (error) { setPlayback((state) => ({ ...state, error: error instanceof Error ? error.message : '播放失败' })); setPanelMode('mini'); throw error }
   }
 
-  async function closeMori() {
-    // The backend owns the global Presence and playback state. Do not locally hide first: waiting
-    // for the command prevents one tab from appearing closed while other tabs are still active.
-    await sendRuntimeRequest<{ closed: true }>({ type: 'MORI_CLOSE' })
+  function collapsePanel() {
+    // 面板右上角只控制当前页的展开状态。全局 Presence 和播放由浏览器工具栏管理，
+    // 否则一个看似普通的收起按钮会让所有标签页的 Mori 消失并意外暂停音乐。
+    setSettingsOpen(false)
+    setPanelMode('closed')
   }
 
   async function command(command: 'previous' | 'next') {
@@ -232,7 +233,7 @@ export function MoriPresence() {
     {panelMode !== 'closed' && <div ref={panelRef} className="panel-positioner" style={panelStyle ?? { visibility: 'hidden' }}>
       {panelMode === 'mini'
         ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSeek={seekPlayback} onSaveMemory={saveMemory} onOpenSettings={() => { setSettingsOpen(true); setPanelMode('full') }} onExpand={() => { setSettingsOpen(false); setPanelMode('full') }} />
-        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onClose={closeMori} onToggle={togglePlayback} onCommand={command} onSeek={seekPlayback} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
+        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onCollapse={collapsePanel} onToggle={togglePlayback} onCommand={command} onSeek={seekPlayback} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
     </div>}
   </div>
 }

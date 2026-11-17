@@ -125,11 +125,12 @@ export async function getPlaylistTracks(playlistId: string): Promise<MusicTrack[
       // `item` is the current field; `track` keeps existing non-dev-mode apps compatible
       // during Spotify's endpoint migration window.
       const track = entry.item ?? entry.track
-      if (track?.uri) tracks.push({
+      const artist = track?.artists?.map((item) => item.name.trim()).filter(Boolean).join('、') ?? ''
+      if (track?.uri && track.name?.trim() && artist) tracks.push({
         uri: track.uri,
         isrc: track.external_ids?.isrc,
-        title: track.name,
-        artist: track.artists?.map((artist) => artist.name).join('、') || '',
+        title: track.name.trim(),
+        artist,
         artwork: track.album?.images?.[0]?.url,
         durationMs: track.duration_ms,
         isPlayable: !track.is_local && track.is_playable !== false && !track.restrictions,
@@ -145,12 +146,12 @@ export async function searchTracks(query: string, limit = 10): Promise<MusicTrac
   if (!value) return []
   const result = await spotifyFetch<{ tracks?: { items?: SpotifyPlaylistTrack[] } }>(`/search?q=${encodeURIComponent(value)}&type=track&limit=${Math.max(1, Math.min(limit, 20))}`)
   return (result?.tracks?.items ?? [])
-    .filter((track) => track.uri && !track.is_local && track.is_playable !== false && !track.restrictions)
+    .filter((track) => track.uri && track.name?.trim() && track.artists?.some((artist) => artist.name?.trim()) && !track.is_local && track.is_playable !== false && !track.restrictions)
     .map((track) => ({
       uri: track.uri,
       isrc: track.external_ids?.isrc,
-      title: track.name,
-      artist: track.artists?.map((artist) => artist.name).join('、') || '',
+      title: track.name.trim(),
+      artist: track.artists.map((artist) => artist.name.trim()).filter(Boolean).join('、'),
       artwork: track.album?.images?.[0]?.url,
       durationMs: track.duration_ms,
       isPlayable: true,

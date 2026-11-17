@@ -22,7 +22,7 @@ export function createCapabilityRoutes(registry, env = process.env) {
       if (!capability) { json(request, response, 404, { error: 'Unknown capability' }); return true }
       try {
         const input = await readRequestJson(request)
-        const result = await capability.execute(input)
+        const result = await capability.execute(input, { logSource: 'debug' })
         json(request, response, result.success ? 200 : 400, result)
       } catch (error) {
         json(request, response, error?.statusCode ?? 400, { success: false, error: error instanceof Error ? error.message : 'Invalid request' })

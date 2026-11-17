@@ -46,7 +46,14 @@ export async function sendCompanionMessage(
     const track = musicCatalog.find((item) => item.uri === agentResult.action?.track.uri)
     if (!track || !playTrack) reply = '我在你的曲库里找到了候选歌曲，但现在还不能启动播放。'
     else {
-      try { await playTrack(track) }
+      try {
+        await playTrack(track)
+        // API 只能选择可信候选，无法预知浏览器端播放是否成功。成功语气必须在
+        // Extension 完成真实播放动作之后生成，避免“说已播放但动作失败”。
+        reply = agentResult.action.intent === 'RECOMMEND'
+          ? `给你选了《${track.title}》— ${track.artist}，现在开始播放。`
+          : `找到了《${track.title}》— ${track.artist}，现在开始播放。`
+      }
       catch (error) {
         console.error('Agent playback action failed:', error)
         reply = `我找到了《${track.title}》，但这次没能启动播放。请检查 Spotify 设备后再试一次。`
@@ -100,6 +107,12 @@ async function requestAgentReply(
         // Only the fields needed for conversation are sent. Spotify identifiers and artwork stay
         // inside the extension because the Agent has no reason to receive them.
         currentTrack: playback.track ? { uri: playback.track.uri, isrc: playback.track.isrc, title: playback.track.title, artist: playback.track.artist } : null,
+        playbackState: {
+          status: playback.track ? (playback.isPlaying ? 'playing' : 'paused') : 'none',
+          currentTrack: playback.track ? { uri: playback.track.uri, isrc: playback.track.isrc, title: playback.track.title, artist: playback.track.artist } : null,
+          availability: playback.availability,
+        },
+        worldState: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
         conversationHistory: messages
           .filter((message) => message.id !== GREETING_ID && message.text?.trim())
           .slice(-12)
@@ -113,7 +126,12 @@ async function requestAgentReply(
         })),
         // The server receives a bounded, minimal catalogue and may only return one of these URIs.
         // OAuth credentials and playlist ownership remain inside the Extension.
-        musicCatalog: musicCatalog.slice(0, 500).map((track) => ({ uri: track.uri, isrc: track.isrc, title: track.title, artist: track.artist, catalogSource: track.catalogSource })),
+        // Cached Spotify entries may outlive a removed/unavailable track and lose metadata.
+        // Candidate corruption must not invalidate an otherwise normal conversation request.
+        musicCatalog: musicCatalog
+          .filter((track) => track.uri?.trim() && track.title?.trim() && track.artist?.trim())
+          .slice(0, 500)
+          .map((track) => ({ uri: track.uri, isrc: track.isrc, title: track.title.trim(), artist: track.artist.trim(), catalogSource: track.catalogSource })),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       }),
     })
@@ -121,7 +139,7 @@ async function requestAgentReply(
       success?: boolean
       finalResponse?: string
       error?: string
-      action?: { type: 'play_track'; track: { uri: string; title: string; artist: string } }
+      action?: { type: 'play_track'; intent?: 'SEARCH' | 'RECOMMEND'; track: { uri: string; title: string; artist: string } }
     }
     if (!response.ok || !result.success || !result.finalResponse?.trim()) throw new Error(result.error || `Agent HTTP ${response.status}`)
     return { reply: result.finalResponse.trim(), action: result.action }

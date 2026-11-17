@@ -7,11 +7,11 @@ export function createSearchMusicTool(catalog = null, resolveFeatures = null) {
   const productMode = Array.isArray(catalog)
   return {
     name: 'search_music',
-    description: productMode ? '优先在用户曲库候选中搜索；曲库未命中时可使用 Extension 提供的 Spotify Search 候选，命中后播放首个结果' : '搜索歌曲、艺人或相关音乐信息',
+    description: productMode ? '按明确歌名、歌手或版本查找歌曲；不用于“随便推荐、换一首”等推荐任务' : '按明确歌名或艺人搜索音乐信息',
     async execute(args) {
       const query = requiredQuery(args)
       if (productMode) {
-        const results = searchCatalog(catalog, query, resolveFeatures)
+        const results = searchCatalog(catalog, query)
         return { query, source: results[0]?.catalogSource ?? 'user_library', searchScope: catalog.some((track) => track.catalogSource === 'spotify_search') ? 'library_then_spotify' : 'user_library', results }
       }
       return { query, source: 'mock', results: mockResults(query) }
@@ -20,18 +20,26 @@ export function createSearchMusicTool(catalog = null, resolveFeatures = null) {
 }
 function requiredQuery(args) { if (typeof args?.query !== 'string' || !args.query.trim()) throw new Error('search_music.query 必须是非空字符串'); return args.query.trim() }
 function mockResults(query) { return [{ id: 'mock-track-1', title: query, artist: 'Mock Artist', note: 'V0.1 Mock Result，尚未连接真实音乐 API' }] }
-function searchCatalog(catalog, query, resolveFeatures) {
+function searchCatalog(catalog, query) {
   const terms = query.toLocaleLowerCase().split(/[\s·、，,《》「」]+/u).filter(Boolean)
   if (terms.length && terms.every((term) => /^(任意|随便|随机|一首|歌曲?|音乐|安排)$/u.test(term))) return catalog.slice(0, 5)
   return catalog
     .map((track) => {
-      const baseScore = scoreTrack(track, terms, query) + scoreFeatures(resolveFeatures?.(track.isrc), query)
+      const baseScore = scoreTrack(track, terms, query)
       // 来源加权只能解决两个已匹配候选的先后顺序，不能让无关的曲库歌曲凭空命中。
       return { track, score: baseScore > 0 ? baseScore + (track.catalogSource === 'user_library' ? 0.5 : 0) : 0 }
     })
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score)
     .slice(0, 5)
+    .map(({ track }) => track)
+}
+export function rankCatalogByPreference(catalog, query, resolveFeatures) {
+  if (!query || /^(任意|随便|随机)$/u.test(query)) return [...catalog]
+  return catalog
+    .map((track) => ({ track, score: scoreFeatures(resolveFeatures?.(track.isrc), query) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
     .map(({ track }) => track)
 }
 function scoreFeatures(features, query) {

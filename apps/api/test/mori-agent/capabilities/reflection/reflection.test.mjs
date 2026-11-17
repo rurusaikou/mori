@@ -1,5 +1,5 @@
 /** Reflection 行为测试：覆盖保留、弱化、场景化、坏 Action 和临时证据边界。 */
-import assert from 'node:assert/strict'; import test from 'node:test'; import { createReflectionCapability } from './reflection.service.mjs'
+import assert from 'node:assert/strict'; import test from 'node:test'; import { createReflectionCapability } from '../../../../src/mori-agent/capabilities/reflection/reflection.service.mjs'
 const input=(evidence='我只是工作的时候喜欢安静，平时还是很喜欢摇滚。')=>({previousBelief:{content:'用户喜欢安静音乐。',confidence:.8},newEvidence:{content:evidence}})
 const run=(output,value=input())=>createReflectionCapability(async()=>({data:output,model:'test',tokenUsage:null})).execute(value)
 test('contextualizes scene-specific evidence',async()=>assert.equal((await run({action:'CONTEXTUALIZE',updatedBelief:{content:'工作时偏好安静，平时喜欢摇滚',confidence:.9},reason:'新证据给出场景限制'})).data.action,'CONTEXTUALIZE'))

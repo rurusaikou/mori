@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createPostgresMemoryRepository } from './postgres-repository.mjs'
+import { createPostgresMemoryRepository } from '../../../src/mori-agent/memory/postgres-repository.mjs'
 
 test('uses an explicit unavailable repository when database is not configured', async () => {
   const repository = await createPostgresMemoryRepository()

@@ -56,7 +56,7 @@ const songUnderstandingAgent = createSongUnderstandingAgent({
 })
 const handleAgentRequest = createAgentRoutes({
   productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library', resolveMusicFeatures: (isrc) => featureStore.get(isrc), memoryRepository, memoryUserId, songUnderstandingAgent }),
-  playgroundAgent: createMoriAgent(agentLlm),
+  playgroundAgent: createMoriAgent(agentLlm, { logSource: 'debug' }),
   memoryRepository,
   memoryUserId,
   detectMemoryCandidate: (input) => memoryCandidateCapability.execute(input),

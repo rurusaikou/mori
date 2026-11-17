@@ -1,5 +1,5 @@
 /** Companionship 行为测试：覆盖回应、沉默、坏 Action、坏输入和禁止追问边界。 */
-import assert from 'node:assert/strict'; import test from 'node:test'; import { createCompanionshipCapability } from './companionship.service.mjs'
+import assert from 'node:assert/strict'; import test from 'node:test'; import { createCompanionshipCapability } from '../../../../src/mori-agent/capabilities/companionship/companionship.service.mjs'
 const run=(output,input)=>createCompanionshipCapability(async()=>({data:output,model:'test',tokenUsage:null})).execute(input)
 const decision=(action)=>({action,reason:'符合用户明确表达',responseGuidance:'保持简短'})
 test('acknowledges request for quiet',async()=>assert.equal((await run(decision('ACKNOWLEDGE'),{userMessage:'今天不想讲话，就陪我听吧。'})).data.action,'ACKNOWLEDGE'))

@@ -11,7 +11,6 @@ export type { PlaybackHostEvent, SpotifySdkTrack } from '@mori/contracts/playbac
 export type RuntimeRequest =
   | { type: 'MORI_GET_STATE' }
   | { type: 'MORI_GET_PRESENCE_STATE' }
-  | { type: 'MORI_CLOSE' }
   | { type: 'MORI_SAVE_POSITION'; position: { x: number; y: number } }
   | { type: 'MORI_CONNECT_SPOTIFY' }
   | { type: 'MORI_DISCONNECT_SPOTIFY' }

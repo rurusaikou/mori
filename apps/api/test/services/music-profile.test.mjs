@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createMusicProfileService } from './music-profile.mjs'
+import { createMusicProfileService } from '../../src/services/music-profile.mjs'
 
 const MELODATA_BASE_URL = 'https://melodata.example/api/v1'
 

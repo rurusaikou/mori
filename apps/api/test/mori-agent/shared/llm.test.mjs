@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createCapabilityLlm } from './llm.mjs'
+import { createCapabilityLlm } from '../../../src/mori-agent/shared/llm.mjs'
 
 const schema = {
   type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false,

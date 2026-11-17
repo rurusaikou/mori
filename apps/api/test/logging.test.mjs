@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { dailyLogFileName, formatLogLine } from './logging.mjs'
+import { dailyLogFileName, formatLogLine } from '../src/logging.mjs'
 
 test('builds a dated log filename from the local calendar date', () => {
   const localNoon = new Date(2026, 10, 3, 12).toISOString()

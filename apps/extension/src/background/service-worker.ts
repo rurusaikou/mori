@@ -64,9 +64,6 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         return { state: music.state }
       case 'MORI_GET_PRESENCE_STATE':
         return { visible: presence.enabled, position: await extensionStorage.getPosition() }
-      case 'MORI_CLOSE':
-        await closeMoriEverywhere('panel')
-        return { closed: true }
       case 'MORI_SAVE_POSITION':
         await extensionStorage.setPosition(message.position)
         return { saved: true }
@@ -183,7 +180,7 @@ async function broadcastCompanionData() {
   await broadcastTabMessage(message)
 }
 
-async function closeMoriEverywhere(source: 'toolbar' | 'panel') {
+async function closeMoriEverywhere(source: 'toolbar') {
   // Visibility must still close globally when Spotify is temporarily unavailable. A playback
   // failure is logged, while the persisted Presence state and cross-tab broadcast always run.
   try { await music.pauseForShutdown() }
@@ -250,16 +247,16 @@ function rankTextMatches(tracks: MusicTrack[], query: string) {
 }
 
 function hasMusicArrangementIntent(text: string) {
-  return /想听|播放|放一首|来一首|来点|安排.{0,4}(歌|音乐)|听.{0,6}(歌|音乐|的)/u.test(text)
+  // 这里只决定是否预加载曲库，不替代服务端 Intent Routing。先挡住否定和状态陈述，
+  // 否则“我现在没有在听歌”会因为包含“听歌”而触发昂贵搜索并造成伪命中。
+  if (/(不想|不要|别|先别|没有|没在|并未).{0,6}(听|放|播放)|没有在听/u.test(text)) return false
+  return /(推荐|安排|随便|不知道.{0,5}听什么|换一首|来一首|来点|帮我找|帮我搜|搜索|查找)|想听.{1,24}(的歌|《)|播放《/u.test(text)
 }
 
 function logUserEvent(message: RuntimeRequest & { target?: string }) {
   switch (message?.type) {
     case 'MORI_SAVE_POSITION':
       logInfo('user_event', 'presence_moved', { position: message.position })
-      break
-    case 'MORI_CLOSE':
-      logInfo('user_event', 'mori_close_requested')
       break
     case 'MORI_CONNECT_SPOTIFY':
     case 'MORI_DISCONNECT_SPOTIFY':

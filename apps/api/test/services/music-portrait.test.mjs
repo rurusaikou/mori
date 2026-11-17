@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createMusicPortraitService } from './music-portrait.mjs'
+import { createMusicPortraitService } from '../../src/services/music-portrait.mjs'
 
 const profile = {
   analyzedAt: 0, trackCount: 373, requestedCount: 394, averageBpm: 123,
