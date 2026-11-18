@@ -7,7 +7,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { createAgentState } from './state.mjs'
-import { decisionSystemPrompt, FINAL_RESPONSE_PROMPT, MORI_AGENT_PROMPT_VERSION } from './system-prompt.mjs'
+import { decisionSystemPrompt, FINAL_RESPONSE_PROMPT, MORI_AGENT_PROMPT_VERSION, RESPONSE_REPAIR_PROMPT } from './system-prompt.mjs'
 import { createMockMemoryRepository } from '../memory/mock-repository.mjs'
 import { createSearchMemoryTool } from '../tools/search-memory.mjs'
 import { createGetMusicContextTool } from '../tools/get-music-context.mjs'
@@ -17,7 +17,7 @@ import { createGetTrackInsightTool } from '../tools/get-track-insight.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { enforceIntentBoundary, ensureRoutedAction, routeIntent } from './intent-router.mjs'
-import { assembleConversationContext, enforceResponseProgression, understandConversation } from './conversation-understanding.mjs'
+import { assembleConversationContext, responseQualityIssue, understandConversation } from './conversation-understanding.mjs'
 
 export function createMoriAgent(llm, options = {}) {
   const musicSearchMode = options.musicSearchMode ?? 'mock'
@@ -65,13 +65,28 @@ export function createMoriAgent(llm, options = {}) {
         logRun.model = first.model
         let decision = enforceIntentBoundary(validateDecision(first.data), routedIntent, tools)
         decision = ensureRoutedAction(decision, routedIntent, tools, state)
-        decision = enforceResponseProgression(decision, state, conversationUnderstanding)
         push('MODEL_DECISION', decision)
 
         if (decision.action === 'respond') {
+          const qualityIssue = responseQualityIssue(decision, state)
+          let response = decision.response
+          let tokenUsage = first.tokenUsage
+          if (qualityIssue) {
+            // 质量门只允许一次重生成，避免死循环。Bad Case 作为输入反馈，不进入长期 Prompt。
+            push('RESPONSE_REPAIR', { issue: qualityIssue, rejectedResponse: response })
+            const repaired = await llm({
+              prompt: RESPONSE_REPAIR_PROMPT,
+              input: { context, routedIntent, issue: qualityIssue, rejectedResponse: response },
+              schema: FINAL_RESPONSE_SCHEMA,
+              schemaName: 'mori_agent_response_repair_v0_1',
+            })
+            logRun.model = repaired.model
+            response = validateFinalResponse(repaired.data).response
+            tokenUsage = mergeUsage(first.tokenUsage, repaired.tokenUsage)
+          }
           push('STATE_AFTER', { playbackState: state.playbackState, plannedAction: null })
-          push('FINAL_RESPONSE', { response: decision.response })
-          return complete(logRun, runId, started, first.model, first.tokenUsage, decision.response, trace, null)
+          push('FINAL_RESPONSE', { response })
+          return complete(logRun, runId, started, logRun.model, tokenUsage, response, trace, null)
         }
 
         // Tool Result 是外部事实的唯一来源。最终模型只能基于该结果组织语言，不能补造候选或动作。

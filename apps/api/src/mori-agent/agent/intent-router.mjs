@@ -67,15 +67,35 @@ export function enforceIntentBoundary(decision, routed, tools) {
  * 这里集中维护查询抽取边界，避免编排器理解业务语义。
  */
 export function ensureRoutedAction(decision, routed, tools, state) {
-  if (decision.action === 'tool') return decision
+  if (decision.action === 'tool') {
+    if (routed.intent !== 'RECOMMEND' || decision.toolCall?.name !== 'recommend_music') return decision
+    return withRecommendationExclusions(decision, state)
+  }
   if (routed.intent === 'RECOMMEND' && tools.recommend_music) {
-    return { action: 'tool', intent: 'RECOMMEND', conversationMove: 'ANSWER', reason: routed.reason, response: null, toolCall: { name: 'recommend_music', arguments: { query: recommendationQuery(state.userMessage), excludeUris: state.currentTrack?.uri ? [state.currentTrack.uri] : [] } } }
+    return withRecommendationExclusions({ action: 'tool', intent: 'RECOMMEND', conversationMove: 'ANSWER', reason: routed.reason, response: null, toolCall: { name: 'recommend_music', arguments: { query: recommendationQuery(state.userMessage), excludeUris: [] } } }, state)
   }
   if (routed.intent === 'SEARCH' && tools.search_music) {
     const query = searchQuery(state.userMessage)
     if (query) return { action: 'tool', intent: 'SEARCH', conversationMove: 'ANSWER', reason: routed.reason, response: null, toolCall: { name: 'search_music', arguments: { query, excludeUris: [] } } }
   }
   return decision
+}
+
+function withRecommendationExclusions(decision, state) {
+  const recentAssistantText = state.conversationHistory
+    .filter((item) => item.role === 'assistant')
+    .slice(-8)
+    .map((item) => item.content)
+    .join('\n')
+  const recentUris = state.musicCatalog
+    .filter((track) => recentAssistantText.includes(`《${track.title}》`))
+    .map((track) => track.uri)
+  const exclusions = new Set([
+    ...(decision.toolCall.arguments.excludeUris ?? []),
+    ...(state.currentTrack?.uri ? [state.currentTrack.uri] : []),
+    ...recentUris,
+  ])
+  return { ...decision, toolCall: { ...decision.toolCall, arguments: { ...decision.toolCall.arguments, excludeUris: [...exclusions] } } }
 }
 
 function searchQuery(text) {

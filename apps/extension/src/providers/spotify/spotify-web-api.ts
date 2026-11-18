@@ -151,7 +151,7 @@ export async function searchTracks(query: string, limit = 10): Promise<MusicTrac
       uri: track.uri,
       isrc: track.external_ids?.isrc,
       title: track.name.trim(),
-      artist: track.artists.map((artist) => artist.name.trim()).filter(Boolean).join('、'),
+      artist: track.artists?.map((artist) => artist.name.trim()).filter(Boolean).join('、') ?? '',
       artwork: track.album?.images?.[0]?.url,
       durationMs: track.duration_ms,
       isPlayable: true,

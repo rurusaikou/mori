@@ -16,6 +16,7 @@ Conversation、Song Understanding 与 Memory 的全部已知不足统一记录�
 | Memory 契约、阶段与评判标准 | [Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md) |
 | 歌曲四层理解与协作边界 | [Song Understanding V0.1](../../../../docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md) |
 | Conversation Agent 测试复盘 | [测试复盘](../../../../docs/MORI_AGENT_TEST_REVIEW_2026-11-16.md) |
+| 对话、推荐与播放闭环复盘 | [2026-11-18 真实测试复盘](../../../../docs/MORI_AGENT_CONVERSATION_RECOMMENDATION_REVIEW_2026-11-18.md) |
 | 日志文件、来源和排查方式 | [日志说明](../../../../docs/LOGGING.md) |
 
 本文不重复维护其他文档的详细 Schema、缺口或日志事件表。

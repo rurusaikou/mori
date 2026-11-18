@@ -117,6 +117,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         const messages = await sendCompanionMessage(message.text, music.state, catalog, async (track) => {
           pendingListeningSource = 'agent_selected'
           await music.playUri(track.uri, undefined, track)
+          if (!await music.confirmPlayback(track.uri)) throw new Error('Spotify 未确认目标歌曲开始播放')
           logInfo('conversation', 'agent_track_played', { uri: track.uri, title: track.title, artist: track.artist })
         }, broadcastCompanionData)
         const exchange = messages.slice(-2)
@@ -198,6 +199,16 @@ async function getAgentMusicCatalog(userText: string) {
   for (const entry of Object.values(cache.tracks)) {
     for (const track of entry.data) if (track.uri && track.isPlayable !== false) library.set(track.uri, { ...track, catalogSource: 'user_library' })
   }
+  // “随便推荐”没有精确歌名或歌手，不能拿整句做文本匹配。此前“给我推首歌”中的
+  // 单字“我”会错误命中歌曲《我》，导致无条件推荐持续收敛到同一首。
+  if (isOpenRecommendation(userText)) {
+    const candidates = preferenceSample
+      .filter((track) => track.uri && track.title?.trim() && track.artist?.trim() && track.isPlayable !== false)
+      .map((track) => ({ ...track, catalogSource: 'user_library' as const }))
+      .slice(0, 500)
+    logInfo('conversation', 'music_recommendation_catalog_ready', { libraryTracks: library.size, candidates: candidates.length, spotifyFallback: false })
+    return candidates
+  }
   const query = musicSearchQuery(userText)
   const exactLibraryMatches = rankTextMatches([...library.values()], query).slice(0, 30)
   if (exactLibraryMatches.length) {
@@ -219,6 +230,11 @@ async function getAgentMusicCatalog(userText: string) {
   for (const track of spotifyMatches) combined.set(track.uri, track)
   logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.size, libraryMatches: 0, spotifyFallback: true, spotifyMatches: spotifyMatches.length })
   return [...combined.values()].slice(0, 500)
+}
+
+function isOpenRecommendation(text: string) {
+  return /(随便|随机|任意).{0,10}(推|推荐|来|放|听)|不知道.{0,5}听什么|换一首/u.test(text)
+    || /^(?:再)?(?:给我)?(?:推|推荐|安排|来)(?:一?首|点|一些)?(?:歌|音乐)(?:吧|呗|好吗|好么)?[。！!？?]*$/u.test(text.trim())
 }
 
 function musicSearchQuery(text: string) {

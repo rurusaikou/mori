@@ -59,17 +59,24 @@ export function assembleConversationContext(state, understanding) {
   }
 }
 
-/** 最近三轮已经表达过相同核心意思时，使用确定性承接，避免模型反复道歉或复述。 */
-export function enforceResponseProgression(decision, state, understanding) {
-  if (decision.action !== 'respond') return decision
+/** 质量门只报告问题，不生成文案；具体 Bad Case 留在测试，避免业务代码积累场景话术。 */
+export function responseQualityIssue(decision, state) {
+  if (decision.action !== 'respond') return null
+  if (isUnsupportedRandomRecommendationExplanation(state, decision.response)) {
+    return '回复为随机推荐编造了输入和 Tool Result 中不存在的因果关系'
+  }
   const recentAssistant = state.conversationHistory.filter((item) => item.role === 'assistant').slice(-3).map((item) => item.content)
-  if (!recentAssistant.some((previous) => isRepeatedMeaning(previous, decision.response))) return decision
-  const response = /日语课|日语学习/u.test(state.userMessage)
-    ? '刚上完日语课啊，今天学到哪一部分了？'
-    : understanding.referenceRelation.type === 'CONTINUES_PREVIOUS'
-      ? '听起来就是一般般，没有特别好，也没有特别糟。'
-      : '那就顺着你刚提到的新话题继续。'
-  return { ...decision, conversationMove: 'FOLLOW_UP', reason: '避免重复最近已经表达过的核心意思', response }
+  const repetitive = recentAssistant.some((previous) => isRepeatedMeaning(previous, decision.response))
+  return repetitive ? '回复与最近三条 assistant 消息表达了高度相似的核心意思，没有推进对话' : null
+}
+
+function isUnsupportedRandomRecommendationExplanation(state, response) {
+  const recent = state.conversationHistory.slice(-6)
+  const askedWhyThisTrack = /为什么(?:是|选|推荐|给我).{0,12}/u.test(state.userMessage)
+  const hadOpenRequest = recent.some((item) => item.role === 'user' && /(随便|随机|任意).{0,8}(推|推荐|来|放|听)/u.test(item.content))
+  const recommendationWasShown = recent.some((item) => item.role === 'assistant' && /(给你选了|推荐|找到).{0,8}《/u.test(item.content))
+  const inventedConnection = /(因为|主题|歌词|共鸣|心情|状态|适合你|符合你)/u.test(response)
+  return askedWhyThisTrack && hadOpenRequest && recommendationWasShown && inventedConnection
 }
 
 function isRepeatedMeaning(previous, next) {
@@ -78,7 +85,31 @@ function isRepeatedMeaning(previous, next) {
   if (!left || !right) return false
   if (left.includes(right) || right.includes(left)) return true
   const bothApology = /(抱歉|对不起|不好意思)/u.test(previous) && /(抱歉|对不起|不好意思)/u.test(next)
-  return bothApology && (/(啰嗦|人机|机械)/u.test(previous) || /(啰嗦|人机|机械)/u.test(next))
+  if (bothApology && (/(啰嗦|人机|机械)/u.test(previous) || /(啰嗦|人机|机械)/u.test(next))) return true
+  return ngramSimilarity(left, right) >= 0.58 || longestCommonRatio(left, right) >= 0.3
+}
+
+function longestCommonRatio(left, right) {
+  const a = [...left]; const b = [...right]
+  const previous = Array(b.length + 1).fill(0)
+  let longest = 0
+  for (const leftChar of a) {
+    const current = Array(b.length + 1).fill(0)
+    for (let index = 1; index <= b.length; index += 1) {
+      if (leftChar === b[index - 1]) current[index] = previous[index - 1] + 1
+      longest = Math.max(longest, current[index])
+    }
+    for (let index = 0; index < current.length; index += 1) previous[index] = current[index]
+  }
+  return longest >= 6 ? longest / Math.min(a.length, b.length) : 0
+}
+
+function ngramSimilarity(left, right) {
+  const grams = (value) => new Set([...value].slice(0, -1).map((char, index) => `${char}${[...value][index + 1]}`))
+  const a = grams(left); const b = grams(right)
+  if (!a.size || !b.size) return 0
+  const overlap = [...a].filter((gram) => b.has(gram)).length
+  return overlap / new Set([...a, ...b]).size
 }
 
 function explicitEmotion(message) {

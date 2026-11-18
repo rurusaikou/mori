@@ -44,7 +44,7 @@ function describeStage(entry) {
     output_validated: () => `${identity}：模型输出 Schema 与业务边界校验通过。`,
     completed: () => `${identity}：Capability 执行成功，耗时 ${entry.latency}ms。输出：${readable(entry.output)}。`,
     failed: () => `${identity}：Capability 执行失败，耗时 ${entry.latency}ms。原因：${safe(entry.error)}。`,
-    agent_input: () => `${identity}：收到 Agent 输入。${readable(eventData(entry))}。`,
+    agent_input: () => `${identity}：收到 Agent 输入。${readable(agentInputSummary(eventData(entry)))}。`,
     agent_context_assembly: () => `${identity}：Agent Context 组装完成。${readable(eventData(entry))}。`,
     agent_scene_understanding: () => `${identity}：场景与局部对话理解完成。${readable(eventData(entry))}。`,
     agent_state_before: () => `${identity}：记录决策前的 World State 与 Playback State。${readable(eventData(entry))}。`,
@@ -65,6 +65,21 @@ function capabilityName(value) {
   return ({ memory: '记忆候选检测', understanding: '用户表达理解', connection: '历史关联发现', reflection: '旧理解反思', companionship: '陪伴行动决策', conversation_agent: 'Mori 对话 Agent' })[value] ?? value
 }
 function eventData(entry) { const { timestamp, source, runId, capability, promptVersion, model, stage, ...data } = entry; return data }
+function agentInputSummary(input) {
+  // musicCatalog 与 fakeMemory 可能包含数百条记录。完整数据仍进入 Agent，但日志只保留
+  // 排障需要的状态和数量，避免真正的错误被超长 JSON 淹没，也减少用户资料落盘范围。
+  return {
+    userMessage: input.userMessage,
+    currentTrack: input.currentTrack
+      ? { uri: input.currentTrack.uri, title: input.currentTrack.title, artist: input.currentTrack.artist }
+      : null,
+    playbackState: input.playbackState,
+    worldState: input.worldState,
+    conversationHistoryCount: Array.isArray(input.conversationHistory) ? input.conversationHistory.length : 0,
+    fakeMemoryCount: Array.isArray(input.fakeMemory) ? input.fakeMemory.length : 0,
+    musicCatalogCount: Array.isArray(input.musicCatalog) ? input.musicCatalog.length : 0,
+  }
+}
 function tokens(value) { return value?.total_tokens ?? value?.totalTokens ?? '—' }
 function readable(value) { try { return JSON.stringify(value) } catch { return safe(value) } }
 function safe(value) { return String(value ?? '—').replaceAll(/\s+/g, ' ').trim() }

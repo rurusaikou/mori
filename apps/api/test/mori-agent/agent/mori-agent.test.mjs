@@ -419,7 +419,10 @@ test('Case D recognizes casual song recommendation even if scene history was soc
 })
 
 test('Case E prevents a repeated apology and advances the new topic', async () => {
-  const result = await createMoriAgent(async () => response({ action: 'respond', intent: 'CHAT', conversationMove: 'ACKNOWLEDGE', reason: '重复道歉', response: '抱歉，我确实有些啰嗦了。', toolCall: null })).execute({
+  let calls = 0
+  const result = await createMoriAgent(async () => ++calls === 1
+    ? response({ action: 'respond', intent: 'CHAT', conversationMove: 'ACKNOWLEDGE', reason: '重复道歉', response: '抱歉，我确实有些啰嗦了。', toolCall: null })
+    : response({ response: '刚上完日语课啊，今天学到哪一部分了？' })).execute({
     ...base,
     userMessage: '刚上完日语课',
     conversationHistory: [
@@ -429,4 +432,55 @@ test('Case E prevents a repeated apology and advances the new topic', async () =
   })
   assert.doesNotMatch(result.finalResponse, /抱歉|啰嗦/)
   assert.match(result.finalResponse, /日语课/)
+})
+
+test('does not invent an emotional reason for a random recommendation', async () => {
+  let calls = 0
+  const result = await createMoriAgent(async () => ++calls === 1
+    ? response({
+      action: 'respond', intent: 'CHAT', conversationMove: 'ANSWER', reason: '解释推荐',
+      response: '因为这首歌的孤独主题和你泡澡后的平静心情很有共鸣。', toolCall: null,
+    })
+    : response({ response: '你刚才让我随便选，我只是从可播放的候选里挑了一首，不是根据你的心情判断的。' }), { musicSearchMode: 'library' }).execute({
+    ...base,
+    userMessage: '为什么是这首',
+    conversationHistory: [
+      { role: 'user', content: '随便给我推首歌吧' },
+      { role: 'assistant', content: '给你选了《测试歌曲》，现在开始播放。' },
+    ],
+  })
+  assert.equal(result.finalResponse, '你刚才让我随便选，我只是从可播放的候选里挑了一首，不是根据你的心情判断的。')
+})
+
+test('avoids recently recommended tracks even when playback state is missing', async () => {
+  let calls = 0
+  const result = await createMoriAgent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'RECOMMEND', conversationMove: 'ANSWER', reason: '随机推荐', response: null, toolCall: { name: 'recommend_music', arguments: { query: '', excludeUris: [] } } })
+    : response({ response: '换一首。' }), { musicSearchMode: 'library' }).execute({
+      ...base,
+      userMessage: '再随便推一首歌',
+      currentTrack: null,
+      playbackState: { status: 'none', currentTrack: null },
+      conversationHistory: [{ role: 'assistant', content: '给你选了《已经推荐》，现在开始播放。' }],
+      musicCatalog: [
+        { uri: 'spotify:track:old', title: '已经推荐', artist: 'A' },
+        { uri: 'spotify:track:new', title: '新的候选', artist: 'B' },
+      ],
+    })
+  assert.equal(result.action.track.uri, 'spotify:track:new')
+})
+
+test('rewrites repetitive relaxation copy into a short contextual reply', async () => {
+  let calls = 0
+  const result = await createMoriAgent(async () => ++calls === 1
+    ? response({
+      action: 'respond', intent: 'CHAT', conversationMove: 'ACKNOWLEDGE', reason: '接话',
+      response: '平静也是一种难得的宁静，在这样放松的时刻，偶尔什么都不想也是一种难得的宁静。', toolCall: null,
+    })
+    : response({ response: '那确实很爽，整个人都松下来了。' })).execute({
+    ...base,
+    userMessage: '爽的嘞',
+    conversationHistory: [{ role: 'assistant', content: '泡澡确实是放松身心的好方式，静静待着也是一种难得的宁静。' }],
+  })
+  assert.equal(result.finalResponse, '那确实很爽，整个人都松下来了。')
 })

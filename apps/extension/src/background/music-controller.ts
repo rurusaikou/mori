@@ -140,7 +140,9 @@ export class MusicController {
     if (targetTrack) await this.update({ track: targetTrack, progressMs: 0, durationMs: targetTrack.durationMs, isPlaying: false, error: null })
     try {
       await this.provider.playUri(uri, contextUri)
-      await this.update({ ...(targetTrack ? { track: targetTrack, durationMs: targetTrack.durationMs } : {}), progressMs: 0, isPlaying: true, availability: 'ready', error: null })
+      // Web API 2xx 只代表 Spotify 接受命令，不代表目标设备已经开始播放。保持 pending，
+      // 等 SDK 事件或 provider 轮询确认后才把 isPlaying 设为 true。
+      await this.update({ ...(targetTrack ? { track: targetTrack, durationMs: targetTrack.durationMs } : {}), progressMs: 0, isPlaying: false, availability: 'ready', error: null })
       setTimeout(() => void this.refreshFromProvider(), 500)
       setTimeout(() => {
         if (this.#pendingTrackUri !== uri) return
@@ -155,6 +157,26 @@ export class MusicController {
       await this.replace({ ...previous, availability: playbackAvailabilityFor(message), error: message })
       throw error
     }
+  }
+
+  async confirmPlayback(uri: string, timeoutMs = 6_000) {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (this.#state.track?.uri === uri && this.#state.isPlaying) return true
+      try {
+        const state = await this.provider.getPlaybackState()
+        if (state.track?.uri === uri && state.isPlaying) {
+          this.#pendingTrackUri = null
+          await this.replace(state)
+          return true
+        }
+      }
+      catch {
+        // SDK 事件仍可能完成确认；短暂的 Web API 读取失败不立即判定播放失败。
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    return this.#state.track?.uri === uri && this.#state.isPlaying
   }
 
   async handleHostEvent(event: PlaybackHostEvent) {

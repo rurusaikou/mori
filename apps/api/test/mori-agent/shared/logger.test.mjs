@@ -32,3 +32,25 @@ test('marks playground and lab logs as debug', () => {
   const line = formatCapabilityLogLine({ source: 'debug', timestamp: '2026-11-17T12:00:00.000Z', runId: 'debug-1', capability: 'conversation_agent', promptVersion: 'mori-agent-v0.6', stage: 'agent_input' })
   assert.match(line, /\[调试\] \[信息\]/)
 })
+
+test('summarizes large agent input instead of logging catalog and memory contents', () => {
+  const line = formatCapabilityLogLine({
+    source: 'runtime',
+    timestamp: '2026-11-18T12:00:00.000Z',
+    runId: 'real-2',
+    capability: 'conversation_agent',
+    promptVersion: 'mori-agent-v0.6',
+    stage: 'agent_input',
+    userMessage: '随便听首歌吧',
+    currentTrack: null,
+    playbackState: { status: 'none', currentTrack: null },
+    conversationHistory: [{ role: 'user', content: '旧消息正文' }],
+    fakeMemory: [{ id: 'm1', content: '不应写入日志的记忆正文' }],
+    musicCatalog: [{ uri: 'spotify:track:1', title: '不应写入日志的歌名', artist: '歌手' }],
+  })
+  assert.match(line, /"conversationHistoryCount":1/)
+  assert.match(line, /"fakeMemoryCount":1/)
+  assert.match(line, /"musicCatalogCount":1/)
+  assert.doesNotMatch(line, /不应写入日志/)
+  assert.doesNotMatch(line, /旧消息正文/)
+})

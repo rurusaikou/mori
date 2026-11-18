@@ -12,7 +12,8 @@ export function createRecommendMusicTool(catalog, resolveFeatures = null) {
       const ranked = rankCatalogByPreference(candidates, preference, resolveFeatures)
       // 没有可用音频特征或用户没有给出条件时，仍可从已排除当前曲目的可信候选中推荐；
       // 这与精确搜索的“无匹配即为空”语义不同。
-      const results = (ranked.length ? ranked : preference ? [] : candidates).slice(0, 5)
+      const pool = ranked.length ? ranked : preference ? [] : rotateFromRandomStart(candidates)
+      const results = pool.slice(0, 5)
       return {
         preference,
         excludedUris: [...excluded],
@@ -22,4 +23,12 @@ export function createRecommendMusicTool(catalog, resolveFeatures = null) {
       }
     },
   }
+}
+
+function rotateFromRandomStart(candidates) {
+  if (candidates.length < 2) return candidates
+  // 无条件推荐没有可解释的排序依据。随机轮换可信候选比永远取数组第一首更符合
+  // “随便来一首”的语义；当前曲目已经在上方被排除，因此不会立即重复播放。
+  const offset = Math.floor(Math.random() * candidates.length)
+  return [...candidates.slice(offset), ...candidates.slice(0, offset)]
 }
