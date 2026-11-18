@@ -164,8 +164,8 @@ export const transferPlayback = (deviceId: string, play = false) => spotifyFetch
 })
 
 export const startPlayback = (deviceId: string, uri?: string, contextUri?: string, queueUris?: string[]) => {
-  // Starting one track with `uris: [uri]` creates a one-item queue, so Spotify accepts next/prev
-  // without changing anything. Preserve the playlist context and start at the selected track.
+  // For collections without context_uri, queueUris must already start at the selected track.
+  // Spotify then owns end-of-track advancement instead of relying on a service-worker timer.
   const body = queueUris?.length
     ? { uris: queueUris }
     : contextUri && uri

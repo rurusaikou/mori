@@ -109,8 +109,8 @@ export class SpotifyMusicProvider implements MusicProvider {
     if (embedded) await sendToPlaybackHost('PLAYER_SET_VOLUME', { volume: 0.8 })
   }
 
-  async next() { await nextPlayback(await resolveActivePlaybackDevice()) }
-  async previous() { await previousPlayback(await resolveActivePlaybackDevice()) }
+  async next() { await nextPlayback(await resolveNavigationPlaybackDevice()) }
+  async previous() { await previousPlayback(await resolveNavigationPlaybackDevice()) }
   async seek(positionMs: number) { await seekPlayback(await resolveActivePlaybackDevice(), positionMs) }
   async setPlaybackMode(mode: PlaybackMode) {
     const deviceId = await resolveActivePlaybackDevice()
@@ -151,11 +151,11 @@ export class SpotifyMusicProvider implements MusicProvider {
     return refreshPlaylists()
   }
 
-  async playUri(uri: string, contextUri?: string) {
+  async playUri(uri: string, contextUri?: string, queueUris?: string[]) {
     const { deviceId, embedded } = await resolvePlaybackDevice()
     if (embedded) await sendToPlaybackHost('PLAYER_ACTIVATE')
     await transferPlayback(deviceId, false)
-    await startPlayback(deviceId, uri, contextUri)
+    await startPlayback(deviceId, uri, contextUri, queueUris)
     // Spotify may reapply the device volume while transferring/starting playback. Restore the
     // local SDK output after the play command, not only before it, to avoid a playing-but-silent host.
     if (embedded) await sendToPlaybackHost('PLAYER_SET_VOLUME', { volume: 0.8 })
@@ -346,6 +346,18 @@ async function resolveActivePlaybackDevice() {
   // inactive Mori device here makes the request appear successful without changing the track.
   if (!active?.id) throw new Error('当前没有正在播放的 Spotify 设备，请先播放一首歌')
   return active.id
+}
+
+async function resolveNavigationPlaybackDevice() {
+  try { return await resolveActivePlaybackDevice() }
+  catch {
+    // 歌曲刚结束时 Spotify 可能先把设备标记为 inactive，用户此时点击上一首/下一首
+    // 仍是明确的播放意图。只对导航命令恢复 Mori 设备并继续会话；seek 和模式设置
+    // 继续要求真实 active device，避免无意中启动播放。
+    const deviceId = await ensureSpotifyDevice()
+    await transferPlayback(deviceId, true)
+    return deviceId
+  }
 }
 
 async function resolvePlaybackDevice() {

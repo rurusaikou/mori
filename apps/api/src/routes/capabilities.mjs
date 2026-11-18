@@ -4,7 +4,7 @@
  * 输出：结构化执行结果或 Lab 资源；生产环境不注册这些开发入口。
  */
 import { json, readRequestJson } from '../http.mjs'
-import { CAPABILITY_EXAMPLES } from '../mori-agent/index.mjs'
+import { CAPABILITY_EXAMPLES } from '../mori-agent/brain/capability-registry.mjs'
 import { recentCapabilityLogs } from '../mori-agent/shared/logger.mjs'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'

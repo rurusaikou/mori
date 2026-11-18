@@ -46,10 +46,12 @@ async function runAgent(request, response, agent, memory = {}) {
       : null
     const result = await agent.execute(input)
     if (archive) {
+      // pending 先保证用户输入可恢复；同一 exchange/role 使用 upsert 收敛为 completed/failed，
+      // 避免请求重试制造同一轮的重复对话记录。
       await memory.memoryRepository.appendConversationMessage(conversationRecord(input, memory.memoryUserId, exchangeId, 'user', result.success ? 'completed' : 'failed', createdAt))
       if (result.success) await memory.memoryRepository.appendConversationMessage(conversationRecord({ ...input, userMessage: result.finalResponse }, memory.memoryUserId, exchangeId, 'assistant', 'completed', new Date().toISOString()))
       if (result.success && memory.detectMemoryCandidate) {
-        // 候选提炼失败不能影响主对话；原始消息已经是事实，可在后台重新分析。
+        // 候选提炼是可重试派生任务，不是回复成功条件；失败不能撤销已保存的原始对话。
         void detectAndStore(memory, input, storedUserMessage).catch(() => undefined)
       }
     }

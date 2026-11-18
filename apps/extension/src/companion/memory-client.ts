@@ -1,6 +1,7 @@
 /**
  * 作用：把浏览器中产生的 Memory 事实同步到服务端事实库。
- * 同步失败不能撤销用户已经完成的本地操作；调用方记录错误，后续可在此处增加 Outbox 重试。
+ * 同步失败不能撤销用户已经完成的本地操作。听歌事件是可选的 best-effort 事实同步，
+ * Repository 未配置或本地 API 暂时离线时静默跳过，避免每次 SDK 状态变化污染扩展错误页。
  */
 import type { MusicMemory, PlaybackState } from '@mori/domain'
 import { extensionStorage } from '../storage/extension-storage'
@@ -26,7 +27,7 @@ export async function syncListeningTransition(previous: PlaybackState, current: 
   }
   if (current.track && current.isPlaying && (changed || !previous.isPlaying)) events.push({ state: current, type: 'started' })
   if (!changed && previous.track && previous.isPlaying && !current.isPlaying) events.push({ state: current, type: 'paused' })
-  await Promise.all(events.map(({ state, type }) => postMemory('/memory/events/listening', {
+  await Promise.allSettled(events.map(({ state, type }) => postMemory('/memory/events/listening', {
     eventId: crypto.randomUUID(),
     type,
     source,

@@ -158,7 +158,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
           await music.handleHostEvent(message.event)
           const source = pendingListeningSource
           if (previous.track?.uri !== music.state.track?.uri && music.state.track) pendingListeningSource = 'unknown'
-          void syncListeningTransition(previous, music.state, source).catch((error) => logError('memory', 'listening_sync_failed', error))
+          // 听歌事实同步是可选后台能力。memory-client 自行吸收数据库未配置和 API 离线，
+          // 不能让一次正常播放在 Chrome 扩展错误页生成多条重复错误。
+          void syncListeningTransition(previous, music.state, source)
         }
         return { accepted: true }
       default:

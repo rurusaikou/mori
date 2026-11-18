@@ -139,7 +139,14 @@ export class MusicController {
     // song while transferring devices; handleHostEvent ignores that stale snapshot below.
     if (targetTrack) await this.update({ track: targetTrack, progressMs: 0, durationMs: targetTrack.durationMs, isPlaying: false, error: null })
     try {
-      await this.provider.playUri(uri, contextUri)
+      // Saved Tracks 没有 Spotify context。把从选中歌曲开始的剩余队列交给 Spotify，
+      // 让歌曲自然结束后由原生播放器续播；不能传原始完整数组，否则 Spotify 会从
+      // 第一项开始，重新引入“点了 A 却播放 B”的问题。
+      const selectedIndex = this.#navigationQueue.findIndex((track) => track.uri === uri)
+      const nativeQueueUris = !contextUri && selectedIndex >= 0
+        ? this.#navigationQueue.slice(selectedIndex).map((track) => track.uri)
+        : undefined
+      await this.provider.playUri(uri, contextUri, nativeQueueUris)
       // Web API 2xx 只代表 Spotify 接受命令，不代表目标设备已经开始播放。保持 pending，
       // 等 SDK 事件或 provider 轮询确认后才把 isPlaying 设为 true。
       await this.update({ ...(targetTrack ? { track: targetTrack, durationMs: targetTrack.durationMs } : {}), progressMs: 0, isPlaying: false, availability: 'ready', error: null })

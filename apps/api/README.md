@@ -1,6 +1,6 @@
 # Mori API
 
-Mori 的服务端边界。当前包含音乐特征代理、画像生成、正式 Agent API、隔离 Capability 和开发调试页面；第三方密钥始终留在 Extension 之外。它仍是本地开发服务，不提供生产身份、数据库或跨设备同步，也不持久化用户画像与对话。
+Mori 的服务端边界。当前包含音乐特征代理、画像生成、正式 Agent API、隔离 Capability、可选 PostgreSQL/pgvector Memory 和开发调试页面；第三方密钥始终留在 Extension 之外。它仍是本地开发服务：没有正式用户认证和跨设备身份体系；配置 `MORI_MEMORY_DATABASE_URL` 与服务端开发用户后会归档对话、Moment、听歌事件和 Memory，未配置时显式降级为不可用仓储。
 
 ```bash
 pnpm dev:api
@@ -56,7 +56,7 @@ POST /agent/capabilities/companionship
 GET  /agent/capability-logs
 ```
 
-Capability Run 的每个阶段写入 `apps/api/logs/capability_YYYY-MM-DD.log`，使用与其他 Mori 日志一致的“本地时间 + 级别 + 事件 + 中文说明”格式。内容保留 runId、模块、Prompt 版本、模型、输入/输出、延迟、Token 或错误，但不再以整行裸 JSON 展示。该 Debug Log 与用户 Memory、对话存储完全隔离。
+正式 Capability Run 的每个阶段写入 `apps/api/logs/capability_YYYY-MM-DD.log`；Lab 与 Playground 手工请求写入 `capability_debug_YYYY-MM-DD.log`，自动化测试写入 `capability_test_YYYY-MM-DD.log`。三者使用相同的“本地时间 + 来源 + 级别 + 事件 + 中文说明”格式，但来源严格分开。内容保留 runId、模块、Prompt 版本、模型、延迟、Token 或错误；调试日志可能包含手工输入，但始终与用户 Memory、对话存储隔离。
 
 ## Mori Agent V0.1
 
@@ -67,7 +67,16 @@ Capability Run 的每个阶段写入 `apps/api/logs/capability_YYYY-MM-DD.log`�
 | Extension 聊天 | `POST /agent/run` | Extension 真实曲库候选 | 保留，需 Extension Origin |
 | Agent Playground | `/agent-playground`、`POST /agent/playground/run` | Mock | 关闭 |
 
-Agent 一次最多执行一个 Tool；Moment 始终是用户操作，不是 Tool。正式上下文、播放动作校验、Trace 与限制统一记录在 [`docs/MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md`](../../docs/MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md)，本 README 只保留 API 运维入口。
+Agent 一次最多执行一个 Tool；Moment 始终是用户操作，不是 Tool。正式上下文、播放动作校验、Trace 与限制统一记录在 [`docs/IMPLEMENTATION.md`](../../docs/IMPLEMENTATION.md) 的“对话与记忆”，本 README 只保留 API 运维入口。
+
+正式 Memory 为可选配置：
+
+```dotenv
+MORI_MEMORY_DATABASE_URL=postgresql://mori:password@127.0.0.1:5432/mori
+MORI_MEMORY_USER_ID=local-development-user
+```
+
+`MORI_MEMORY_USER_ID` 只是 V0.1 本地开发身份，不能用于生产多用户隔离。Embedding 和 Schema 说明见 [`MORI_AGENT_MEMORY_V0.1_2026-11-12.md`](../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md)。
 
 ## 结构
 
@@ -84,9 +93,12 @@ apps/api/
     │   ├── capabilities.mjs
     │   └── agent.mjs
     ├── mori-agent/
-    │   ├── capabilities/            # 五个物理隔离的 V0 Capability
-    │   ├── agent/、tools/、memory/   # Agent 闭环与显式 Tool
-    │   ├── shared/                   # execute、LLM transport、Debug logger
+    │   ├── perception/               # 会话、播放事实与歌曲理解
+    │   ├── brain/                    # Intent、五个 Capability 与 Memory
+    │   ├── expression/               # Prompt 与回复质量门
+    │   ├── action/                   # 受控 Tool
+    │   ├── runtime/                  # 四层编排与 Trace
+    │   ├── shared/                   # Schema、LLM transport、Debug logger
     │   ├── lab/                      # Capability 调试页面
     │   └── playground/               # Agent 调试页面
     └── services/
@@ -105,12 +117,12 @@ tail -f apps/api/logs/backend_$(date +%F).log
 tail -f apps/api/logs/capability_$(date +%F).log
 ```
 
-未来后端负责：
+仍待后端补齐：
 
 - Mori 用户身份与会话；
 - Spotify OAuth 回调、Refresh Token 加密存储和短期 Token 签发；
 - AI Provider 调用与限流；
-- 对话、音乐记忆和跨设备同步；
+- 正式认证下的对话、音乐记忆和跨设备同步；
 - 隐私授权、审计日志和数据删除。
 
 Extension UI、Chrome Service Worker 和 Player Host 都不属于后端。新增后端实现时应按 `auth/`、`spotify/`、`companion/`、`memory/`、`users/`、`database/` 分类，并通过 `packages/contracts/` 暴露前后端契约。

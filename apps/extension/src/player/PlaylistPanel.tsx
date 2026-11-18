@@ -69,10 +69,9 @@ export function PlaylistPanel({ playback, getPlaylists, hasLibraryCache, refresh
   async function playTrack(track: MusicTrack) {
     setRequestedUri(track.uri); setError('')
     const isLikedTracks = activePlaylist?.uri === 'spotify:collection:tracks'
-    // Saved Tracks is not a valid Spotify context_uri. Sending the whole collection as `uris`
-    // allowed Spotify to skip to the next URI a few seconds after starting the selected track.
-    // Start exactly one URI in Spotify, but retain a trusted local queue for controls. Sending the
-    // whole collection as Spotify `uris` previously made it jump away from the selected song.
+    // Saved Tracks is not a valid Spotify context_uri. The controller receives this trusted list,
+    // slices it from the selected URI, and supplies that ordered queue to Spotify. Slicing there is
+    // essential: sending the unrotated collection makes Spotify start the first item, not this one.
     try { await playUri(track, isLikedTracks ? undefined : activePlaylist?.uri, isLikedTracks ? tracks?.filter((item) => item.isPlayable !== false) : undefined) }
     catch (reason) { setRequestedUri(null); setError(reason instanceof Error ? reason.message : '无法播放这首歌曲') }
   }

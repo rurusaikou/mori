@@ -53,7 +53,8 @@ export type MusicProvider = {
   getPlaylistTracks(playlistId: string): Promise<MusicTrack[]>
   hasLibraryCache(playlistId?: string): Promise<boolean>
   refreshLibrary(): Promise<MusicPlaylist[]>
-  playUri(uri: string, contextUri?: string): Promise<void>
+  /** queueUris 仅用于没有合法 context URI 的集合，并且首项必须是用户选中的 uri。 */
+  playUri(uri: string, contextUri?: string, queueUris?: string[]): Promise<void>
   getPreferenceTracks(): Promise<MusicTrack[]>
   searchTracks(query: string, limit?: number): Promise<MusicTrack[]>
 }

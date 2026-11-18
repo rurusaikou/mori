@@ -2,7 +2,7 @@
 
 Mori 是悬浮在浏览器中的 AI 音乐知音伙伴。Spotify 是当前 Music Provider；Mori 提供跨网页常驻角色、播放控制、歌单浏览、对话和经用户允许保存的音乐记忆。
 
-文档入口：产品边界见 [PRODUCT.md](docs/PRODUCT.md)，系统架构见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)，代码导航见 [CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md)，运行逻辑见 [IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。Conversation Agent 闭环见 [MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md](docs/MORI_AGENT_PLAYGROUND_V0.1_2026-11-09.md)，歌曲四层理解见 [MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md](docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md)，独立 Capability 见 [MORI_AGENT_V0_IMPLEMENTATION_2026-11-08.md](docs/MORI_AGENT_V0_IMPLEMENTATION_2026-11-08.md)，真实对话、推荐与播放问题见 [2026-11-18 测试复盘](docs/MORI_AGENT_CONVERSATION_RECOMMENDATION_REVIEW_2026-11-18.md)。
+文档入口：产品边界见 [PRODUCT.md](docs/PRODUCT.md)，四层系统架构见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)，代码导航见 [CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md)，运行逻辑见 [IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。Memory 设计见 [MORI_AGENT_MEMORY_V0.1_2026-11-12.md](docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md)，歌曲四层理解见 [MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md](docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md)，真实对话、推荐与播放问题见 [2026-11-18 测试复盘](docs/MORI_AGENT_CONVERSATION_RECOMMENDATION_REVIEW_2026-11-18.md)。
 
 本仓库按前端应用、后端边界和共享包分类，不再包含 Electron、Desktop UI、Soloist 或 Next.js 应用。
 
