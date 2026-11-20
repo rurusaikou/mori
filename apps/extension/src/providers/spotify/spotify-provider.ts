@@ -161,6 +161,30 @@ export class SpotifyMusicProvider implements MusicProvider {
     if (embedded) await sendToPlaybackHost('PLAYER_SET_VOLUME', { volume: 0.8 })
   }
 
+  async getSearchableLibraryTracks() {
+    const playlists = (await this.getUserPlaylists()).filter((playlist) => playlist.isAccessible !== false)
+    const unique = new Map<string, MusicTrack>()
+    let cursor = 0
+    const worker = async () => {
+      while (cursor < playlists.length) {
+        const playlist = playlists[cursor++]
+        try {
+          // UI 的歌单歌曲采用按需缓存；Agent 搜索不能依赖用户碰巧打开过哪些歌单。
+          // 这里主动读取每个可访问来源，getPlaylistTracks 会复用已有缓存并补齐缺失项。
+          const tracks = await this.getPlaylistTracks(playlist.id)
+          for (const track of tracks) {
+            if (track.uri && track.isPlayable !== false) unique.set(track.uri, { ...track, catalogSource: 'user_library' })
+          }
+        } catch {
+          // 单个已删除或无权访问的歌单不应让整个搜索曲库不可用。
+        }
+      }
+    }
+    // 与歌单可访问性预检保持相同并发度，避免大型账号串行过慢，也避免 API 请求突发。
+    await Promise.all(Array.from({ length: Math.min(4, playlists.length) }, () => worker()))
+    return [...unique.values()]
+  }
+
   async getPreferenceTracks() {
     const playlists = await this.getUserPlaylists()
     const liked = playlists.find((item) => item.id === LIKED_TRACKS_ID)

@@ -55,6 +55,8 @@ export type MusicProvider = {
   refreshLibrary(): Promise<MusicPlaylist[]>
   /** queueUris 仅用于没有合法 context URI 的集合，并且首项必须是用户选中的 uri。 */
   playUri(uri: string, contextUri?: string, queueUris?: string[]): Promise<void>
+  /** 返回完整、去重的可搜索个人曲库；不能只包含用户已经打开过的歌单。 */
+  getSearchableLibraryTracks(): Promise<MusicTrack[]>
   getPreferenceTracks(): Promise<MusicTrack[]>
   searchTracks(query: string, limit?: number): Promise<MusicTrack[]>
 }

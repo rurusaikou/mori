@@ -123,6 +123,8 @@ export class MusicController {
 
   refreshLibrary() { return this.provider.refreshLibrary() }
 
+  getSearchableLibraryTracks() { return this.provider.getSearchableLibraryTracks() }
+
   getPreferenceTracks() { return this.provider.getPreferenceTracks() }
 
   searchTracks(query: string, limit = 10) { return this.provider.searchTracks(query, limit) }

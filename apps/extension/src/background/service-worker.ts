@@ -193,45 +193,35 @@ async function closeMoriEverywhere(source: 'toolbar') {
 }
 
 async function getAgentMusicCatalog(userText: string) {
-  // getPreferenceTracks 会遍历并缓存完整收藏/歌单；返回值本身只是听感排序所需的代表样本。
-  // 先完成这一步，避免“已经缓存过一张歌单”导致其他个人曲库内容永远不参与精确搜索。
-  const preferenceSample = await music.getPreferenceTracks()
-  const cache = await extensionStorage.getLibraryCache()
-  const library = new Map<string, MusicTrack>()
-  for (const entry of Object.values(cache.tracks)) {
-    for (const track of entry.data) if (track.uri && track.isPlayable !== false) library.set(track.uri, { ...track, catalogSource: 'user_library' })
-  }
   // “随便推荐”没有精确歌名或歌手，不能拿整句做文本匹配。此前“给我推首歌”中的
   // 单字“我”会错误命中歌曲《我》，导致无条件推荐持续收敛到同一首。
   if (isOpenRecommendation(userText)) {
+    const preferenceSample = await music.getPreferenceTracks()
     const candidates = preferenceSample
       .filter((track) => track.uri && track.title?.trim() && track.artist?.trim() && track.isPlayable !== false)
       .map((track) => ({ ...track, catalogSource: 'user_library' as const }))
       .slice(0, 500)
-    logInfo('conversation', 'music_recommendation_catalog_ready', { libraryTracks: library.size, candidates: candidates.length, spotifyFallback: false })
+    logInfo('conversation', 'music_recommendation_catalog_ready', { libraryTracks: preferenceSample.length, candidates: candidates.length, spotifyFallback: false })
     return candidates
   }
+
   const query = musicSearchQuery(userText)
-  const exactLibraryMatches = rankTextMatches([...library.values()], query).slice(0, 30)
+  // 精确搜索使用完整可搜索曲库，而不是直接读取 cache.tracks。后者只是 UI 按需缓存，
+  // 在用户没有逐个打开歌单时并不完整。
+  const library = await music.getSearchableLibraryTracks()
+  const exactLibraryMatches = rankTextMatches(library, query).slice(0, 30)
   if (exactLibraryMatches.length) {
-    logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.size, libraryMatches: exactLibraryMatches.length, spotifyFallback: false, spotifyMatches: 0 })
+    logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.length, libraryMatches: exactLibraryMatches.length, spotifyFallback: false, spotifyMatches: 0 })
     return exactLibraryMatches
   }
 
-  // 个人曲库没有歌名/歌手命中时才访问 Spotify Search。代表样本仍随请求发送，
-  // 让“有节奏、安静”等听感请求优先由用户自己的曲库特征匹配。
-  const localSample = preferenceSample
-    .filter((track) => track.uri && track.isPlayable !== false)
-    .map((track) => ({ ...track, catalogSource: 'user_library' as const }))
+  // 完整个人曲库没有歌名/歌手命中时才访问 Spotify Search。此时无需再把无关的
+  // 本地样本塞进本轮精确搜索；只传 Spotify 命中能缩小 payload 和误选空间。
   let spotifyMatches: MusicTrack[] = []
   try { spotifyMatches = await music.searchTracks(query, 10) }
   catch (error) { logError('conversation', 'spotify_search_failed', error, { query }) }
-  const combined = new Map<string, MusicTrack>()
-  // Agent 请求上限为 500；为兜底结果预留位置，避免大型曲库样本把 Spotify 命中截掉。
-  for (const track of localSample.slice(0, Math.max(0, 500 - spotifyMatches.length))) combined.set(track.uri, track)
-  for (const track of spotifyMatches) combined.set(track.uri, track)
-  logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.size, libraryMatches: 0, spotifyFallback: true, spotifyMatches: spotifyMatches.length })
-  return [...combined.values()].slice(0, 500)
+  logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.length, libraryMatches: 0, spotifyFallback: true, spotifyMatches: spotifyMatches.length })
+  return spotifyMatches
 }
 
 function isOpenRecommendation(text: string) {
@@ -268,7 +258,11 @@ function hasMusicArrangementIntent(text: string) {
   // 这里只决定是否预加载曲库，不替代服务端 Intent Routing。先挡住否定和状态陈述，
   // 否则“我现在没有在听歌”会因为包含“听歌”而触发昂贵搜索并造成伪命中。
   if (/(不想|不要|别|先别|没有|没在|并未).{0,6}(听|放|播放)|没有在听/u.test(text)) return false
-  return /(推荐|安排|随便|不知道.{0,5}听什么|换一首|来一首|来点|帮我找|帮我搜|搜索|查找)|想听.{1,24}(的歌|《)|播放《/u.test(text)
+  // 服务端已经把“我想听言不由衷”识别为 SEARCH；Extension 必须对同一类明确请求
+  // 预加载候选，否则 Intent 正确但 musicCatalog 为空，Tool 注定只能返回未命中。
+  // 此处允许略宽于精确歌名语法，因为它只准备只读候选，最终动作仍由服务端 Router
+  // 和 Extension URI 白名单双重校验。
+  return /(推荐|安排|随便|不知道.{0,5}听什么|换一首|来一首|来点|帮我找|帮我搜|搜索|查找)|想听.{2,24}|播放《/u.test(text)
 }
 
 function logUserEvent(message: RuntimeRequest & { target?: string }) {
