@@ -13,7 +13,7 @@ import { createCapabilityRegistry } from './mori-agent/brain/capability-registry
 import { createCapabilityRoutes } from './routes/capabilities.mjs'
 import { createAgentRoutes } from './routes/agent.mjs'
 import { createCapabilityLlm } from './mori-agent/shared/llm.mjs'
-import { createMoriAgent } from './mori-agent/runtime/mori-runtime.mjs'
+import { createMoriAgent } from './mori-agent/runtime/index.mjs'
 import { createFeatureStore } from './services/feature-store.mjs'
 import { createMusicProfileService } from './services/music-profile.mjs'
 import { createMusicPortraitService } from './services/music-portrait.mjs'

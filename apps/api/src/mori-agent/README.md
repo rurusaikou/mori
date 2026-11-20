@@ -22,7 +22,12 @@ mori-agent/
 ├── action/                     # 行动：受控 Tool；不直接拥有产品状态
 │   └── tools/
 ├── runtime/                    # 四层编排，不承载任何一层的业务判断
-│   └── mori-runtime.mjs
+│   ├── index.mjs               # 默认 Graph / 人工 Legacy 回退
+│   ├── graph-state.mjs         # MoriGraphState
+│   ├── graph-nodes.mjs         # 现有领域函数的 Node Wrapper
+│   ├── mori-graph-runtime.mjs  # LangGraph Edge 与执行
+│   ├── mori-runtime.mjs        # 迁移期 Legacy Runtime
+│   └── runtime-support.mjs     # 两种 Runtime 的共享契约
 ├── shared/                     # LLM、Schema、Logger 等无主体语义基础设施
 ├── lab/                        # Capability 开发调试页，不进入正式产品
 └── playground/                 # Agent 开发调试页，不进入正式产品
@@ -60,15 +65,19 @@ State validation
 
 每轮最多执行一个 Tool。模型不能直接操作 Spotify；Action 返回客户端动作后，Extension 仍需校验 URI、执行播放并以真实 Playback State 确认结果。
 
+正式 `/agent/run` 默认使用 LangGraph Runtime。`MORI_AGENT_RUNTIME=legacy` 只用于迁移期人工回退；禁止失败后自动重跑，以免重复执行播放计划。`npm run test:api` 会把完整 API 测试分别跑在 Legacy 和 Graph 上，并额外比较 Intent、Tool、参数、回复和 Action 契约。
+
 ## 专项文档
 
 | 主题 | 文档 |
 |---|---|
+| 四层模块完成度、证据与验收标准 | [模块成熟度](../../../../docs/MORI_MODULE_MATURITY_2026-11-19.md) |
 | Memory 契约、存储与评判标准 | [Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md) |
 | 歌曲四层证据与协作边界 | [Song Understanding V0.1](../../../../docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md) |
 | Conversation Agent 回归与改进 | [测试复盘](../../../../docs/MORI_AGENT_TEST_REVIEW_2026-11-16.md) |
 | 对话、推荐与播放闭环问题 | [2026-11-18 复盘](../../../../docs/MORI_AGENT_CONVERSATION_RECOMMENDATION_REVIEW_2026-11-18.md) |
 | 日志来源与排查方式 | [日志说明](../../../../docs/LOGGING.md) |
+| LangGraph 迁移范围与回退策略 | [迁移记录](../../../../docs/MORI_LANGGRAPH_MIGRATION_2026-11-19.md) |
 
 ## 开发入口
 

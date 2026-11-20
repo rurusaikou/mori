@@ -69,6 +69,14 @@ GET  /agent/capability-logs
 
 Agent 一次最多执行一个 Tool；Moment 始终是用户操作，不是 Tool。正式上下文、播放动作校验、Trace 与限制统一记录在 [`docs/IMPLEMENTATION.md`](../../docs/IMPLEMENTATION.md) 的“对话与记忆”，本 README 只保留 API 运维入口。
 
+`/agent/run` 默认使用 LangGraph Runtime。迁移期需要人工回退时设置：
+
+```dotenv
+MORI_AGENT_RUNTIME=legacy
+```
+
+不要在一次失败请求中自动改用 Legacy 重跑，否则可能重复调用 Tool 或计划同一个播放动作。恢复 Graph 时删除该配置或设为 `graph`。
+
 正式 Memory 为可选配置：
 
 ```dotenv

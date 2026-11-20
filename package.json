@@ -11,13 +11,18 @@
     "build": "node scripts/build-extension.mjs && node scripts/build-playback-host.mjs",
     "build:extension": "node scripts/build-extension.mjs",
     "build:host": "node scripts/build-playback-host.mjs",
-    "test:api": "node --test apps/api/test",
+    "test:api": "npm run test:api:legacy && npm run test:api:graph",
+    "test:api:legacy": "MORI_AGENT_RUNTIME=legacy node --test apps/api/test",
+    "test:api:graph": "MORI_AGENT_RUNTIME=graph node --test apps/api/test",
     "check": "tsc --noEmit && node scripts/build-extension.mjs && node scripts/build-playback-host.mjs"
   },
   "dependencies": {
+    "@langchain/core": "^1.4.1",
+    "@langchain/langgraph": "^1.7.5",
     "pg": "^8.23.1",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.7",

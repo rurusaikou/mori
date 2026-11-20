@@ -9,23 +9,14 @@ import { randomUUID } from 'node:crypto'
 import { createAgentState } from '../perception/state.mjs'
 import { decisionSystemPrompt, FINAL_RESPONSE_PROMPT, MORI_AGENT_PROMPT_VERSION, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
 import { responseQualityIssue } from '../expression/response-quality.mjs'
-import { createMockMemoryRepository } from '../brain/memory/mock-repository.mjs'
-import { createSearchMemoryTool } from '../action/tools/search-memory.mjs'
-import { createGetMusicContextTool } from '../action/tools/get-music-context.mjs'
-import { createSearchMusicTool } from '../action/tools/search-music.mjs'
-import { createRecommendMusicTool } from '../action/tools/recommend-music.mjs'
-import { createGetTrackInsightTool } from '../action/tools/get-track-insight.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { enforceIntentBoundary, ensureRoutedAction, routeIntent } from '../brain/intent-router.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
+import { clientAction, completeRun, createRuntimeTools, mergeTokenUsage, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
 
-export function createMoriAgent(llm, options = {}) {
-  const musicSearchMode = options.musicSearchMode ?? 'mock'
-  const resolveMusicFeatures = options.resolveMusicFeatures
-  if (!['none', 'mock', 'library'].includes(musicSearchMode)) {
-    throw new Error(`不支持的 musicSearchMode：${musicSearchMode}`)
-  }
+export function createLegacyMoriAgent(llm, options = {}) {
+  const { musicSearchMode, resolveMusicFeatures } = validateRuntimeOptions(options)
   return {
     async execute(input) {
       const runId = randomUUID()
@@ -43,7 +34,7 @@ export function createMoriAgent(llm, options = {}) {
         // 脱离上一轮问答、当前播放状态而触发音乐动作。
         push('INPUT', input)
         const state = createAgentState(input)
-        const tools = createTools(state, musicSearchMode, resolveMusicFeatures, options.memoryRepository, options.memoryUserId, options.songUnderstandingAgent)
+        const tools = createRuntimeTools(state, options, musicSearchMode, resolveMusicFeatures)
         const conversationUnderstanding = understandConversation(state)
         push('SCENE_UNDERSTANDING', conversationUnderstanding)
         const context = { ...assembleConversationContext(state, conversationUnderstanding), conversationUnderstanding }
@@ -83,11 +74,11 @@ export function createMoriAgent(llm, options = {}) {
             })
             logRun.model = repaired.model
             response = validateFinalResponse(repaired.data).response
-            tokenUsage = mergeUsage(first.tokenUsage, repaired.tokenUsage)
+            tokenUsage = mergeTokenUsage(first.tokenUsage, repaired.tokenUsage)
           }
           push('STATE_AFTER', { playbackState: state.playbackState, plannedAction: null })
           push('FINAL_RESPONSE', { response })
-          return complete(logRun, runId, started, logRun.model, tokenUsage, response, trace, null)
+          return completeRun(logRun, runId, started, logRun.model, tokenUsage, response, trace, null)
         }
 
         // Tool Result 是外部事实的唯一来源。最终模型只能基于该结果组织语言，不能补造候选或动作。
@@ -121,7 +112,7 @@ export function createMoriAgent(llm, options = {}) {
         const validated = validateFinalResponse(final.data)
         const response = safeToolResponse(toolResult, validated.response)
         push('FINAL_RESPONSE', { response })
-        return complete(logRun, runId, started, final.model, mergeUsage(first.tokenUsage, final.tokenUsage), response, trace, plannedAction)
+        return completeRun(logRun, runId, started, final.model, mergeTokenUsage(first.tokenUsage, final.tokenUsage), response, trace, plannedAction)
       } catch (cause) {
         const error = cause instanceof Error ? cause.message : String(cause)
         push('ERROR', { error })
@@ -133,50 +124,5 @@ export function createMoriAgent(llm, options = {}) {
   }
 }
 
-function createTools(state, musicSearchMode, resolveMusicFeatures, memoryRepository, memoryUserId, songUnderstandingAgent) {
-  // 正式 Agent 只在 composition root 注入服务端仓储；Playground 才读取 fakeMemory。
-  const usesServerMemory = Boolean(memoryRepository?.available && memoryUserId)
-  const repository = usesServerMemory ? memoryRepository : createMockMemoryRepository(state.fakeMemory)
-  const tools = [
-    createSearchMemoryTool(repository, usesServerMemory ? { userId: memoryUserId } : undefined),
-    createGetMusicContextTool(state),
-  ]
-  if (songUnderstandingAgent) tools.push(createGetTrackInsightTool(state, songUnderstandingAgent))
-  // Playground 保留 Mock 只为观察 Tool Trace；正式产品只有 library 模式，防止 Mock 曲目进入用户对话。
-  if (musicSearchMode === 'library') {
-    tools.push(createSearchMusicTool(state.musicCatalog, resolveMusicFeatures))
-    tools.push(createRecommendMusicTool(state.musicCatalog, resolveMusicFeatures))
-  }
-  else if (musicSearchMode === 'mock') tools.push(createSearchMusicTool())
-  return Object.fromEntries(tools.map((tool) => [tool.name, tool]))
-}
-function complete(logRun, runId, started, model, tokenUsage, finalResponse, trace, action) {
-  const meta = { runId, version: MORI_AGENT_PROMPT_VERSION, model, latency: Date.now() - started, tokenUsage }
-  capabilityStage(logRun, 'completed', { output: { finalResponse }, latency: meta.latency, tokenUsage })
-  return { success: true, finalResponse, ...(action ? { action } : {}), trace, meta }
-}
-function mergeUsage(first, second) {
-  if (!first && !second) return null
-  return { firstCall: first ?? null, finalCall: second ?? null }
-}
-function clientAction(toolResult, toolName) {
-  if (!['search_music', 'recommend_music'].includes(toolName)) return null
-  const track = ['user_library', 'spotify_search'].includes(toolResult?.source) ? toolResult.results?.[0] : null
-  if (!track?.uri) return null
-  return {
-    type: 'play_track',
-    intent: toolName === 'recommend_music' ? 'RECOMMEND' : 'SEARCH',
-    track: { uri: track.uri, title: track.title, artist: track.artist },
-  }
-}
-function safeToolResponse(toolResult, modelResponse) {
-  // A local model may offer to play or recommend something after the trusted library search found
-  // nothing. No candidate means no executable URI, so use a deterministic response rather than
-  // letting fluent text imply an action Mori cannot perform.
-  if (toolResult?.searchScope && !toolResult.results?.length) {
-    return toolResult.searchScope === 'library_then_spotify'
-      ? '我先查了你的曲库，也尝试了 Spotify 搜索，但暂时没有找到符合这个条件的歌曲。可以换个歌手、歌名或听感描述再试试。'
-      : '你的曲库里暂时没有找到符合这个条件的歌曲。可以换个歌手、歌名或听感描述再试试。'
-  }
-  return modelResponse
-}
+// 兼容旧 import；正式 composition root 通过 runtime/index.mjs 选择 Graph 或 Legacy。
+export const createMoriAgent = createLegacyMoriAgent

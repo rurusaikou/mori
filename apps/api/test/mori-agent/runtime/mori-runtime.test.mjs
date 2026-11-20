@@ -1,7 +1,7 @@
 /** Agent V0.1 闭环测试：验证直接回复、三类 Tool、Trace 顺序与错误边界。 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createMoriAgent } from '../../../src/mori-agent/runtime/mori-runtime.mjs'
+import { createMoriAgent } from '../../../src/mori-agent/runtime/index.mjs'
 
 const base = { userMessage: '你好', currentTrack: { title: '测试歌曲', artist: '测试歌手' }, conversationHistory: [], fakeMemory: [{ id: 'm1', content: '旅行时听过这首歌', context: '旅行' }] }
 const response = (data) => ({ data, model: 'test-model', tokenUsage: { total_tokens: 10 } })
