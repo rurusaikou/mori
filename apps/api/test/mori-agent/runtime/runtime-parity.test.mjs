@@ -13,12 +13,17 @@ const base = {
   fakeMemory: [],
 }
 const response = (data) => ({ data, model: 'parity-model', tokenUsage: { total_tokens: 10 } })
+const understandingLlm = async ({ input }) => response({
+  scene: /想听|推荐/u.test(input.latestMessage) ? 'LISTEN_REQUEST' : 'DAILY_CHAT', meaning: input.latestMessage, reference: null,
+  listeningRequest: /想听|推荐/u.test(input.latestMessage) ? { type: /推荐/u.test(input.latestMessage) ? 'RECOMMEND' : 'SEARCH', song: null, artist: null, preferences: [], excludeCurrentTrack: false } : null,
+  emotion: null, confidence: 0.99, ambiguity: null,
+})
 
 function contract(result) {
   const step = (type) => result.trace.find((item) => item.type === type)?.data
   return {
     success: result.success,
-    intent: step('INTENT_ROUTED'),
+    understanding: step('CONVERSATION_UNDERSTANDING'),
     toolCall: step('TOOL_CALL') ?? null,
     toolArguments: step('TOOL_ARGUMENTS') ?? null,
     finalResponse: result.finalResponse,
@@ -27,8 +32,9 @@ function contract(result) {
 }
 
 async function runBoth(createLlm, input = base, options = {}) {
-  const legacy = await createLegacyMoriAgent(createLlm(), options).execute(input)
-  const graph = await createMoriGraphAgent(createLlm(), options).execute(input)
+  const runtimeOptions = { ...options, understandingLlm }
+  const legacy = await createLegacyMoriAgent(createLlm(), runtimeOptions).execute(input)
+  const graph = await createMoriGraphAgent(createLlm(), runtimeOptions).execute(input)
   return { legacy, graph }
 }
 
@@ -52,7 +58,6 @@ test('Legacy and Graph preserve tool arguments, response, and playback action', 
   const { legacy, graph } = await runBoth(createLlm, {
     ...base,
     userMessage: '我想听言不由衷',
-    musicCatalog: [{ uri: 'spotify:track:target', title: '言不由衷', artist: '徐佳莹' }],
   }, { musicSearchMode: 'library' })
   assert.deepEqual(contract(graph), contract(legacy))
 })

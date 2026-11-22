@@ -46,9 +46,8 @@ function describeStage(entry) {
     failed: () => `${identity}：Capability 执行失败，耗时 ${entry.latency}ms。原因：${safe(entry.error)}。`,
     agent_input: () => `${identity}：收到 Agent 输入。${readable(agentInputSummary(eventData(entry)))}。`,
     agent_context_assembly: () => `${identity}：Agent Context 组装完成。${readable(eventData(entry))}。`,
-    agent_scene_understanding: () => `${identity}：场景与局部对话理解完成。${readable(eventData(entry))}。`,
+    agent_conversation_understanding: () => `${identity}：LLM Conversation Understanding 完成。${readable(eventData(entry))}。`,
     agent_state_before: () => `${identity}：记录决策前的 World State 与 Playback State。${readable(eventData(entry))}。`,
-    agent_intent_routed: () => `${identity}：意图路由完成。${readable(eventData(entry))}。`,
     agent_model_decision: () => `${identity}：模型完成下一步决策。${readable(eventData(entry))}。`,
     agent_tool_call: () => `${identity}：Agent 选择调用 Tool。${readable(eventData(entry))}。`,
     agent_tool_arguments: () => `${identity}：Tool 参数已生成。${readable(eventData(entry))}。`,
@@ -66,8 +65,8 @@ function capabilityName(value) {
 }
 function eventData(entry) { const { timestamp, source, runId, capability, promptVersion, model, stage, ...data } = entry; return data }
 function agentInputSummary(input) {
-  // musicCatalog 与 fakeMemory 可能包含数百条记录。完整数据仍进入 Agent，但日志只保留
-  // 排障需要的状态和数量，避免真正的错误被超长 JSON 淹没，也减少用户资料落盘范围。
+  // fakeMemory 可能包含多条记录。日志只保留排障需要的状态和数量，避免真正的错误
+  // 被超长 JSON 淹没，也减少用户资料落盘范围。
   return {
     userMessage: input.userMessage,
     currentTrack: input.currentTrack
@@ -77,7 +76,6 @@ function agentInputSummary(input) {
     worldState: input.worldState,
     conversationHistoryCount: Array.isArray(input.conversationHistory) ? input.conversationHistory.length : 0,
     fakeMemoryCount: Array.isArray(input.fakeMemory) ? input.fakeMemory.length : 0,
-    musicCatalogCount: Array.isArray(input.musicCatalog) ? input.musicCatalog.length : 0,
   }
 }
 function tokens(value) { return value?.total_tokens ?? value?.totalTokens ?? '—' }

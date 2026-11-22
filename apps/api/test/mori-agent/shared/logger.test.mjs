@@ -33,7 +33,7 @@ test('marks playground and lab logs as debug', () => {
   assert.match(line, /\[调试\] \[信息\]/)
 })
 
-test('summarizes large agent input instead of logging catalog and memory contents', () => {
+test('summarizes large agent input instead of logging memory contents', () => {
   const line = formatCapabilityLogLine({
     source: 'runtime',
     timestamp: '2026-11-18T12:00:00.000Z',
@@ -46,11 +46,9 @@ test('summarizes large agent input instead of logging catalog and memory content
     playbackState: { status: 'none', currentTrack: null },
     conversationHistory: [{ role: 'user', content: '旧消息正文' }],
     fakeMemory: [{ id: 'm1', content: '不应写入日志的记忆正文' }],
-    musicCatalog: [{ uri: 'spotify:track:1', title: '不应写入日志的歌名', artist: '歌手' }],
   })
   assert.match(line, /"conversationHistoryCount":1/)
   assert.match(line, /"fakeMemoryCount":1/)
-  assert.match(line, /"musicCatalogCount":1/)
   assert.doesNotMatch(line, /不应写入日志/)
   assert.doesNotMatch(line, /旧消息正文/)
 })

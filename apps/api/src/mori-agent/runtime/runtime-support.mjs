@@ -27,11 +27,11 @@ export function createRuntimeTools(state, options, musicSearchMode, resolveMusic
     createGetMusicContextTool(state),
   ]
   if (options.songUnderstandingAgent) tools.push(createGetTrackInsightTool(state, options.songUnderstandingAgent))
-  // Playground 保留 Mock 只为观察 Tool Trace；正式产品只有 library 模式，防止 Mock 曲目进入用户对话。
+  // 正式音乐 Tool 只返回待 Extension 执行的请求。OAuth 与完整曲库不进入 Agent API。
   if (musicSearchMode === 'library') {
-    tools.push(createSearchMusicTool(state.musicCatalog, resolveMusicFeatures))
-    tools.push(createRecommendMusicTool(state.musicCatalog, resolveMusicFeatures))
-  } else if (musicSearchMode === 'mock') tools.push(createSearchMusicTool())
+    tools.push(createSearchMusicTool('delegate'))
+    tools.push(createRecommendMusicTool())
+  } else if (musicSearchMode === 'mock') tools.push(createSearchMusicTool('mock'))
   return Object.fromEntries(tools.map((tool) => [tool.name, tool]))
 }
 
@@ -49,25 +49,17 @@ export function mergeTokenUsage(first, second) {
 }
 
 export function clientAction(toolResult, toolName) {
-  // 只有来自可信曲库或 Spotify Search 的完整 URI 才能跨越服务端边界。Mock、Memory、
-  // Song Insight 的结果即使包含相似字段，也不能被解释为播放命令。
   if (!['search_music', 'recommend_music'].includes(toolName)) return null
-  const track = ['user_library', 'spotify_search'].includes(toolResult?.source) ? toolResult.results?.[0] : null
-  if (!track?.uri) return null
+  if (!['search_music', 'recommend_music'].includes(toolResult?.operation)) return null
   return {
-    type: 'play_track',
+    type: 'music_request',
     intent: toolName === 'recommend_music' ? 'RECOMMEND' : 'SEARCH',
-    track: { uri: track.uri, title: track.title, artist: track.artist },
+    query: toolResult.query ?? '',
+    excludeUris: toolResult.excludeUris ?? [],
   }
 }
 
 export function safeToolResponse(toolResult, modelResponse) {
-  // 本地模型可能在可信候选为空时仍承诺播放。没有 URI 就没有可执行动作，因此使用
-  // 确定性回复封住副作用边界，而不是让流畅文本掩盖 Tool 失败。
-  if (toolResult?.searchScope && !toolResult.results?.length) {
-    return toolResult.searchScope === 'library_then_spotify'
-      ? '我先查了你的曲库，也尝试了 Spotify 搜索，但暂时没有找到符合这个条件的歌曲。可以换个歌手、歌名或听感描述再试试。'
-      : '你的曲库里暂时没有找到符合这个条件的歌曲。可以换个歌手、歌名或听感描述再试试。'
-  }
+  // 音乐请求的真实结果要等 Extension 执行后才能确定；服务端不能提前声称找到或播放。
   return modelResponse
 }

@@ -71,6 +71,8 @@ State validation
 
 | 主题 | 文档 |
 |---|---|
+| 规则理解迁移到 LLM Understanding 的设计与评估 | [LLM 对话理解](../../../../docs/MORI_CONVERSATION_UNDERSTANDING_LLM_2026-11-22.md) |
+| 三个用户场景与唯一主流程 | [三场景主流程](../../../../docs/MORI_THREE_SCENES_2026-11-21.md) |
 | 四层模块完成度、证据与验收标准 | [模块成熟度](../../../../docs/MORI_MODULE_MATURITY_2026-11-19.md) |
 | Memory 契约、存储与评判标准 | [Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md) |
 | 歌曲四层证据与协作边界 | [Song Understanding V0.1](../../../../docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md) |
@@ -78,6 +80,7 @@ State validation
 | 对话、推荐与播放闭环问题 | [2026-11-18 复盘](../../../../docs/MORI_AGENT_CONVERSATION_RECOMMENDATION_REVIEW_2026-11-18.md) |
 | 日志来源与排查方式 | [日志说明](../../../../docs/LOGGING.md) |
 | LangGraph 迁移范围与回退策略 | [迁移记录](../../../../docs/MORI_LANGGRAPH_MIGRATION_2026-11-19.md) |
+| 每个 Tool 的实现、流程图与副作用边界 | [Tool 实现说明](../../../../docs/MORI_AGENT_TOOLS_2026-11-21.md) |
 
 ## 开发入口
 

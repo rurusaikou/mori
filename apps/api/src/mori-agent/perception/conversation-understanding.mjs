@@ -1,115 +1,76 @@
-/**
- * Intent 之前的场景理解层。它只整理当前对话事实和证据，不决定 Tool 或动作。
- * 目的：先回答“现在在聊什么、评价谁、是否承接上一句”，再讨论音乐意图。
- */
-import { explicitMusicRequestKind, isReferenceContinuation } from './conversation-rules.mjs'
+/** Conversation Understanding 使用结构化 LLM，不包含关键词、正则或 Tool 路由规则。 */
+import { object, text } from '../shared/executor.mjs'
 
-export function understandConversation(state) {
-  const message = state.userMessage.trim()
-  const recent = state.conversationHistory.slice(-6)
-  const previousUserMessage = [...recent].reverse().find((item) => item.role === 'user')?.content ?? null
-  const previousAssistantMessage = [...recent].reverse().find((item) => item.role === 'assistant')?.content ?? null
-  const explicitMusicRequest = explicitMusicRequestKind(message) !== null
-  const currentTrackReference = Boolean(state.playbackState.currentTrack) && /(这首|这歌|当前|现在这首|正在听)/u.test(message)
-  const explicitMusicTopic = /(歌曲?|音乐|歌手|专辑|歌词|旋律|节奏|编曲|作词|作曲|播放|推荐)/u.test(message)
-  const recentMusicTopic = recent.slice(-4).some((item) => /(歌曲?|音乐|歌手|专辑|歌词|播放|推荐|《[^》]+》)/u.test(item.content))
-  const evaluationTarget = targetOf(message, currentTrackReference)
-  const referenceRelation = referenceOf(message, previousUserMessage, previousAssistantMessage, recent)
-  const scene = explicitMusicRequest
-    ? 'MUSIC_REQUEST'
-    : (currentTrackReference || (explicitMusicTopic && recentMusicTopic))
-      ? 'MUSIC_CHAT'
-      : explicitCompanionSignal(message)
-        ? 'COMPANION'
-        : 'SOCIAL_CHAT'
-
-  return {
-    scene,
-    currentTopic: semanticTopic(message, previousAssistantMessage, referenceRelation, explicitMusicRequest),
-    evaluationTarget,
-    referenceRelation,
-    musicEvidence: {
-      explicitRequest: explicitMusicRequest,
-      currentTrackReference,
-      recentMusicTopic,
-      sufficient: explicitMusicRequest || currentTrackReference || (explicitMusicTopic && recentMusicTopic),
-    },
-  }
+export const CONVERSATION_UNDERSTANDING_PROMPT_VERSION = 'conversation-understanding-v1.0'
+export const CONVERSATION_SCENES = ['LISTEN_REQUEST', 'DAILY_CHAT', 'SONG_CHAT']
+export const CONVERSATION_UNDERSTANDING_SCHEMA = {
+  type: 'object',
+  properties: {
+    scene: { type: 'string', enum: CONVERSATION_SCENES }, meaning: { type: 'string' },
+    reference: { anyOf: [{ type: 'null' }, { type: 'object', properties: { type: { type: 'string' }, value: { anyOf: [{ type: 'null' }, { type: 'string' }] } }, required: ['type', 'value'], additionalProperties: false }] },
+    listeningRequest: { anyOf: [{ type: 'null' }, { type: 'object', properties: { type: { type: 'string', enum: ['SEARCH', 'RECOMMEND'] }, song: { anyOf: [{ type: 'null' }, { type: 'string' }] }, artist: { anyOf: [{ type: 'null' }, { type: 'string' }] }, preferences: { type: 'array', items: { type: 'string' } }, excludeCurrentTrack: { type: 'boolean' } }, required: ['type', 'song', 'artist', 'preferences', 'excludeCurrentTrack'], additionalProperties: false }] },
+    emotion: { anyOf: [{ type: 'null' }, { type: 'object', properties: { description: { type: 'string' }, confidence: { type: 'number' } }, required: ['description', 'confidence'], additionalProperties: false }] },
+    confidence: { type: 'number' }, ambiguity: { anyOf: [{ type: 'null' }, { type: 'string' }] },
+  },
+  required: ['scene', 'meaning', 'reference', 'listeningRequest', 'emotion', 'confidence', 'ambiguity'], additionalProperties: false,
 }
 
-/**
- * 将已校验的 State 整理成模型上下文。历史只用于解释本轮输入，不能覆盖 latestMessage。
- */
-export function assembleConversationContext(state, understanding) {
-  const history = deduplicateHistory(state.conversationHistory)
-  const previousAssistant = [...history].reverse().find((item) => item.role === 'assistant')?.content ?? null
-  const previousUser = [...history].reverse().find((item) => item.role === 'user')?.content ?? null
-  return {
-    latestMessage: state.userMessage,
-    conversationFocus: {
-      currentTopic: understanding.currentTopic,
-      previousUserMessage: previousUser,
-      previousAssistantMessage: previousAssistant,
-      referenceContinuation: understanding.referenceRelation.type === 'CONTINUES_PREVIOUS' || isReferenceContinuation(state.userMessage),
-    },
-    recentHistory: history.slice(-6),
-    emotionSignal: explicitEmotion(state.userMessage),
-    worldState: state.worldState,
-    playbackState: state.playbackState,
-  }
-}
+export const CONVERSATION_UNDERSTANDING_PROMPT = `
+你是 Mori 的 Conversation Understanding 模块。
 
-function explicitEmotion(message) {
-  const signals = [
-    ['sad', /我(?:很|好)?(?:难过|伤心|低落|压抑)/u],
-    ['tired', /我.{0,4}(?:很|好)?累|我累了/u],
-    ['happy', /我(?:很|好)?(?:开心|高兴|快乐)/u],
-    ['angry', /我(?:很|好)?(?:生气|愤怒|火大)/u],
-  ]
-  const match = signals.find(([, pattern]) => pattern.test(message))
-  return match ? { label: match[0], confidence: 0.98, evidence: message } : null
-}
+你的任务是理解 latestMessage 在当前上下文中的含义，而不是总结整段 conversation。
 
-function deduplicateHistory(history) {
-  const seen = new Set()
-  return history.filter((item) => {
-    const key = `${item.role}:${item.content.replaceAll(/\s+/g, ' ').trim()}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
+【信息使用原则】
+1. latestMessage 是当前轮用户真正说的话，也是判断本轮意图的唯一主体。
+2. conversationHistory 只用于理解 latestMessage 的指代、省略、承接和背景。
+3. currentState 只用于理解当前客观状态，例如当前正在播放什么歌曲。
+4. 不要把 conversationHistory 中过去的请求、意图或情绪自动继承到当前轮。
+5. 如果过去的请求已经得到响应或执行，除非 latestMessage 明确继续该请求，否则不要把它判断为当前请求。
+6. meaning 必须描述 latestMessage 当前表达的意思，不要总结历史对话。
+
+【scene】
+LISTEN_REQUEST：
+latestMessage 当前正在要求 Mori 搜索、推荐或播放音乐。
+只有当前消息存在音乐行动请求时才使用。
+
+SONG_CHAT：
+latestMessage 是在讨论、评价、回应歌曲、歌手、歌词、声音或音乐感受，但没有提出新的搜索、推荐或播放请求。
+
+DAILY_CHAT：
+其他日常聊天、分享、提问、倾诉或回应。
+
+【listeningRequest】
+只有 latestMessage 当前确实提出搜索或推荐音乐的请求时才生成。
+历史中已经提出或执行过的音乐请求不能自动继承到当前轮。
+
+【emotion】
+只提取 latestMessage 当前明确表达的用户情绪。
+不要从 conversationHistory 继承过去的情绪。
+
+你不回复用户、不选择 Tool、不执行动作，只返回给定 Schema。
+`
+
+export async function understandConversation(llm, state) {
+  const result = await llm({
+    prompt: CONVERSATION_UNDERSTANDING_PROMPT,
+    input: { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), currentState: { worldState: state.worldState, playbackState: state.playbackState } },
+    schema: CONVERSATION_UNDERSTANDING_SCHEMA,
+    schemaName: 'mori_conversation_understanding_v1',
   })
+  return { understanding: validateConversationUnderstanding(result.data), model: result.model, tokenUsage: result.tokenUsage }
 }
 
-function explicitCompanionSignal(text) {
-  return /我.{0,5}(难过|伤心|低落|压抑|孤独|好累|很累|累了|生气|开心)|想找你聊|陪我/u.test(text)
-}
-function targetOf(text, currentTrackReference) {
-  if (/(为什么(?:你)?推荐|你推荐的|你说|你的意思|你理解|你弄错|Mori)/iu.test(text)) return 'MORI'
-  if (currentTrackReference) return 'CURRENT_TRACK'
-  const person = text.match(/([p{Script=Han}]{1,8}(?:姐|哥|老师|前辈|同事|朋友|她|他))/u)?.[1]
-  return person ? `PERSON:${person}` : 'GENERAL'
-}
-function referenceOf(text, previousUserMessage, previousAssistantMessage, recent) {
-  const shortAnswer = /^(一般|还行|对啊|是啊|不知道|嗯+|没有|没呢|还好|不太好|挺好)[。.!！?？…]*$/u.test(text)
-  const previousWasQuestion = Boolean(previousAssistantMessage && /[?？]|怎么样|吗|呢|什么|如何|要不要/u.test(previousAssistantMessage))
-  if ((shortAnswer && previousWasQuestion) || isReferenceContinuation(text)) {
-    return { type: 'CONTINUES_PREVIOUS', refersTo: previousAssistantMessage ?? previousUserMessage ?? recent.at(-1)?.content ?? null }
-  }
-  return { type: 'NEW_TOPIC', refersTo: null }
+export function validateConversationUnderstanding(value) {
+  object(value, 'conversation understanding')
+  if (!CONVERSATION_SCENES.includes(value.scene)) throw new Error('conversation understanding scene 无效')
+  text(value.meaning, 'conversation understanding meaning')
+  if (!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1) throw new Error('conversation understanding confidence 无效')
+  if (value.scene === 'LISTEN_REQUEST' && !value.listeningRequest) throw new Error('LISTEN_REQUEST 必须包含 listeningRequest')
+  if (value.scene !== 'LISTEN_REQUEST' && value.listeningRequest) throw new Error('非 LISTEN_REQUEST 不能包含 listeningRequest')
+  return value
 }
 
-function semanticTopic(text, previousAssistantMessage, referenceRelation, explicitMusicRequest) {
-  if (explicitMusicRequest) return '音乐查找、推荐或播放请求'
-  if (/日语课|日语学习|上完.{0,4}课/u.test(text)) return '日语课程与刚结束的学习经历'
-  if (/(像人机|说话方式|太啰嗦|机械)/u.test(text)) return '对 Mori 对话方式的反馈'
-  if (/(没有|没在).{0,5}(听歌|听音乐|播放)/u.test(text)) return '当前没有播放音乐'
-  if (referenceRelation.type === 'CONTINUES_PREVIOUS') return `回应上一轮问题：${topicHint(previousAssistantMessage)}`
-  if (/(前辈|同事|朋友|老师|姐姐|哥哥|她|他)/u.test(text)) return '人物相关的日常分享'
-  if (/[?？]/u.test(text)) return '用户当前提出的问题'
-  return '用户当前的日常分享'
-}
-function topicHint(value) {
-  if (!value) return '上一轮话题'
-  if (/今天过得怎么样|今天怎么样/u.test(value)) return '今天过得怎么样'
-  return value.replaceAll(/\s+/g, ' ').slice(0, 36)
+export function assembleConversationContext(state, understanding) {
+  // Decision 不再接触原始消息和 History，避免绕过 Understanding 重新分类语义。
+  return { understanding, worldState: state.worldState, playbackState: state.playbackState }
 }

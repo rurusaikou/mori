@@ -5,7 +5,6 @@
  */
 import { createAgentState } from '../perception/state.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
-import { enforceIntentBoundary, ensureRoutedAction, routeIntent } from '../brain/intent-router.mjs'
 import { responseQualityIssue } from '../expression/response-quality.mjs'
 import { decisionSystemPrompt, FINAL_RESPONSE_PROMPT, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
@@ -25,24 +24,19 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, resolveMus
       // 本节点一次完成输入校验、Scene 理解和 Context Assembly；这些仍由原领域函数负责，
       // Wrapper 只把结果写入显式 State，不在 Graph 层复制语言规则。
       const agentState = createAgentState(state.input)
-      const conversationUnderstanding = understandConversation(agentState)
-      const context = { ...assembleConversationContext(agentState, conversationUnderstanding), conversationUnderstanding }
       return {
         agentState,
-        conversationUnderstanding,
-        context,
         trace: [
           record(state, 'INPUT', state.input),
-          record(state, 'SCENE_UNDERSTANDING', conversationUnderstanding),
-          record(state, 'CONTEXT_ASSEMBLY', context),
           record(state, 'STATE_BEFORE', { worldState: agentState.worldState, playbackState: agentState.playbackState }),
         ],
       }
     },
 
-    intent(state) {
-      const routedIntent = routeIntent(state.agentState.userMessage, state.agentState.playbackState, state.conversationUnderstanding)
-      return { routedIntent, trace: [record(state, 'INTENT_ROUTED', routedIntent)] }
+    async understanding(state) {
+      const result = await understandConversation(options.understandingLlm ?? llm, state.agentState)
+      const context = assembleConversationContext(state.agentState, result.understanding)
+      return { conversationUnderstanding: result.understanding, context, understandingTokenUsage: result.tokenUsage, trace: [record(state, 'CONVERSATION_UNDERSTANDING', result.understanding), record(state, 'CONTEXT_ASSEMBLY', context)] }
     },
 
     async decision(state) {
@@ -51,7 +45,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, resolveMus
         prompt: decisionSystemPrompt(Object.values(tools)),
         input: {
           context: state.context,
-          routedIntent: state.routedIntent,
+          understanding: state.conversationUnderstanding,
           availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })),
         },
         schema: AGENT_DECISION_SCHEMA,
@@ -60,8 +54,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, resolveMus
       logRun.model = first.model
       // LLM 的结构化 Decision 仍需经过确定性边界校验。Graph Edge 不能替代 Intent 安全规则，
       // 否则模型可以通过返回任意 Tool 名绕过 Router。
-      let decision = enforceIntentBoundary(validateDecision(first.data), state.routedIntent, tools)
-      decision = ensureRoutedAction(decision, state.routedIntent, tools, state.agentState)
+      const decision = validateDecision(first.data)
       return { decision, model: first.model, firstTokenUsage: first.tokenUsage, trace: [record(state, 'MODEL_DECISION', decision)] }
     },
 
@@ -76,7 +69,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, resolveMus
         trace.push(record(state, 'RESPONSE_REPAIR', { issue: qualityIssue, rejectedResponse: finalResponse }))
         const repaired = await llm({
           prompt: RESPONSE_REPAIR_PROMPT,
-          input: { context: state.context, routedIntent: state.routedIntent, issue: qualityIssue, rejectedResponse: finalResponse },
+          input: { context: state.context, understanding: state.conversationUnderstanding, issue: qualityIssue, rejectedResponse: finalResponse },
           schema: FINAL_RESPONSE_SCHEMA,
           schemaName: 'mori_agent_response_repair_v0_1',
         })

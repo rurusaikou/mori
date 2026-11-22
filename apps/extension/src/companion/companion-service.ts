@@ -24,8 +24,7 @@ export async function getCompanionData() {
 export async function sendCompanionMessage(
   text: string,
   playback: PlaybackState,
-  musicCatalog: MusicTrack[] = [],
-  playTrack?: (track: MusicTrack) => Promise<void>,
+  executeMusicRequest?: (request: MusicRequestAction) => Promise<MusicTrack | null>,
   onUserStored?: (messages: ConversationMessage[]) => Promise<void>,
 ) {
   const value = text.trim()
@@ -38,25 +37,23 @@ export async function sendCompanionMessage(
   await extensionStorage.setConversation(messagesWithUser)
   await onUserStored?.(messagesWithUser)
 
-  const agentResult = await requestAgentReply(value, playback, messages, memories, musicCatalog)
+  const agentResult = await requestAgentReply(value, playback, messages, memories)
   let reply = agentResult.reply
-  if (agentResult.action?.type === 'play_track') {
-    // The model may only select a URI that was supplied in this request. Resolve it back to the
-    // trusted Extension object before touching Spotify, so invented URIs never become commands.
-    const track = musicCatalog.find((item) => item.uri === agentResult.action?.track.uri)
-    if (!track || !playTrack) reply = '我在你的曲库里找到了候选歌曲，但现在还不能启动播放。'
+  if (agentResult.action?.type === 'music_request') {
+    if (!executeMusicRequest) reply = '这次还不能执行音乐请求。'
     else {
       try {
-        await playTrack(track)
-        // API 只能选择可信候选，无法预知浏览器端播放是否成功。成功语气必须在
-        // Extension 完成真实播放动作之后生成，避免“说已播放但动作失败”。
-        reply = agentResult.action.intent === 'RECOMMEND'
+        const track = await executeMusicRequest(agentResult.action)
+        if (!track) reply = agentResult.action.intent === 'SEARCH'
+          ? '我查了你的完整曲库和 Spotify，暂时没有找到这首歌。'
+          : '这次没有找到合适且可播放的歌曲。'
+        else reply = agentResult.action.intent === 'RECOMMEND'
           ? `给你选了《${track.title}》— ${track.artist}，现在开始播放。`
           : `找到了《${track.title}》— ${track.artist}，现在开始播放。`
       }
       catch (error) {
         console.error('Agent playback action failed:', error)
-        reply = `我找到了《${track.title}》，但这次没能启动播放。请检查 Spotify 设备后再试一次。`
+        reply = '我找到了候选歌曲，但这次没能启动播放。请检查 Spotify 设备后再试一次。'
       }
     }
   }
@@ -95,7 +92,6 @@ async function requestAgentReply(
   playback: PlaybackState,
   messages: ConversationMessage[],
   memories: MusicMemory[],
-  musicCatalog: MusicTrack[],
 ) {
   const apiBaseUrl = (await extensionStorage.getApiBaseUrl()).replace(/\/$/, '')
   try {
@@ -124,14 +120,6 @@ async function requestAgentReply(
           content: memory.note,
           context: memory.track ? `${memory.track.title} · ${memory.track.artist}` : memory.createdAt,
         })),
-        // The server receives a bounded, minimal catalogue and may only return one of these URIs.
-        // OAuth credentials and playlist ownership remain inside the Extension.
-        // Cached Spotify entries may outlive a removed/unavailable track and lose metadata.
-        // Candidate corruption must not invalidate an otherwise normal conversation request.
-        musicCatalog: musicCatalog
-          .filter((track) => track.uri?.trim() && track.title?.trim() && track.artist?.trim())
-          .slice(0, 500)
-          .map((track) => ({ uri: track.uri, isrc: track.isrc, title: track.title.trim(), artist: track.artist.trim(), catalogSource: track.catalogSource })),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       }),
     })
@@ -139,7 +127,7 @@ async function requestAgentReply(
       success?: boolean
       finalResponse?: string
       error?: string
-      action?: { type: 'play_track'; intent?: 'SEARCH' | 'RECOMMEND'; track: { uri: string; title: string; artist: string } }
+      action?: MusicRequestAction
     }
     if (!response.ok || !result.success || !result.finalResponse?.trim()) throw new Error(result.error || `Agent HTTP ${response.status}`)
     return { reply: result.finalResponse.trim(), action: result.action }
@@ -153,6 +141,13 @@ async function requestAgentReply(
       ? `我暂时连不上理解服务，但还在陪你听《${playback.track.title}》。连接恢复后，我再认真回答你。`
       : '我暂时连不上理解服务，但我还在。连接恢复后，我们再继续聊。' }
   }
+}
+
+type MusicRequestAction = {
+  type: 'music_request'
+  intent: 'SEARCH' | 'RECOMMEND'
+  query: string
+  excludeUris: string[]
 }
 
 function greeting(now: Date): ConversationMessage {

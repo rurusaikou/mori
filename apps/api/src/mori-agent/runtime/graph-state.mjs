@@ -17,10 +17,10 @@ export const MoriGraphState = Annotation.Root({
   // 二者分开保存，避免后续 Node 从 Prompt 输入反推播放状态等原始事实。
   agentState: value(),
   conversationUnderstanding: value(),
+  understandingTokenUsage: value(),
   context: value(),
 
-  // Brain output：Intent 是唯一动作边界；Decision 只能在该边界内选择回复或 Tool。
-  routedIntent: value(),
+  // Brain output：Decision 只消费上方 Structured Understanding，选择回复或 Tool。
   decision: value(),
 
   // Model accounting：第一次调用和最终/修订调用分别保留，便于比较两种 Runtime。

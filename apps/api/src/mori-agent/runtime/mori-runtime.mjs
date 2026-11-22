@@ -1,7 +1,7 @@
 /**
  * Conversation Agent 的应用层编排器。
  *
- * 固定流程：State 校验 → Scene/Context → Intent → Model Decision → Optional Tool → Final Response。
+ * 固定流程：State 校验 → Understanding LLM → Model Decision → Optional Tool → Final Response。
  * 这里不维护语言识别规则，也不直接访问产品状态；所有输入先转成只读 State，Tool 由
  * composition root 显式装配。每轮最多执行一个 Tool，保证动作可追踪且不会形成失控循环。
  */
@@ -11,7 +11,6 @@ import { decisionSystemPrompt, FINAL_RESPONSE_PROMPT, MORI_AGENT_PROMPT_VERSION,
 import { responseQualityIssue } from '../expression/response-quality.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
-import { enforceIntentBoundary, ensureRoutedAction, routeIntent } from '../brain/intent-router.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
 import { clientAction, completeRun, createRuntimeTools, mergeTokenUsage, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
 
@@ -30,33 +29,30 @@ export function createLegacyMoriAgent(llm, options = {}) {
         return step
       }
       try {
-        // 第一阶段只建立事实与语义上下文。Intent 必须在 Context 完成后判断，避免关键词
-        // 脱离上一轮问答、当前播放状态而触发音乐动作。
+        // 第一阶段只建立事实；语义统一交给结构化 Understanding LLM。
         push('INPUT', input)
         const state = createAgentState(input)
         const tools = createRuntimeTools(state, options, musicSearchMode, resolveMusicFeatures)
-        const conversationUnderstanding = understandConversation(state)
-        push('SCENE_UNDERSTANDING', conversationUnderstanding)
-        const context = { ...assembleConversationContext(state, conversationUnderstanding), conversationUnderstanding }
-        push('CONTEXT_ASSEMBLY', context)
         push('STATE_BEFORE', { worldState: state.worldState, playbackState: state.playbackState })
-        const routedIntent = routeIntent(state.userMessage, state.playbackState, conversationUnderstanding)
-        push('INTENT_ROUTED', routedIntent)
+        const understood = await understandConversation(options.understandingLlm ?? llm, state)
+        const conversationUnderstanding = understood.understanding
+        push('CONVERSATION_UNDERSTANDING', conversationUnderstanding)
+        const context = assembleConversationContext(state, conversationUnderstanding)
+        push('CONTEXT_ASSEMBLY', context)
 
         // 模型负责在已确定的 Intent 边界内选择“回复或 Tool”；代码随后再次执行副作用边界校验。
         const first = await llm({
           prompt: decisionSystemPrompt(Object.values(tools)),
           input: {
             context,
-            routedIntent,
+            understanding: conversationUnderstanding,
             availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })),
           },
           schema: AGENT_DECISION_SCHEMA,
           schemaName: 'mori_agent_decision_v0_2',
         })
         logRun.model = first.model
-        let decision = enforceIntentBoundary(validateDecision(first.data), routedIntent, tools)
-        decision = ensureRoutedAction(decision, routedIntent, tools, state)
+        const decision = validateDecision(first.data)
         push('MODEL_DECISION', decision)
 
         if (decision.action === 'respond') {
@@ -68,7 +64,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
             push('RESPONSE_REPAIR', { issue: qualityIssue, rejectedResponse: response })
             const repaired = await llm({
               prompt: RESPONSE_REPAIR_PROMPT,
-              input: { context, routedIntent, issue: qualityIssue, rejectedResponse: response },
+              input: { context, understanding: conversationUnderstanding, issue: qualityIssue, rejectedResponse: response },
               schema: FINAL_RESPONSE_SCHEMA,
               schemaName: 'mori_agent_response_repair_v0_1',
             })

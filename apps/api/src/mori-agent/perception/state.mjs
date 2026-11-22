@@ -1,22 +1,21 @@
 /**
  * 作用：校验并组装一次 Agent Run 的只读上下文，避免 Tool 自行访问产品状态。
- * 输入：userMessage、currentTrack、conversationHistory、fakeMemory、可选 musicCatalog/timeZone。
+ * 输入：userMessage、currentTrack、conversationHistory、fakeMemory、timeZone。
  * 输出：冻结的 AgentState，供模型决策和三个 Tool 显式使用。
  */
 import { noExtra, object, text } from '../shared/executor.mjs'
 
 export function createAgentState(input) {
   object(input)
-  noExtra(input, ['userMessage', 'currentTrack', 'playbackState', 'worldState', 'conversationHistory', 'fakeMemory', 'musicCatalog', 'timeZone'], 'Agent input')
+  noExtra(input, ['userMessage', 'currentTrack', 'playbackState', 'worldState', 'conversationHistory', 'fakeMemory', 'timeZone'], 'Agent input')
   const userMessage = text(input.userMessage, 'userMessage')
   const currentTrack = optionalTrack(input.currentTrack)
   const conversationHistory = Array.isArray(input.conversationHistory) ? input.conversationHistory.map(conversationItem) : []
   const fakeMemory = Array.isArray(input.fakeMemory) ? input.fakeMemory.map(memoryItem) : []
-  const musicCatalog = normalizeMusicCatalog(input.musicCatalog)
   const timeZone = typeof input.timeZone === 'string' && input.timeZone.trim() ? input.timeZone.trim() : 'UTC'
   const playbackState = normalizePlaybackState(input.playbackState, currentTrack)
   const worldState = normalizeWorldState(input.worldState, timeZone)
-  return Object.freeze({ userMessage, currentTrack: playbackState.currentTrack, playbackState, worldState, conversationHistory, fakeMemory, musicCatalog, timeZone })
+  return Object.freeze({ userMessage, currentTrack: playbackState.currentTrack, playbackState, worldState, conversationHistory, fakeMemory, timeZone })
 }
 
 function normalizePlaybackState(value, legacyTrack) {
@@ -44,25 +43,3 @@ function optionalTrack(value) {
 }
 function conversationItem(value) { object(value, 'conversation item'); if (!['user', 'assistant'].includes(value.role)) throw new Error('conversation role 无效'); return { role: value.role, content: text(value.content, 'conversation content') } }
 function memoryItem(value, index) { object(value, `fakeMemory[${index}]`); return { id: value.id ? String(value.id) : `memory-${index + 1}`, content: text(value.content, `fakeMemory[${index}].content`), ...(value.context ? { context: String(value.context) } : {}) } }
-function catalogItem(value, index) {
-  object(value, `musicCatalog[${index}]`)
-  const catalogSource = value.catalogSource === 'spotify_search' ? 'spotify_search' : 'user_library'
-  return { uri: text(value.uri, `musicCatalog[${index}].uri`), ...(value.isrc ? { isrc: String(value.isrc).replaceAll('-', '').toUpperCase() } : {}), title: text(value.title, `musicCatalog[${index}].title`), artist: text(value.artist, `musicCatalog[${index}].artist`), catalogSource }
-}
-
-function normalizeMusicCatalog(value) {
-  if (!Array.isArray(value)) return []
-  const catalog = []
-  for (const [index, item] of value.entries()) {
-    if (catalog.length >= 500) break
-    try {
-      catalog.push(catalogItem(item, index))
-    }
-    catch {
-      // Catalogue entries are optional search candidates, not playback facts. Spotify can return
-      // unavailable or partially removed tracks without artist metadata; discarding one candidate
-      // is safer than failing the user's entire conversation turn.
-    }
-  }
-  return catalog
-}

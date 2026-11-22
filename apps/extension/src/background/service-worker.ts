@@ -111,14 +111,20 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
       case 'MORI_GET_COMPANION_DATA':
         return getCompanionData()
       case 'MORI_SEND_MESSAGE': {
-        // Library hydration can page through many Spotify playlists. Do it only for an explicit
-        // listening/play request; ordinary conversation should stay fast and avoid Spotify quota.
-        const catalog = hasMusicArrangementIntent(message.text) ? await getAgentMusicCatalog(message.text) : []
-        const messages = await sendCompanionMessage(message.text, music.state, catalog, async (track) => {
+        // Brain 先判断三类场景；只有返回 music_request 时才在 Action 层访问曲库/Spotify。
+        // 普通聊天不再由 Extension 猜测意图，也不会预加载数百首候选。
+        const messages = await sendCompanionMessage(message.text, music.state, async (request) => {
+          const candidates = await findMusicCandidates(request.query, request.intent)
+          const available = candidates.filter((item) => !request.excludeUris.includes(item.uri))
+          // 开放推荐没有足够证据做确定性排名时随机选择，避免曲库顺序让 Mori 总推荐
+          // 同一首；明确搜索仍保留最相关结果的首项顺序。
+          const track = request.intent === 'RECOMMEND' ? randomTrack(available) : available[0] ?? null
+          if (!track) return null
           pendingListeningSource = 'agent_selected'
           await music.playUri(track.uri, undefined, track)
           if (!await music.confirmPlayback(track.uri)) throw new Error('Spotify 未确认目标歌曲开始播放')
           logInfo('conversation', 'agent_track_played', { uri: track.uri, title: track.title, artist: track.artist })
+          return track
         }, broadcastCompanionData)
         const exchange = messages.slice(-2)
         logInfo('conversation', 'message_exchange', {
@@ -183,6 +189,12 @@ async function broadcastCompanionData() {
   await broadcastTabMessage(message)
 }
 
+function randomTrack(tracks: MusicTrack[]) {
+  if (!tracks.length) return null
+  const value = crypto.getRandomValues(new Uint32Array(1))[0]
+  return tracks[value % tracks.length]
+}
+
 async function closeMoriEverywhere(source: 'toolbar') {
   // Visibility must still close globally when Spotify is temporarily unavailable. A playback
   // failure is logged, while the persisted Presence state and cross-tab broadcast always run.
@@ -192,10 +204,10 @@ async function closeMoriEverywhere(source: 'toolbar') {
   logInfo('user_event', 'mori_closed', { source, playbackStopped: !music.state.isPlaying })
 }
 
-async function getAgentMusicCatalog(userText: string) {
+async function findMusicCandidates(userText: string, intent: 'SEARCH' | 'RECOMMEND') {
   // “随便推荐”没有精确歌名或歌手，不能拿整句做文本匹配。此前“给我推首歌”中的
   // 单字“我”会错误命中歌曲《我》，导致无条件推荐持续收敛到同一首。
-  if (isOpenRecommendation(userText)) {
+  if (intent === 'RECOMMEND') {
     const preferenceSample = await music.getPreferenceTracks()
     const candidates = preferenceSample
       .filter((track) => track.uri && track.title?.trim() && track.artist?.trim() && track.isPlayable !== false)
@@ -224,27 +236,24 @@ async function getAgentMusicCatalog(userText: string) {
   return spotifyMatches
 }
 
-function isOpenRecommendation(text: string) {
-  return /(随便|随机|任意).{0,10}(推|推荐|来|放|听)|不知道.{0,5}听什么|换一首/u.test(text)
-    || /^(?:再)?(?:给我)?(?:推|推荐|安排|来)(?:一?首|点|一些)?(?:歌|音乐)(?:吧|呗|好吗|好么)?[。！!？?]*$/u.test(text.trim())
-}
-
 function musicSearchQuery(text: string) {
   const stripped = text
     .replace(/[《》「」“”]/gu, ' ')
-    .replace(/(?:我)?(?:想要听|想听|要听|播放|放一首|来一首|来点|帮我找|给我放)/gu, ' ')
-    .replace(/(?:的)?(?:歌曲?|音乐)$/u, ' ')
+    // Extension 必须和 Agent 提取出同一个检索实体。若把“还”“的其他歌”留在 query
+    // 中，服务端虽然正确选择 search_music，预加载阶段仍会把可信候选过滤成空数组。
+    .replace(/(?:我)?(?:还想听|想要听|想听|要听|播放|放一首|来一首|来点|帮我找|帮我搜|给我放)/gu, ' ')
+    .replace(/(?:的)?(?:其他|其它|别的)?(?:歌曲?|音乐)(?:吧|呢|啊|呀)?$/u, ' ')
     .replace(/\s+/gu, ' ')
     .trim()
   return stripped || text.trim()
 }
 
 function rankTextMatches(tracks: MusicTrack[], query: string) {
-  const normalized = query.toLocaleLowerCase()
+  const normalized = normalizeMusicSearchText(query)
   const terms = normalized.split(/[\s·、，,]+/u).filter((term) => term.length > 1)
   return tracks
     .map((track) => {
-      const title = track.title.toLocaleLowerCase(); const artist = track.artist.toLocaleLowerCase()
+      const title = normalizeMusicSearchText(track.title); const artist = normalizeMusicSearchText(track.artist)
       const score = (title && normalized.includes(title) ? 12 : 0) + (artist && normalized.includes(artist) ? 10 : 0)
         + terms.reduce((sum, term) => sum + (title.includes(term) ? 6 : 0) + (artist.includes(term) ? 5 : 0), 0)
       return { track, score }
@@ -254,15 +263,10 @@ function rankTextMatches(tracks: MusicTrack[], query: string) {
     .map((item) => item.track)
 }
 
-function hasMusicArrangementIntent(text: string) {
-  // 这里只决定是否预加载曲库，不替代服务端 Intent Routing。先挡住否定和状态陈述，
-  // 否则“我现在没有在听歌”会因为包含“听歌”而触发昂贵搜索并造成伪命中。
-  if (/(不想|不要|别|先别|没有|没在|并未).{0,6}(听|放|播放)|没有在听/u.test(text)) return false
-  // 服务端已经把“我想听言不由衷”识别为 SEARCH；Extension 必须对同一类明确请求
-  // 预加载候选，否则 Intent 正确但 musicCatalog 为空，Tool 注定只能返回未命中。
-  // 此处允许略宽于精确歌名语法，因为它只准备只读候选，最终动作仍由服务端 Router
-  // 和 Extension URI 白名单双重校验。
-  return /(推荐|安排|随便|不知道.{0,5}听什么|换一首|来一首|来点|帮我找|帮我搜|搜索|查找)|想听.{2,24}|播放《/u.test(text)
+function normalizeMusicSearchText(value: string) {
+  // Spotify 与用户曲库可能分别返回简体、繁体艺名。这里只折叠已知会影响精确搜索
+  // 的字形，不做大规模语言转换，避免错误改写真实歌名。
+  return value.normalize('NFKC').toLocaleLowerCase().replaceAll('瑩', '莹')
 }
 
 function logUserEvent(message: RuntimeRequest & { target?: string }) {
