@@ -51,6 +51,8 @@ DAILY_CHAT：
 `
 
 export async function understandConversation(llm, state) {
+  // History 只提供指代和承接证据，截断可防止久远意图压过本轮消息；完整长期事实应通过
+  // Memory Tool 按需检索，而不是无限塞入 Conversation Understanding。
   const result = await llm({
     prompt: CONVERSATION_UNDERSTANDING_PROMPT,
     input: { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), currentState: { worldState: state.worldState, playbackState: state.playbackState } },
@@ -65,6 +67,8 @@ export function validateConversationUnderstanding(value) {
   if (!CONVERSATION_SCENES.includes(value.scene)) throw new Error('conversation understanding scene 无效')
   text(value.meaning, 'conversation understanding meaning')
   if (!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1) throw new Error('conversation understanding confidence 无效')
+  // Scene 与请求对象必须互相约束。这里校验结构一致性而不是重新写一套自然语言规则，
+  // 既防止下游误触发音乐 Action，也保持 LLM 是唯一语义理解来源。
   if (value.scene === 'LISTEN_REQUEST' && !value.listeningRequest) throw new Error('LISTEN_REQUEST 必须包含 listeningRequest')
   if (value.scene !== 'LISTEN_REQUEST' && value.listeningRequest) throw new Error('非 LISTEN_REQUEST 不能包含 listeningRequest')
   return value

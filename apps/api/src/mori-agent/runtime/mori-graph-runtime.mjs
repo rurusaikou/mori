@@ -13,7 +13,7 @@ import { createMoriGraphNodes, routeAfterDecision } from './graph-nodes.mjs'
 import { completeRun, validateRuntimeOptions } from './runtime-support.mjs'
 
 export function createMoriGraphAgent(llm, options = {}) {
-  const { musicSearchMode, resolveMusicFeatures } = validateRuntimeOptions(options)
+  const { musicSearchMode } = validateRuntimeOptions(options)
   return {
     async execute(input) {
       const runId = randomUUID()
@@ -23,7 +23,7 @@ export function createMoriGraphAgent(llm, options = {}) {
       try {
         // 每次 Run 独立编译，使节点闭包只持有本轮 logger metadata；业务 State 仍全部显式
         // 存在 MoriGraphState 中。启用持久 Checkpointer 前会再将依赖迁入 RunnableConfig。
-        const nodes = createMoriGraphNodes({ llm, options, musicSearchMode, resolveMusicFeatures, logRun })
+        const nodes = createMoriGraphNodes({ llm, options, musicSearchMode, logRun })
         const graph = new StateGraph(MoriGraphState)
           .addNode('perception', nodes.perception)
           .addNode('understanding', nodes.understanding)

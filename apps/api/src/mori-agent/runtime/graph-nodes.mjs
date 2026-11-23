@@ -9,15 +9,15 @@ import { responseQualityIssue } from '../expression/response-quality.mjs'
 import { decisionSystemPrompt, FINAL_RESPONSE_PROMPT, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
-import { clientAction, createRuntimeTools, mergeTokenUsage, safeToolResponse } from './runtime-support.mjs'
+import { clientAction, createRuntimeTools, mergeRunTokenUsage, safeToolResponse } from './runtime-support.mjs'
 
-export function createMoriGraphNodes({ llm, options, musicSearchMode, resolveMusicFeatures, logRun }) {
+export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) {
   // Trace 与文件日志从同一个 record 入口产生，避免 Graph 可观测但 capability 日志缺阶段。
   const record = (state, type, data) => {
     capabilityStage(logRun, `agent_${type.toLowerCase()}`, data)
     return agentStep(state.runId, type, data)
   }
-  const toolsFor = (state) => createRuntimeTools(state.agentState, options, musicSearchMode, resolveMusicFeatures)
+  const toolsFor = (state) => createRuntimeTools(state.agentState, options, musicSearchMode)
 
   return {
     perception(state) {
@@ -76,7 +76,9 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, resolveMus
         logRun.model = repaired.model
         model = repaired.model
         finalResponse = validateFinalResponse(repaired.data).response
-        tokenUsage = mergeTokenUsage(state.firstTokenUsage, repaired.tokenUsage)
+        tokenUsage = mergeRunTokenUsage(state.understandingTokenUsage, state.firstTokenUsage, repaired.tokenUsage)
+      } else {
+        tokenUsage = mergeRunTokenUsage(state.understandingTokenUsage, state.firstTokenUsage)
       }
       trace.push(record(state, 'STATE_AFTER', { playbackState: state.agentState.playbackState, plannedAction: null }))
       trace.push(record(state, 'FINAL_RESPONSE', { response: finalResponse }))
@@ -126,7 +128,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, resolveMus
       return {
         finalResponse,
         model: final.model,
-        tokenUsage: mergeTokenUsage(state.firstTokenUsage, final.tokenUsage),
+        tokenUsage: mergeRunTokenUsage(state.understandingTokenUsage, state.firstTokenUsage, final.tokenUsage),
         trace: [record(state, 'FINAL_RESPONSE', { response: finalResponse })],
       }
     },

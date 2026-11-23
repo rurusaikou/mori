@@ -12,10 +12,10 @@ import { responseQualityIssue } from '../expression/response-quality.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
-import { clientAction, completeRun, createRuntimeTools, mergeTokenUsage, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
+import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
 
 export function createLegacyMoriAgent(llm, options = {}) {
-  const { musicSearchMode, resolveMusicFeatures } = validateRuntimeOptions(options)
+  const { musicSearchMode } = validateRuntimeOptions(options)
   return {
     async execute(input) {
       const runId = randomUUID()
@@ -32,7 +32,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
         // 第一阶段只建立事实；语义统一交给结构化 Understanding LLM。
         push('INPUT', input)
         const state = createAgentState(input)
-        const tools = createRuntimeTools(state, options, musicSearchMode, resolveMusicFeatures)
+        const tools = createRuntimeTools(state, options, musicSearchMode)
         push('STATE_BEFORE', { worldState: state.worldState, playbackState: state.playbackState })
         const understood = await understandConversation(options.understandingLlm ?? llm, state)
         const conversationUnderstanding = understood.understanding
@@ -58,7 +58,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
         if (decision.action === 'respond') {
           const qualityIssue = responseQualityIssue(decision, state)
           let response = decision.response
-          let tokenUsage = first.tokenUsage
+          let tokenUsage = mergeRunTokenUsage(understood.tokenUsage, first.tokenUsage)
           if (qualityIssue) {
             // 质量门只允许一次重生成，避免死循环。Bad Case 作为输入反馈，不进入长期 Prompt。
             push('RESPONSE_REPAIR', { issue: qualityIssue, rejectedResponse: response })
@@ -70,7 +70,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
             })
             logRun.model = repaired.model
             response = validateFinalResponse(repaired.data).response
-            tokenUsage = mergeTokenUsage(first.tokenUsage, repaired.tokenUsage)
+            tokenUsage = mergeRunTokenUsage(understood.tokenUsage, first.tokenUsage, repaired.tokenUsage)
           }
           push('STATE_AFTER', { playbackState: state.playbackState, plannedAction: null })
           push('FINAL_RESPONSE', { response })
@@ -108,7 +108,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
         const validated = validateFinalResponse(final.data)
         const response = safeToolResponse(toolResult, validated.response)
         push('FINAL_RESPONSE', { response })
-        return completeRun(logRun, runId, started, final.model, mergeTokenUsage(first.tokenUsage, final.tokenUsage), response, trace, plannedAction)
+        return completeRun(logRun, runId, started, final.model, mergeRunTokenUsage(understood.tokenUsage, first.tokenUsage, final.tokenUsage), response, trace, plannedAction)
       } catch (cause) {
         const error = cause instanceof Error ? cause.message : String(cause)
         push('ERROR', { error })

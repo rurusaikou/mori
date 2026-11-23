@@ -8,11 +8,9 @@
 mori-agent/
 ├── perception/                 # 感知：当前消息、上下文、播放事实、歌曲证据
 │   ├── state.mjs
-│   ├── conversation-rules.mjs
 │   ├── conversation-understanding.mjs
 │   └── song-understanding/
-├── brain/                      # 认知：意图、五项 Capability、Memory
-│   ├── intent-router.mjs
+├── brain/                      # 认知：专项 Capability 与 Memory
 │   ├── capability-registry.mjs
 │   ├── capabilities/
 │   └── memory/
@@ -39,7 +37,7 @@ mori-agent/
 
 ```text
 Route → Runtime
-Runtime → Perception → Brain → Expression / Action
+Runtime → Perception Understanding → Model Decision → Expression / Action
 Brain Capability → Shared
 Action Tool → 显式注入的 Repository 或 Song Understanding
 ```
@@ -56,8 +54,8 @@ Action Tool → 显式注入的 Repository 或 Song Understanding
 
 ```text
 State validation
-→ Perception: Scene / Context / Playback facts
-→ Brain: Intent routing / Model decision
+→ Perception: Structured Conversation Understanding / Playback facts
+→ Brain: Model decision（消费唯一 Understanding 结果）
 → Action: optional Tool call
 → Expression: final response / quality gate
 → Runtime result and trace
@@ -76,8 +74,6 @@ State validation
 | 四层模块完成度、证据与验收标准 | [模块成熟度](../../../../docs/MORI_MODULE_MATURITY_2026-11-19.md) |
 | Memory 契约、存储与评判标准 | [Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md) |
 | 歌曲四层证据与协作边界 | [Song Understanding V0.1](../../../../docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md) |
-| Conversation Agent 回归与改进 | [测试复盘](../../../../docs/MORI_AGENT_TEST_REVIEW_2026-11-16.md) |
-| 对话、推荐与播放闭环问题 | [2026-11-18 复盘](../../../../docs/MORI_AGENT_CONVERSATION_RECOMMENDATION_REVIEW_2026-11-18.md) |
 | 日志来源与排查方式 | [日志说明](../../../../docs/LOGGING.md) |
 | LangGraph 迁移范围与回退策略 | [迁移记录](../../../../docs/MORI_LANGGRAPH_MIGRATION_2026-11-19.md) |
 | 每个 Tool 的实现、流程图与副作用边界 | [Tool 实现说明](../../../../docs/MORI_AGENT_TOOLS_2026-11-21.md) |

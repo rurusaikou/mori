@@ -15,10 +15,10 @@ import { MORI_AGENT_PROMPT_VERSION } from '../expression/prompts.mjs'
 export function validateRuntimeOptions(options) {
   const musicSearchMode = options.musicSearchMode ?? 'mock'
   if (!['none', 'mock', 'library'].includes(musicSearchMode)) throw new Error(`不支持的 musicSearchMode：${musicSearchMode}`)
-  return { musicSearchMode, resolveMusicFeatures: options.resolveMusicFeatures }
+  return { musicSearchMode }
 }
 
-export function createRuntimeTools(state, options, musicSearchMode, resolveMusicFeatures) {
+export function createRuntimeTools(state, options, musicSearchMode) {
   // 正式 Agent 只在 composition root 注入服务端仓储；Playground 才读取 fakeMemory。
   const usesServerMemory = Boolean(options.memoryRepository?.available && options.memoryUserId)
   const repository = usesServerMemory ? options.memoryRepository : createMockMemoryRepository(state.fakeMemory)
@@ -41,11 +41,11 @@ export function completeRun(logRun, runId, started, model, tokenUsage, finalResp
   return { success: true, finalResponse, ...(action ? { action } : {}), trace, meta }
 }
 
-export function mergeTokenUsage(first, second) {
-  // 不直接相加不同 Provider 的字段；保留原始两次用量，避免 Responses 与 Chat Completions
-  // token 命名差异造成错误统计。
-  if (!first && !second) return null
-  return { firstCall: first ?? null, finalCall: second ?? null }
+export function mergeRunTokenUsage(understanding, decision, final = null) {
+  // Understanding 已成为正式独立模型调用，必须进入 Run 计量；否则日志会系统性低估
+  // 每轮成本。保留 Provider 原始字段，不跨协议猜测 token 字段含义。
+  if (!understanding && !decision && !final) return null
+  return { understandingCall: understanding ?? null, decisionCall: decision ?? null, finalCall: final ?? null }
 }
 
 export function clientAction(toolResult, toolName) {
