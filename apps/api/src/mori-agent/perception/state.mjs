@@ -7,15 +7,16 @@ import { noExtra, object, text } from '../shared/executor.mjs'
 
 export function createAgentState(input) {
   object(input)
-  noExtra(input, ['userMessage', 'currentTrack', 'playbackState', 'worldState', 'conversationHistory', 'fakeMemory', 'timeZone'], 'Agent input')
+  noExtra(input, ['userMessage', 'currentTrack', 'playbackState', 'worldState', 'conversationHistory', 'conversationFocus', 'fakeMemory', 'timeZone'], 'Agent input')
   const userMessage = text(input.userMessage, 'userMessage')
   const currentTrack = optionalTrack(input.currentTrack)
   const conversationHistory = Array.isArray(input.conversationHistory) ? input.conversationHistory.map(conversationItem) : []
+  const conversationFocus = optionalTrack(input.conversationFocus)
   const fakeMemory = Array.isArray(input.fakeMemory) ? input.fakeMemory.map(memoryItem) : []
   const timeZone = typeof input.timeZone === 'string' && input.timeZone.trim() ? input.timeZone.trim() : 'UTC'
   const playbackState = normalizePlaybackState(input.playbackState, currentTrack)
   const worldState = normalizeWorldState(input.worldState, timeZone)
-  return Object.freeze({ userMessage, currentTrack: playbackState.currentTrack, playbackState, worldState, conversationHistory, fakeMemory, timeZone })
+  return Object.freeze({ userMessage, currentTrack: playbackState.currentTrack, playbackState, worldState, conversationHistory, conversationFocus, fakeMemory, timeZone })
 }
 
 function normalizePlaybackState(value, legacyTrack) {
@@ -41,5 +42,14 @@ function optionalTrack(value) {
   object(value, 'currentTrack')
   return { title: text(value.title, 'currentTrack.title'), artist: text(value.artist, 'currentTrack.artist'), ...(value.uri ? { uri: String(value.uri) } : {}), ...(value.isrc ? { isrc: String(value.isrc).replaceAll('-', '').toUpperCase() } : {}), ...(value.album ? { album: String(value.album) } : {}) }
 }
-function conversationItem(value) { object(value, 'conversation item'); if (!['user', 'assistant'].includes(value.role)) throw new Error('conversation role 无效'); return { role: value.role, content: text(value.content, 'conversation content') } }
+function conversationItem(value) {
+  object(value, 'conversation item')
+  if (!['user', 'assistant'].includes(value.role)) throw new Error('conversation role 无效')
+  return {
+    role: value.role,
+    content: text(value.content, 'conversation content'),
+    playbackTrack: optionalTrack(value.playbackTrack ?? value.track),
+    discussionTrack: optionalTrack(value.discussionTrack),
+  }
+}
 function memoryItem(value, index) { object(value, `fakeMemory[${index}]`); return { id: value.id ? String(value.id) : `memory-${index + 1}`, content: text(value.content, `fakeMemory[${index}].content`), ...(value.context ? { context: String(value.context) } : {}) } }

@@ -29,7 +29,7 @@ export function recentCapabilityLogs() { return debugRuns.slice(-100) }
 
 export function formatCapabilityLogLine(entry) {
   const time = localTime(entry.timestamp)
-  const level = ['failed', 'agent_error'].includes(entry.stage) ? '错误' : '信息'
+  const level = ['failed', 'agent_error', 'agent_client_action_failed'].includes(entry.stage) ? '错误' : '信息'
   const source = entry.source === 'test' ? '测试' : entry.source === 'debug' ? '调试' : '真实'
   return `${time} [${source}] [${level}] [mori_agent/${entry.capability}/${entry.stage}] ${describeStage(entry)}`
 }
@@ -42,19 +42,32 @@ function describeStage(entry) {
     llm_started: () => `${identity}：开始调用 LLM 生成结构化结果。`,
     llm_completed: () => `${identity}：LLM 返回完成（模型：${entry.model}；Token：${tokens(entry.tokenUsage)}）。`,
     output_validated: () => `${identity}：模型输出 Schema 与业务边界校验通过。`,
-    completed: () => `${identity}：Capability 执行成功，耗时 ${entry.latency}ms。输出：${readable(entry.output)}。`,
+    completed: () => entry.output?.plannedAction
+      ? `${identity}：服务端决策与动作规划完成，耗时 ${entry.latency}ms；动作仍待客户端执行和确认。输出：${readable(entry.output)}。`
+      : `${identity}：Capability 执行成功，耗时 ${entry.latency}ms。输出：${readable(entry.output)}。`,
     failed: () => `${identity}：Capability 执行失败，耗时 ${entry.latency}ms。原因：${safe(entry.error)}。`,
     agent_input: () => `${identity}：收到 Agent 输入。${readable(agentInputSummary(eventData(entry)))}。`,
     agent_context_assembly: () => `${identity}：Agent Context 组装完成。${readable(eventData(entry))}。`,
     agent_conversation_understanding: () => `${identity}：LLM Conversation Understanding 完成。${readable(eventData(entry))}。`,
+    agent_conversation_understanding_raw: () => `${identity}：Conversation Understanding 原始结构化输出。${readable(eventData(entry))}。`,
+    agent_decision_repair: () => `${identity}：Decision 首次输出不符合 Schema 或动作边界，执行一次受限修复。${readable(eventData(entry))}。`,
+    agent_decision_raw: () => `${identity}：Agent Decision 原始结构化输出。${readable(eventData(entry))}。`,
+    agent_decision_repair_raw: () => `${identity}：Agent Decision 修复后的原始结构化输出。${readable(eventData(entry))}。`,
+    agent_decision_fallback: () => `${identity}：Decision 修复仍无效，执行确定性安全降级。${readable(eventData(entry))}。`,
+    agent_track_reference_resolution: () => `${identity}：歌曲引用解析完成。${readable(eventData(entry))}。`,
     agent_state_before: () => `${identity}：记录决策前的 World State 与 Playback State。${readable(eventData(entry))}。`,
     agent_model_decision: () => `${identity}：模型完成下一步决策。${readable(eventData(entry))}。`,
     agent_tool_call: () => `${identity}：Agent 选择调用 Tool。${readable(eventData(entry))}。`,
     agent_tool_arguments: () => `${identity}：Tool 参数已生成。${readable(eventData(entry))}。`,
-    agent_tool_result: () => `${identity}：Tool 执行完成。${readable(eventData(entry))}。`,
+    agent_tool_result: () => entry.result?.status === 'PENDING'
+      ? `${identity}：Tool 已生成待客户端执行的动作计划，尚未完成真实操作。${readable(eventData(entry))}。`
+      : `${identity}：Tool 执行完成。${readable(eventData(entry))}。`,
     agent_final_model_call: () => `${identity}：开始基于 Tool Result 生成最终回复。${readable(eventData(entry))}。`,
     agent_state_after: () => `${identity}：记录本轮事实状态与待执行动作。${readable(eventData(entry))}。`,
     agent_final_response: () => `${identity}：Agent 最终回复生成完成。${readable(eventData(entry))}。`,
+    agent_client_action_started: () => `${identity}：客户端开始执行服务端规划的播放动作。${readable(eventData(entry))}。`,
+    agent_client_action_completed: () => `${identity}：客户端已确认播放动作真实完成。${readable(eventData(entry))}。`,
+    agent_client_action_failed: () => `${identity}：客户端播放动作执行失败。${readable(eventData(entry))}。`,
     agent_error: () => `${identity}：Agent 执行失败。原因：${safe(entry.error)}。`,
   }
   return descriptions[entry.stage]?.() ?? `${identity}：进入阶段 ${entry.stage}。`

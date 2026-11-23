@@ -5,10 +5,10 @@ import { createRecommendMusicTool } from '../../../src/mori-agent/action/tools/r
 
 test('delegates open recommendation without inventing candidates', async () => {
   const result = await createRecommendMusicTool().execute({ query: '', excludeUris: [] })
-  assert.deepEqual(result, { operation: 'recommend_music', query: '', excludeUris: [] })
+  assert.deepEqual(result, { status: 'PENDING', operation: 'recommend_music', query: '', excludeUris: [], tracks: [] })
 })
 
 test('preserves explicit preference and exclusions for Extension execution', async () => {
   const result = await createRecommendMusicTool().execute({ query: '有能量', excludeUris: ['spotify:track:current'] })
-  assert.deepEqual(result, { operation: 'recommend_music', query: '有能量', excludeUris: ['spotify:track:current'] })
+  assert.deepEqual(result, { status: 'PENDING', operation: 'recommend_music', query: '有能量', excludeUris: ['spotify:track:current'], tracks: [] })
 })

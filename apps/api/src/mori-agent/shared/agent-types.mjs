@@ -5,7 +5,7 @@
  */
 import { object, text } from './executor.mjs'
 
-export const TOOL_NAMES = ['search_memory', 'get_music_context', 'get_track_insight', 'search_music', 'recommend_music']
+export const TOOL_NAMES = ['search_memory', 'get_music_context', 'get_track_insight', 'search_music', 'recommend_music', 'playback_control']
 export const INTENT_NAMES = ['CHAT', 'SEARCH', 'RECOMMEND', 'CONTROL', 'FEEDBACK']
 export const CONVERSATION_MOVES = ['ANSWER', 'FOLLOW_UP', 'ACKNOWLEDGE', 'CLARIFY', 'CONNECT', 'PLAYFUL']
 
@@ -29,8 +29,9 @@ export const AGENT_DECISION_SCHEMA = {
               properties: {
                 query: { anyOf: [{ type: 'null' }, { type: 'string' }] },
                 excludeUris: { type: 'array', items: { type: 'string' } },
+                command: { type: 'string', enum: ['PAUSE', 'RESUME', 'NEXT', 'PREVIOUS'] },
               },
-              required: ['query', 'excludeUris'],
+              required: [],
               additionalProperties: false,
             },
           },
@@ -41,6 +42,14 @@ export const AGENT_DECISION_SCHEMA = {
     },
   },
   required: ['action', 'intent', 'conversationMove', 'reason', 'response', 'toolCall'],
+  allOf: [
+    {
+      anyOf: [
+        { properties: { action: { enum: ['respond'] }, response: { type: 'string' }, toolCall: { type: 'null' } }, required: ['action', 'response', 'toolCall'] },
+        { properties: { action: { enum: ['tool'] }, response: { type: 'null' }, toolCall: { type: 'object' } }, required: ['action', 'response', 'toolCall'] },
+      ],
+    },
+  ],
   additionalProperties: false,
 }
 
@@ -54,14 +63,54 @@ export const FINAL_RESPONSE_SCHEMA = {
 export function validateDecision(value) {
   object(value, 'model decision')
   if (!['respond', 'tool'].includes(value.action)) throw new Error('Agent decision action 无效')
-  text(value.reason, 'decision.reason')
-  const intent = INTENT_NAMES.includes(value.intent) ? value.intent : null
+  const reason = typeof value.reason === 'string' && value.reason.trim() ? value.reason.trim() : '模型未提供决策原因'
+  const inferredIntent = value.action === 'tool' ? ({ search_music: 'SEARCH', recommend_music: 'RECOMMEND', playback_control: 'CONTROL' }[value.toolCall?.name] ?? 'CHAT') : 'CHAT'
+  const intent = INTENT_NAMES.includes(value.intent) ? value.intent : inferredIntent
   const conversationMove = CONVERSATION_MOVES.includes(value.conversationMove) ? value.conversationMove : 'ANSWER'
-  if (value.action === 'respond') return { action: 'respond', intent, conversationMove, reason: value.reason, response: text(value.response, 'decision.response'), toolCall: null }
+  if (value.action === 'respond') return { action: 'respond', intent, conversationMove, reason, response: text(value.response, 'decision.response'), toolCall: null }
   const toolCall = object(value.toolCall, 'decision.toolCall')
   if (!TOOL_NAMES.includes(toolCall.name)) throw new Error(`Agent 请求了未注册 Tool：${toolCall.name}`)
   object(toolCall.arguments, 'decision.toolCall.arguments')
-  return { action: 'tool', intent, conversationMove, reason: value.reason, response: null, toolCall: { ...toolCall, arguments: { ...toolCall.arguments, excludeUris: Array.isArray(toolCall.arguments.excludeUris) ? toolCall.arguments.excludeUris : [] } } }
+  const argumentsValue = ['search_music', 'recommend_music'].includes(toolCall.name)
+    ? { ...toolCall.arguments, excludeUris: Array.isArray(toolCall.arguments.excludeUris) ? toolCall.arguments.excludeUris : [] }
+    : toolCall.name === 'playback_control' ? { command: toolCall.arguments.command } : {}
+  return { action: 'tool', intent, conversationMove, reason, response: null, toolCall: { ...toolCall, arguments: argumentsValue } }
+}
+
+export function validateDecisionForUnderstanding(value, understanding) {
+  const decision = validateDecision(value)
+  const requestType = understanding?.listeningRequest?.type ?? null
+  const expectedMusicTool = requestType === 'SEARCH' ? 'search_music' : requestType === 'RECOMMEND' ? 'recommend_music' : requestType === 'CONTROL' ? 'playback_control' : null
+  if (expectedMusicTool && (decision.action !== 'tool' || decision.toolCall.name !== expectedMusicTool)) {
+    throw new Error(`listeningRequest=${requestType} 必须调用 ${expectedMusicTool}`)
+  }
+  // 所有音乐副作用都必须来自 Structured Understanding。播放控制虽然可恢复，仍会改变
+  // 用户正在听到的内容，不能因为 Decision 单独猜测就越过 listeningRequest 边界。
+  if (!expectedMusicTool && decision.action === 'tool' && ['search_music', 'recommend_music', 'playback_control'].includes(decision.toolCall.name)) {
+    throw new Error('listeningRequest 为空时不能调用音乐动作 Tool')
+  }
+  return decision
+}
+
+export function fallbackDecisionForUnderstanding(value, understanding) {
+  const request = understanding?.listeningRequest
+  if (!request) {
+    if (typeof value?.response === 'string' && value.response.trim()) {
+      return { action: 'respond', intent: 'CHAT', conversationMove: 'ANSWER', reason: 'Decision 修复失败，保留无副作用回复', response: value.response.trim(), toolCall: null }
+    }
+    throw new Error('Decision 修复失败且没有安全回复')
+  }
+  const name = request.type === 'SEARCH' ? 'search_music' : request.type === 'RECOMMEND' ? 'recommend_music' : 'playback_control'
+  const query = [request.song, request.artist, ...(request.preferences ?? [])].filter(Boolean).join(' ').trim()
+  const rejectedExclusions = Array.isArray(value?.toolCall?.arguments?.excludeUris) ? value.toolCall.arguments.excludeUris : []
+  return {
+    action: 'tool',
+    intent: request.type,
+    conversationMove: 'ACKNOWLEDGE',
+    reason: 'Decision 修复失败，按 Structured Understanding 的明确音乐请求安全降级',
+    response: null,
+    toolCall: { name, arguments: name === 'playback_control' ? { command: request.control } : { query, excludeUris: rejectedExclusions } },
+  }
 }
 
 export function validateFinalResponse(value) { return { response: text(object(value, 'final response').response, 'final response.response') } }

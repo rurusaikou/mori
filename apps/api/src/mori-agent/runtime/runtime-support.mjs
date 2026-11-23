@@ -9,6 +9,7 @@ import { createGetMusicContextTool } from '../action/tools/get-music-context.mjs
 import { createSearchMusicTool } from '../action/tools/search-music.mjs'
 import { createRecommendMusicTool } from '../action/tools/recommend-music.mjs'
 import { createGetTrackInsightTool } from '../action/tools/get-track-insight.mjs'
+import { createPlaybackControlTool } from '../action/tools/playback-control.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { MORI_AGENT_PROMPT_VERSION } from '../expression/prompts.mjs'
 
@@ -18,15 +19,16 @@ export function validateRuntimeOptions(options) {
   return { musicSearchMode }
 }
 
-export function createRuntimeTools(state, options, musicSearchMode) {
+export function createRuntimeTools(state, options, musicSearchMode, context = null) {
   // 正式 Agent 只在 composition root 注入服务端仓储；Playground 才读取 fakeMemory。
   const usesServerMemory = Boolean(options.memoryRepository?.available && options.memoryUserId)
   const repository = usesServerMemory ? options.memoryRepository : createMockMemoryRepository(state.fakeMemory)
   const tools = [
     createSearchMemoryTool(repository, usesServerMemory ? { userId: options.memoryUserId } : undefined),
-    createGetMusicContextTool(state),
+    createGetMusicContextTool(context),
+    createPlaybackControlTool(),
   ]
-  if (options.songUnderstandingAgent) tools.push(createGetTrackInsightTool(state, options.songUnderstandingAgent))
+  if (options.songUnderstandingAgent) tools.push(createGetTrackInsightTool(context, options.songUnderstandingAgent))
   // 正式音乐 Tool 只返回待 Extension 执行的请求。OAuth 与完整曲库不进入 Agent API。
   if (musicSearchMode === 'library') {
     tools.push(createSearchMusicTool('delegate'))
@@ -35,10 +37,13 @@ export function createRuntimeTools(state, options, musicSearchMode) {
   return Object.fromEntries(tools.map((tool) => [tool.name, tool]))
 }
 
-export function completeRun(logRun, runId, started, model, tokenUsage, finalResponse, trace, action) {
+export function completeRun(logRun, runId, started, model, tokenUsage, finalResponse, trace, action, context = null) {
   const meta = { runId, version: MORI_AGENT_PROMPT_VERSION, model, latency: Date.now() - started, tokenUsage }
-  capabilityStage(logRun, 'completed', { output: { finalResponse }, latency: meta.latency, tokenUsage })
-  return { success: true, finalResponse, ...(action ? { action } : {}), trace, meta }
+  // client action 只代表服务端规划结果。把它写进 completed 日志，使日志不会把
+  // Agent Run 完成误读为 Spotify 已经完成播放副作用。
+  capabilityStage(logRun, 'completed', { output: { finalResponse, ...(action ? { plannedAction: action } : {}) }, latency: meta.latency, tokenUsage })
+  const conversationContext = context ? { targetTrack: context.targetTrack ?? null, resolution: context.trackResolution ?? null } : undefined
+  return { success: true, finalResponse, ...(action ? { action } : {}), ...(conversationContext ? { conversationContext } : {}), trace, meta }
 }
 
 export function mergeRunTokenUsage(understanding, decision, final = null) {
@@ -49,6 +54,9 @@ export function mergeRunTokenUsage(understanding, decision, final = null) {
 }
 
 export function clientAction(toolResult, toolName) {
+  if (toolName === 'playback_control' && toolResult?.operation === 'playback_control') {
+    return { type: 'playback_control', command: toolResult.command }
+  }
   if (!['search_music', 'recommend_music'].includes(toolName)) return null
   if (!['search_music', 'recommend_music'].includes(toolResult?.operation)) return null
   return {
@@ -61,5 +69,8 @@ export function clientAction(toolResult, toolName) {
 
 export function safeToolResponse(toolResult, modelResponse) {
   // 音乐请求的真实结果要等 Extension 执行后才能确定；服务端不能提前声称找到或播放。
+  if (toolResult?.status === 'PENDING' && ['search_music', 'recommend_music'].includes(toolResult?.operation)) {
+    return '我先把这个选歌请求交给播放器，等实际找到后再告诉你具体是哪一首。'
+  }
   return modelResponse
 }

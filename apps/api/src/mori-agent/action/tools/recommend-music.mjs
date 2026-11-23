@@ -8,9 +8,11 @@ export function createRecommendMusicTool() {
     description: '目标不明确时，根据听感、场景和相关 Memory 推荐歌曲',
     async execute(args) {
       return {
+        status: 'PENDING',
         operation: 'recommend_music',
         query: typeof args?.query === 'string' ? args.query.trim() : '',
         excludeUris: Array.isArray(args?.excludeUris) ? args.excludeUris.filter((uri) => typeof uri === 'string' && uri) : [],
+        tracks: [],
       }
     },
   }

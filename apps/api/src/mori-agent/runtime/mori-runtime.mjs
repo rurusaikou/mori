@@ -7,9 +7,9 @@
  */
 import { randomUUID } from 'node:crypto'
 import { createAgentState } from '../perception/state.mjs'
-import { decisionSystemPrompt, FINAL_RESPONSE_PROMPT, MORI_AGENT_PROMPT_VERSION, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
-import { responseQualityIssue } from '../expression/response-quality.mjs'
-import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
+import { DECISION_REPAIR_PROMPT, decisionSystemPrompt, FINAL_RESPONSE_PROMPT, MORI_AGENT_PROMPT_VERSION, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
+import { enforcePlaybackFact, responseQualityIssue } from '../expression/response-quality.mjs'
+import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
 import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
@@ -32,13 +32,22 @@ export function createLegacyMoriAgent(llm, options = {}) {
         // 第一阶段只建立事实；语义统一交给结构化 Understanding LLM。
         push('INPUT', input)
         const state = createAgentState(input)
-        const tools = createRuntimeTools(state, options, musicSearchMode)
         push('STATE_BEFORE', { worldState: state.worldState, playbackState: state.playbackState })
-        const understood = await understandConversation(options.understandingLlm ?? llm, state)
+        const understood = await understandConversation(options.understandingLlm ?? llm, state, {
+          onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
+        })
         const conversationUnderstanding = understood.understanding
         push('CONVERSATION_UNDERSTANDING', conversationUnderstanding)
         const context = assembleConversationContext(state, conversationUnderstanding)
+        push('TRACK_REFERENCE_RESOLUTION', {
+          referenceType: conversationUnderstanding.reference?.type ?? null,
+          currentTrack: state.currentTrack,
+          targetTrack: context.targetTrack,
+          source: context.trackResolution.source,
+          resolved: context.trackResolution.resolved,
+        })
         push('CONTEXT_ASSEMBLY', context)
+        const tools = createRuntimeTools(state, options, musicSearchMode, context)
 
         // 模型负责在已确定的 Intent 边界内选择“回复或 Tool”；代码随后再次执行副作用边界校验。
         const first = await llm({
@@ -52,13 +61,36 @@ export function createLegacyMoriAgent(llm, options = {}) {
           schemaName: 'mori_agent_decision_v0_2',
         })
         logRun.model = first.model
-        const decision = validateDecision(first.data)
+        capabilityStage(logRun, 'agent_decision_raw', { output: first.data, model: first.model, tokenUsage: first.tokenUsage })
+        let decision
+        let decisionTokenUsage = first.tokenUsage
+        try {
+          decision = validateDecisionForUnderstanding(first.data, conversationUnderstanding)
+        } catch (error) {
+          const issue = error instanceof Error ? error.message : 'Decision 无效'
+          push('DECISION_REPAIR', { issue, rejectedDecision: first.data })
+          const repaired = await llm({
+            prompt: DECISION_REPAIR_PROMPT,
+            input: { context, understanding: conversationUnderstanding, availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })), issue, rejectedDecision: first.data },
+            schema: AGENT_DECISION_SCHEMA,
+            schemaName: 'mori_agent_decision_repair_v0_1',
+          })
+          capabilityStage(logRun, 'agent_decision_repair_raw', { output: repaired.data, model: repaired.model, tokenUsage: repaired.tokenUsage })
+          try {
+            decision = validateDecisionForUnderstanding(repaired.data, conversationUnderstanding)
+          } catch (repairError) {
+            decision = fallbackDecisionForUnderstanding(repaired.data, conversationUnderstanding)
+            push('DECISION_FALLBACK', { issue: repairError instanceof Error ? repairError.message : 'Decision 修复仍无效', decision })
+          }
+          logRun.model = repaired.model
+          decisionTokenUsage = { initialCall: first.tokenUsage ?? null, repairCall: repaired.tokenUsage ?? null }
+        }
         push('MODEL_DECISION', decision)
 
         if (decision.action === 'respond') {
           const qualityIssue = responseQualityIssue(decision, state)
           let response = decision.response
-          let tokenUsage = mergeRunTokenUsage(understood.tokenUsage, first.tokenUsage)
+          let tokenUsage = mergeRunTokenUsage(understood.tokenUsage, decisionTokenUsage)
           if (qualityIssue) {
             // 质量门只允许一次重生成，避免死循环。Bad Case 作为输入反馈，不进入长期 Prompt。
             push('RESPONSE_REPAIR', { issue: qualityIssue, rejectedResponse: response })
@@ -70,11 +102,12 @@ export function createLegacyMoriAgent(llm, options = {}) {
             })
             logRun.model = repaired.model
             response = validateFinalResponse(repaired.data).response
-            tokenUsage = mergeRunTokenUsage(understood.tokenUsage, first.tokenUsage, repaired.tokenUsage)
+            tokenUsage = mergeRunTokenUsage(understood.tokenUsage, decisionTokenUsage, repaired.tokenUsage)
           }
+          response = enforcePlaybackFact(response, state)
           push('STATE_AFTER', { playbackState: state.playbackState, plannedAction: null })
           push('FINAL_RESPONSE', { response })
-          return completeRun(logRun, runId, started, logRun.model, tokenUsage, response, trace, null)
+          return completeRun(logRun, runId, started, logRun.model, tokenUsage, response, trace, null, context)
         }
 
         // Tool Result 是外部事实的唯一来源。最终模型只能基于该结果组织语言，不能补造候选或动作。
@@ -108,7 +141,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
         const validated = validateFinalResponse(final.data)
         const response = safeToolResponse(toolResult, validated.response)
         push('FINAL_RESPONSE', { response })
-        return completeRun(logRun, runId, started, final.model, mergeRunTokenUsage(understood.tokenUsage, first.tokenUsage, final.tokenUsage), response, trace, plannedAction)
+        return completeRun(logRun, runId, started, final.model, mergeRunTokenUsage(understood.tokenUsage, decisionTokenUsage, final.tokenUsage), response, trace, plannedAction, context)
       } catch (cause) {
         const error = cause instanceof Error ? cause.message : String(cause)
         push('ERROR', { error })

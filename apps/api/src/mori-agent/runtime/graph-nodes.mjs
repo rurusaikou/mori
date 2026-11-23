@@ -5,9 +5,9 @@
  */
 import { createAgentState } from '../perception/state.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
-import { responseQualityIssue } from '../expression/response-quality.mjs'
-import { decisionSystemPrompt, FINAL_RESPONSE_PROMPT, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
-import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, validateDecision, validateFinalResponse } from '../shared/agent-types.mjs'
+import { enforcePlaybackFact, responseQualityIssue } from '../expression/response-quality.mjs'
+import { DECISION_REPAIR_PROMPT, decisionSystemPrompt, FINAL_RESPONSE_PROMPT, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
+import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { clientAction, createRuntimeTools, mergeRunTokenUsage, safeToolResponse } from './runtime-support.mjs'
 
@@ -17,7 +17,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
     capabilityStage(logRun, `agent_${type.toLowerCase()}`, data)
     return agentStep(state.runId, type, data)
   }
-  const toolsFor = (state) => createRuntimeTools(state.agentState, options, musicSearchMode)
+  const toolsFor = (state) => createRuntimeTools(state.agentState, options, musicSearchMode, state.context)
 
   return {
     perception(state) {
@@ -34,9 +34,18 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
     },
 
     async understanding(state) {
-      const result = await understandConversation(options.understandingLlm ?? llm, state.agentState)
+      const result = await understandConversation(options.understandingLlm ?? llm, state.agentState, {
+        onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
+      })
       const context = assembleConversationContext(state.agentState, result.understanding)
-      return { conversationUnderstanding: result.understanding, context, understandingTokenUsage: result.tokenUsage, trace: [record(state, 'CONVERSATION_UNDERSTANDING', result.understanding), record(state, 'CONTEXT_ASSEMBLY', context)] }
+      const resolutionLog = {
+        referenceType: result.understanding.reference?.type ?? null,
+        currentTrack: state.agentState.currentTrack ?? null,
+        targetTrack: context.targetTrack,
+        source: context.trackResolution.source,
+        resolved: context.trackResolution.resolved,
+      }
+      return { conversationUnderstanding: result.understanding, context, understandingTokenUsage: result.tokenUsage, trace: [record(state, 'CONVERSATION_UNDERSTANDING', result.understanding), record(state, 'TRACK_REFERENCE_RESOLUTION', resolutionLog), record(state, 'CONTEXT_ASSEMBLY', context)] }
     },
 
     async decision(state) {
@@ -52,10 +61,35 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
         schemaName: 'mori_agent_decision_v0_2',
       })
       logRun.model = first.model
-      // LLM 的结构化 Decision 仍需经过确定性边界校验。Graph Edge 不能替代 Intent 安全规则，
-      // 否则模型可以通过返回任意 Tool 名绕过 Router。
-      const decision = validateDecision(first.data)
-      return { decision, model: first.model, firstTokenUsage: first.tokenUsage, trace: [record(state, 'MODEL_DECISION', decision)] }
+      const trace = []
+      capabilityStage(logRun, 'agent_decision_raw', { output: first.data, model: first.model, tokenUsage: first.tokenUsage })
+      let decision
+      let model = first.model
+      let tokenUsage = first.tokenUsage
+      try {
+        decision = validateDecisionForUnderstanding(first.data, state.conversationUnderstanding)
+      } catch (error) {
+        const issue = error instanceof Error ? error.message : 'Decision 无效'
+        trace.push(record(state, 'DECISION_REPAIR', { issue, rejectedDecision: first.data }))
+        const repaired = await llm({
+          prompt: DECISION_REPAIR_PROMPT,
+          input: { context: state.context, understanding: state.conversationUnderstanding, availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })), issue, rejectedDecision: first.data },
+          schema: AGENT_DECISION_SCHEMA,
+          schemaName: 'mori_agent_decision_repair_v0_1',
+        })
+        capabilityStage(logRun, 'agent_decision_repair_raw', { output: repaired.data, model: repaired.model, tokenUsage: repaired.tokenUsage })
+        try {
+          decision = validateDecisionForUnderstanding(repaired.data, state.conversationUnderstanding)
+        } catch (repairError) {
+          decision = fallbackDecisionForUnderstanding(repaired.data, state.conversationUnderstanding)
+          trace.push(record(state, 'DECISION_FALLBACK', { issue: repairError instanceof Error ? repairError.message : 'Decision 修复仍无效', decision }))
+        }
+        model = repaired.model
+        logRun.model = repaired.model
+        tokenUsage = { initialCall: first.tokenUsage ?? null, repairCall: repaired.tokenUsage ?? null }
+      }
+      trace.push(record(state, 'MODEL_DECISION', decision))
+      return { decision, model, firstTokenUsage: tokenUsage, trace }
     },
 
     async directResponse(state) {
@@ -80,6 +114,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
       } else {
         tokenUsage = mergeRunTokenUsage(state.understandingTokenUsage, state.firstTokenUsage)
       }
+      finalResponse = enforcePlaybackFact(finalResponse, state.agentState)
       trace.push(record(state, 'STATE_AFTER', { playbackState: state.agentState.playbackState, plannedAction: null }))
       trace.push(record(state, 'FINAL_RESPONSE', { response: finalResponse }))
       return { finalResponse, model, tokenUsage, action: null, trace }

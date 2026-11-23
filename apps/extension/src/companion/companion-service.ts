@@ -24,13 +24,13 @@ export async function getCompanionData() {
 export async function sendCompanionMessage(
   text: string,
   playback: PlaybackState,
-  executeMusicRequest?: (request: MusicRequestAction) => Promise<MusicTrack | null>,
+  executeAction?: (request: AgentClientAction) => Promise<MusicTrack | null>,
   onUserStored?: (messages: ConversationMessage[]) => Promise<void>,
 ) {
   const value = text.trim()
   if (!value) throw new Error('请输入想和 Mori 说的话')
   const { messages, memories } = await getCompanionData()
-  const userMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'user', text: value, createdAt: new Date().toISOString() }
+  const userMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'user', text: value, createdAt: new Date().toISOString(), playbackTrack: playback.track }
   // Persist the user's turn before waiting for a potentially slow local model. This makes the
   // message survive chat-tab unmounts, page navigation and service-worker suspension.
   const messagesWithUser = [...messages, userMessage].slice(-100)
@@ -39,29 +39,63 @@ export async function sendCompanionMessage(
 
   const agentResult = await requestAgentReply(value, playback, messages, memories)
   let reply = agentResult.reply
+  let replyTrack = playback.track
+  let actionStatus: 'COMPLETED' | 'FAILED' | null = null
+  let switchedTrack = false
   if (agentResult.action?.type === 'music_request') {
-    if (!executeMusicRequest) reply = '这次还不能执行音乐请求。'
+    if (!executeAction) { reply = '这次还不能执行音乐请求。'; actionStatus = 'FAILED' }
     else {
       try {
-        const track = await executeMusicRequest(agentResult.action)
-        if (!track) reply = agentResult.action.intent === 'SEARCH'
-          ? '我查了你的完整曲库和 Spotify，暂时没有找到这首歌。'
-          : '这次没有找到合适且可播放的歌曲。'
-        else reply = agentResult.action.intent === 'RECOMMEND'
-          ? `给你选了《${track.title}》— ${track.artist}，现在开始播放。`
-          : `找到了《${track.title}》— ${track.artist}，现在开始播放。`
+        const track = await executeAction(agentResult.action) as MusicTrack | null
+        if (!track) {
+          actionStatus = 'COMPLETED'
+          reply = agentResult.action.intent === 'SEARCH'
+            ? '我查了你的完整曲库和 Spotify，暂时没有找到这首歌。'
+            : '这次没有找到合适且可播放的歌曲。'
+        }
+        else {
+          replyTrack = track
+          actionStatus = 'COMPLETED'
+          reply = agentResult.action.intent === 'RECOMMEND'
+            ? `给你选了《${track.title}》— ${track.artist}，现在开始播放。`
+            : `找到了《${track.title}》— ${track.artist}，现在开始播放。`
+        }
       }
       catch (error) {
+        actionStatus = 'FAILED'
         console.error('Agent playback action failed:', error)
         reply = '我找到了候选歌曲，但这次没能启动播放。请检查 Spotify 设备后再试一次。'
       }
     }
+  } else if (agentResult.action?.type === 'playback_control') {
+    if (!executeAction) { reply = '这次还不能控制播放。'; actionStatus = 'FAILED' }
+    else {
+      try {
+        const confirmedTrack = await executeAction(agentResult.action)
+        if (confirmedTrack) replyTrack = confirmedTrack
+        switchedTrack = ['NEXT', 'PREVIOUS'].includes(agentResult.action.command)
+        actionStatus = 'COMPLETED'
+        reply = ({ PAUSE: '已经暂停。', RESUME: '继续播放。', NEXT: '切到下一首。', PREVIOUS: '回到上一首。' })[agentResult.action.command]
+      } catch (error) {
+        actionStatus = 'FAILED'
+        console.error('Agent playback control failed:', error)
+        reply = '这次没能完成播放控制，请检查 Spotify 设备后再试一次。'
+      }
+    }
   }
-  const moriMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'mori', text: reply, createdAt: new Date().toISOString() }
+  // NEXT/PREVIOUS 成功后，真实讨论对象必须切换到确认后的新曲；否则下一轮“这首歌”
+  // 会被 conversationFocus 错误地解析回动作前的歌曲。
+  const discussionTrack = switchedTrack && actionStatus === 'COMPLETED'
+    ? replyTrack
+    : agentResult.conversationContext?.targetTrack ?? (agentResult.action && replyTrack ? replyTrack : null)
+  const moriMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'mori', text: reply, createdAt: new Date().toISOString(), playbackTrack: replyTrack, discussionTrack }
   // Bound local history so long-lived profiles do not grow chrome.storage indefinitely before a
   // server-side conversation store exists.
   const next = [...messagesWithUser, moriMessage].slice(-100)
   await extensionStorage.setConversation(next)
+  if (agentResult.action && agentResult.exchangeId && actionStatus) {
+    await reportAgentActionResult({ exchangeId: agentResult.exchangeId, finalResponse: reply, status: actionStatus, currentTrack: replyTrack })
+  }
   return next
 }
 
@@ -112,7 +146,13 @@ async function requestAgentReply(
         conversationHistory: messages
           .filter((message) => message.id !== GREETING_ID && message.text?.trim())
           .slice(-12)
-          .map((message) => ({ role: message.role === 'mori' ? 'assistant' : 'user', content: message.text.trim() })),
+          .map((message) => ({
+            role: message.role === 'mori' ? 'assistant' : 'user',
+            content: message.text.trim(),
+            playbackTrack: compactTrack(message.playbackTrack ?? message.track),
+            discussionTrack: compactTrack(message.discussionTrack),
+          })),
+        conversationFocus: compactTrack([...messages].reverse().find((message) => message.role === 'mori')?.discussionTrack),
         // Moment remains user-created product data, never an Agent action. The Agent receives only
         // short searchable summaries, not the complete stored track object.
         fakeMemory: memories.slice(0, 50).map((memory) => ({
@@ -127,10 +167,18 @@ async function requestAgentReply(
       success?: boolean
       finalResponse?: string
       error?: string
-      action?: MusicRequestAction
+      action?: AgentClientAction
+      conversationContext?: { targetTrack: MusicTrack | null; resolution: { source: string; resolved: boolean; confidence: number; referenceType: string | null } }
+      exchangeId?: string
+      meta?: { runId?: string; version?: string }
     }
     if (!response.ok || !result.success || !result.finalResponse?.trim()) throw new Error(result.error || `Agent HTTP ${response.status}`)
-    return { reply: result.finalResponse.trim(), action: result.action }
+    return {
+      reply: result.finalResponse.trim(),
+      action: result.action ? { ...result.action, agentRunId: result.meta?.runId, promptVersion: result.meta?.version } : undefined,
+      conversationContext: result.conversationContext,
+      exchangeId: result.exchangeId,
+    }
   } catch (error) {
     console.error('Mori Agent request failed:', error)
     // Do not imitate an intelligent answer after an outage: a transparent, track-aware fallback
@@ -143,15 +191,40 @@ async function requestAgentReply(
   }
 }
 
+async function reportAgentActionResult(input: { exchangeId: string; finalResponse: string; status: 'COMPLETED' | 'FAILED'; currentTrack: MusicTrack | null }) {
+  const apiBaseUrl = (await extensionStorage.getApiBaseUrl()).replace(/\/$/, '')
+  try {
+    const response = await fetch(`${apiBaseUrl}/agent/action-result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...input, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
+    })
+    if (!response.ok) throw new Error(`Agent action result HTTP ${response.status}`)
+  } catch (error) {
+    // 本地对话已经保存成功；归档回写失败不能撤销用户刚看到的真实执行结果。
+    console.error('Mori Agent action result sync failed:', error)
+  }
+}
+
+function compactTrack(track: MusicTrack | null | undefined) {
+  return track ? { uri: track.uri, isrc: track.isrc, title: track.title, artist: track.artist } : null
+}
+
 type MusicRequestAction = {
   type: 'music_request'
   intent: 'SEARCH' | 'RECOMMEND'
   query: string
   excludeUris: string[]
+  agentRunId?: string
+  promptVersion?: string
 }
+type PlaybackControlAction = { type: 'playback_control'; command: 'PAUSE' | 'RESUME' | 'NEXT' | 'PREVIOUS'; agentRunId?: string; promptVersion?: string }
+type AgentClientAction = MusicRequestAction | PlaybackControlAction
 
 function greeting(now: Date): ConversationMessage {
-  return { id: GREETING_ID, role: 'mori', text: '我在。想聊聊现在听到的歌吗？', createdAt: now.toISOString() }
+  // 每个本地自然日都从同一个开放式问题开始，既建立稳定的陪伴仪式，也避免在用户
+  // 尚未播放音乐时预设音乐话题。跨日过滤由 getCompanionData 负责。
+  return { id: GREETING_ID, role: 'mori', text: '今天心情怎么样？', createdAt: now.toISOString() }
 }
 
 function isSameLocalDay(value: string | undefined, now: Date) {

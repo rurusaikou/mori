@@ -18,6 +18,10 @@ export function createAgentRoutes({ productAgent, playgroundAgent, memoryReposit
       await runAgent(request, response, productAgent, { memoryRepository, memoryUserId, detectMemoryCandidate })
       return true
     }
+    if (request.method === 'POST' && request.url === '/agent/action-result') {
+      await storeActionResult(request, response, { memoryRepository, memoryUserId })
+      return true
+    }
     if (!playgroundEnabled) return false
     if (request.method === 'POST' && request.url === '/agent/playground/run') {
       await runAgent(request, response, playgroundAgent)
@@ -49,18 +53,41 @@ async function runAgent(request, response, agent, memory = {}) {
       // pending 先保证用户输入可恢复；同一 exchange/role 使用 upsert 收敛为 completed/failed，
       // 避免请求重试制造同一轮的重复对话记录。
       await memory.memoryRepository.appendConversationMessage(conversationRecord(input, memory.memoryUserId, exchangeId, 'user', result.success ? 'completed' : 'failed', createdAt))
-      if (result.success) await memory.memoryRepository.appendConversationMessage(conversationRecord({ ...input, userMessage: result.finalResponse }, memory.memoryUserId, exchangeId, 'assistant', 'completed', new Date().toISOString()))
+      // 有客户端动作时，服务端回复只是 planned 文案。先保存 pending，等 Extension
+      // 以同一 exchangeId 回写用户真正看到的最终回复和确认后的歌曲。
+      if (result.success) await memory.memoryRepository.appendConversationMessage(conversationRecord({ ...input, userMessage: result.finalResponse }, memory.memoryUserId, exchangeId, 'assistant', result.action ? 'pending' : 'completed', new Date().toISOString()))
       if (result.success && memory.detectMemoryCandidate) {
         // 候选提炼是可重试派生任务，不是回复成功条件；失败不能撤销已保存的原始对话。
         void detectAndStore(memory, input, storedUserMessage).catch(() => undefined)
       }
     }
-    json(request, response, result.success ? 200 : 400, result)
+    json(request, response, result.success ? 200 : 400, { ...result, exchangeId })
   } catch (error) {
     if (archive && input) await memory.memoryRepository.appendConversationMessage(conversationRecord(input, memory.memoryUserId, exchangeId, 'user', 'failed', createdAt)).catch(() => undefined)
     json(request, response, error?.statusCode ?? 400, { success: false, error: error instanceof Error ? error.message : 'Invalid request' })
   }
 }
+
+async function storeActionResult(request, response, memory) {
+  try {
+    const input = await readRequestJson(request)
+    if (!isUuid(input?.exchangeId) || typeof input?.finalResponse !== 'string' || !input.finalResponse.trim()) {
+      json(request, response, 400, { success: false, error: 'Invalid action result' }); return
+    }
+    if (memory.memoryRepository?.available && memory.memoryUserId) {
+      await memory.memoryRepository.appendConversationMessage(conversationRecord({
+        userMessage: input.finalResponse.trim(),
+        currentTrack: input.currentTrack ?? null,
+        timeZone: input.timeZone,
+      }, memory.memoryUserId, input.exchangeId, 'assistant', 'completed', new Date().toISOString()))
+    }
+    json(request, response, 200, { success: true })
+  } catch (error) {
+    json(request, response, error?.statusCode ?? 400, { success: false, error: error instanceof Error ? error.message : 'Invalid action result' })
+  }
+}
+
+function isUuid(value) { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value) }
 
 async function detectAndStore(memory, input, storedMessage) {
   const detected = await memory.detectMemoryCandidate({ userMessage: input.userMessage, conversationContext: input.conversationHistory, currentTrack: input.currentTrack })

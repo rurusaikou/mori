@@ -6,6 +6,12 @@ export type ConversationMessage = {
   text: string
   /** 客户端本地会话按自然日切分；可选用于兼容升级前已经保存的消息。 */
   createdAt?: string
+  /** 消息产生时 Spotify 的真实播放上下文，不代表这句话正在讨论该歌曲。 */
+  playbackTrack?: MusicTrack | null
+  /** Context Assembly 已解析的本轮讨论对象，用于短期 conversationFocus。 */
+  discussionTrack?: MusicTrack | null
+  /** v0.7 旧缓存兼容字段；新消息不再写入。 */
+  track?: MusicTrack | null
 }
 
 export type MusicMemory = {

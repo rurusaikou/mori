@@ -146,7 +146,7 @@ export class MusicController {
       // 第一项开始，重新引入“点了 A 却播放 B”的问题。
       const selectedIndex = this.#navigationQueue.findIndex((track) => track.uri === uri)
       const nativeQueueUris = !contextUri && selectedIndex >= 0
-        ? this.#navigationQueue.slice(selectedIndex).map((track) => track.uri)
+        ? this.#navigationQueue.slice(selectedIndex, selectedIndex + 50).map((track) => track.uri)
         : undefined
       await this.provider.playUri(uri, contextUri, nativeQueueUris)
       // Web API 2xx 只代表 Spotify 接受命令，不代表目标设备已经开始播放。保持 pending，
@@ -186,6 +186,32 @@ export class MusicController {
       await new Promise((resolve) => setTimeout(resolve, 400))
     }
     return this.#state.track?.uri === uri && this.#state.isPlaying
+  }
+
+  async confirmPlaying(expected: boolean, timeoutMs = 6_000) {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (this.#state.isPlaying === expected) return true
+      try {
+        const state = await this.provider.getPlaybackState()
+        if (state.isPlaying === expected) { await this.replace(state); return true }
+      } catch { /* SDK 事件仍可能完成确认。 */ }
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    return this.#state.isPlaying === expected
+  }
+
+  async confirmTrackChanged(previousUri: string | null, timeoutMs = 6_000) {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (this.#state.track?.uri && this.#state.track.uri !== previousUri) return true
+      try {
+        const state = await this.provider.getPlaybackState()
+        if (state.track?.uri && state.track.uri !== previousUri) { await this.replace(state); return true }
+      } catch { /* SDK 事件仍可能完成确认。 */ }
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    return Boolean(this.#state.track?.uri && this.#state.track.uri !== previousUri)
   }
 
   async handleHostEvent(event: PlaybackHostEvent) {

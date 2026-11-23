@@ -63,7 +63,7 @@ export function ChatPanel({ messages, onSend, sending, sendError }: Props) {
             if (conversation) conversation.scrollTop = conversation.scrollHeight
           }} onComplete={() => setRevealingId(null)} /> : message.text}
         </p>)
-        : <p className="mori">我在。想聊聊现在听到的歌吗？</p>}
+        : <p className="mori">今天心情怎么样？</p>}
       {sending && <p className="mori thinking" aria-label="Mori 正在思考"><span>正在想</span><i /><i /><i /></p>}
       {sendError && <p className="chat-error" role="alert">{sendError}</p>}
     </div>

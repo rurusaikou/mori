@@ -15,6 +15,19 @@ export function responseQualityIssue(decision, state) {
   return repetitive ? '回复与最近三条 assistant 消息表达了高度相似的核心意思，没有推进对话' : null
 }
 
+export function enforcePlaybackFact(response, state) {
+  const value = String(response ?? '')
+  const status = state.playbackState?.status
+  if (status === 'playing' && /(已经|已|现在)?暂停(?:了|播放)?/u.test(value)) {
+    return '我还没有暂停播放。'
+  }
+  // direct-response 分支没有客户端动作，任何“已经切歌”都不可能由本轮确认。
+  if (/(已经|已|现在)?(?:切到|换到).{0,12}(下一首|上一首)/u.test(value)) {
+    return '我还没有完成切歌。'
+  }
+  return value
+}
+
 function isUnsupportedRandomRecommendationExplanation(state, response) {
   const recent = state.conversationHistory.slice(-6)
   const askedWhyThisTrack = /为什么(?:是|选|推荐|给我).{0,12}/u.test(state.userMessage)

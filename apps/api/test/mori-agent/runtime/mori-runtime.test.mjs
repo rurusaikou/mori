@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createMoriAgent as createRuntimeAgent } from '../../../src/mori-agent/runtime/index.mjs'
+import { CONVERSATION_UNDERSTANDING_PROMPT_VERSION, understandConversation, resolveTrackReference } from '../../../src/mori-agent/perception/conversation-understanding.mjs'
+import { decisionSystemPrompt } from '../../../src/mori-agent/expression/prompts.mjs'
 
 const response = (data) => ({ data, model: 'test-model', tokenUsage: { total_tokens: 10 } })
 const base = { userMessage: '你好', currentTrack: null, playbackState: { status: 'none', currentTrack: null }, conversationHistory: [], fakeMemory: [] }
@@ -11,7 +13,28 @@ const agent = (llm, understood, options = {}) => createRuntimeAgent(llm, { ...op
 test('daily chat responds without a tool', async () => {
   const result = await agent(async () => response({ action: 'respond', intent: 'CHAT', conversationMove: 'ANSWER', reason: '日常接话', response: '你好，我在。', toolCall: null }), { scene: 'DAILY_CHAT', meaning: '用户在打招呼' }).execute(base)
   assert.equal(result.finalResponse, '你好，我在。')
-  assert.deepEqual(result.trace.map((step) => step.type), ['INPUT', 'STATE_BEFORE', 'CONVERSATION_UNDERSTANDING', 'CONTEXT_ASSEMBLY', 'MODEL_DECISION', 'STATE_AFTER', 'FINAL_RESPONSE'])
+  assert.deepEqual(result.trace.map((step) => step.type), ['INPUT', 'STATE_BEFORE', 'CONVERSATION_UNDERSTANDING', 'TRACK_REFERENCE_RESOLUTION', 'CONTEXT_ASSEMBLY', 'MODEL_DECISION', 'STATE_AFTER', 'FINAL_RESPONSE'])
+})
+
+test('passes all twelve normalized history messages into Conversation Understanding', async () => {
+  const history = Array.from({ length: 12 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', content: `消息 ${index + 1}`, playbackTrack: index === 10 ? { uri: 'spotify:track:a', title: 'A', artist: '歌手 A' } : null, discussionTrack: null }))
+  let understandingInput
+  const understandingLlm = async ({ input }) => {
+    understandingInput = input
+    return response({ scene: 'DAILY_CHAT', meaning: '用户继续聊天', reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null })
+  }
+  const runtime = createRuntimeAgent(async () => response({ action: 'respond', intent: 'CHAT', conversationMove: 'ANSWER', reason: '回应', response: '好。', toolCall: null }), { understandingLlm })
+  await runtime.execute({ ...base, conversationHistory: history })
+  assert.deepEqual(understandingInput.conversationHistory, history)
+})
+
+test('reports the actual Understanding prompt version and raw output before validation', async () => {
+  const raw = { scene: 'DAILY_CHAT', meaning: '用户打招呼', reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null }
+  let observed
+  const result = await understandConversation(async () => response(raw), { ...base, worldState: { timeZone: 'UTC' } }, { onRawOutput: (value) => { observed = value } })
+  assert.equal(observed.promptVersion, CONVERSATION_UNDERSTANDING_PROMPT_VERSION)
+  assert.deepEqual(observed.output, raw)
+  assert.deepEqual(result.understanding, raw)
 })
 
 test('structured understanding is the only scene input to decision', async () => {
@@ -38,6 +61,46 @@ test('listen request delegates recommendation and excludes current track', async
   assert.deepEqual(result.action, { type: 'music_request', intent: 'RECOMMEND', query: '', excludeUris: [current.uri] })
 })
 
+test('playback control delegates pause to the Extension', async () => {
+  let calls = 0
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'CONTROL', conversationMove: 'ACKNOWLEDGE', reason: '用户要求暂停', response: null, toolCall: { name: 'playback_control', arguments: { command: 'PAUSE' } } })
+    : response({ response: '正在暂停。' }), { scene: 'LISTEN_REQUEST', meaning: '用户要求暂停当前播放', listeningRequest: { type: 'CONTROL', control: 'PAUSE', song: null, artist: null, preferences: [], excludeCurrentTrack: false } }).execute({ ...base, userMessage: '暂停一下', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  assert.deepEqual(result.action, { type: 'playback_control', command: 'PAUSE' })
+})
+
+test('playback control cannot bypass an Understanding CONTROL omission', async () => {
+  let calls = 0
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', response: null, toolCall: { name: 'playback_control', arguments: { command: 'PAUSE' } } })
+    : response({ response: '正在暂停。' }), { scene: 'DAILY_CHAT', meaning: '用户希望暂停，但 Understanding 漏标了控制请求' }).execute({ ...base, userMessage: '暂停一下', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  assert.equal(result.action, undefined)
+  assert.equal(result.finalResponse, '我还没有暂停播放。')
+  assert.equal(result.trace.some((step) => step.type === 'DECISION_REPAIR'), true)
+})
+
+test('direct response cannot claim playback paused while state is still playing', async () => {
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
+  const result = await agent(async () => response({ action: 'respond', response: '好的，音乐已经暂停了。', toolCall: null }), { scene: 'DAILY_CHAT', meaning: '普通回复' }).execute({ ...base, userMessage: '嗯', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  assert.equal(result.finalResponse, '我还没有暂停播放。')
+})
+
+test('direct response cannot claim a track switch without a client action', async () => {
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
+  const result = await agent(async () => response({ action: 'respond', response: '好的，已经切到下一首。', toolCall: null }), { scene: 'DAILY_CHAT', meaning: '普通回复' }).execute({ ...base, userMessage: '嗯', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  assert.equal(result.finalResponse, '我还没有完成切歌。')
+})
+
+test('playback control delegates next-track switching to the Extension', async () => {
+  let calls = 0
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'CONTROL', conversationMove: 'ACKNOWLEDGE', reason: '用户要求切歌', response: null, toolCall: { name: 'playback_control', arguments: { command: 'NEXT' } } })
+    : response({ response: '正在切歌。' }), { scene: 'LISTEN_REQUEST', meaning: '用户要求切到下一首', listeningRequest: { type: 'CONTROL', control: 'NEXT', song: null, artist: null, preferences: [], excludeCurrentTrack: true } }).execute({ ...base, userMessage: '切歌' })
+  assert.deepEqual(result.action, { type: 'playback_control', command: 'NEXT' })
+})
+
 test('song chat delegates evidence lookup to Song Understanding', async () => {
   let calls = 0
   const current = { uri: 'spotify:track:1', title: '测试歌曲', artist: 'A' }
@@ -48,10 +111,156 @@ test('song chat delegates evidence lookup to Song Understanding', async () => {
   assert.match(result.finalResponse, /声音证据/)
 })
 
+test('P0 A resolves an explicit current-track reference for get_music_context', async () => {
+  let calls = 0
+  const current = { uri: 'spotify:track:b', title: '歌曲 B', artist: '歌手 B' }
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'CHAT', conversationMove: 'ANSWER', reason: '读取当前歌曲', response: null, toolCall: { name: 'get_music_context', arguments: {} } })
+    : response({ response: '现在是歌曲 B。' }), { scene: 'SONG_CHAT', meaning: '用户询问当前歌曲', reference: { type: 'CURRENT_TRACK', value: null } }).execute({ ...base, userMessage: '现在这首歌叫什么？', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  const toolResult = result.trace.find((step) => step.type === 'TOOL_RESULT').data.result
+  assert.equal(toolResult.track.uri, current.uri)
+  assert.equal(toolResult.resolution.source, 'PLAYBACK_STATE')
+})
+
+test('P0 B keeps the conversation track after Spotify switches', async () => {
+  let calls = 0
+  let analyzedTrack
+  const trackA = { uri: 'spotify:track:a', title: '歌曲 A', artist: '歌手 A' }
+  const trackB = { uri: 'spotify:track:b', title: '歌曲 B', artist: '歌手 B' }
+  const songUnderstandingAgent = { analyze: async (track) => { analyzedTrack = track; return { integratedInsight: '歌词证据', missingLayers: [] } } }
+  const history = [
+    { role: 'user', content: '这首歌很好听', playbackTrack: trackA, discussionTrack: trackA },
+    { role: 'assistant', content: '它的表达很克制。', playbackTrack: trackA, discussionTrack: trackA },
+  ]
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'CHAT', conversationMove: 'ANSWER', reason: '分析对话正在讨论的歌曲', response: null, toolCall: { name: 'get_track_insight', arguments: {} } })
+    : response({ response: '它的歌词确实很特别。' }), { scene: 'SONG_CHAT', meaning: '用户继续讨论歌曲 A', reference: { type: 'CONVERSATION_TRACK', value: null } }, { songUnderstandingAgent }).execute({ ...base, userMessage: '我特别喜欢它的歌词', conversationHistory: history, currentTrack: trackB, playbackState: { status: 'playing', currentTrack: trackB } })
+  assert.equal(result.success, true)
+  assert.equal(analyzedTrack.uri, trackA.uri)
+  const resolution = result.trace.find((step) => step.type === 'TRACK_REFERENCE_RESOLUTION').data
+  assert.equal(resolution.targetTrack.uri, trackA.uri)
+  assert.equal(resolution.source, 'CONVERSATION_HISTORY')
+})
+
+test('P0 C switches the discussion target when the user explicitly says current track', async () => {
+  let calls = 0
+  let analyzedTrack
+  const trackA = { uri: 'spotify:track:a', title: '歌曲 A', artist: '歌手 A' }
+  const trackB = { uri: 'spotify:track:b', title: '歌曲 B', artist: '歌手 B' }
+  const songUnderstandingAgent = { analyze: async (track) => { analyzedTrack = track; return { integratedInsight: '当前歌曲证据', missingLayers: [] } } }
+  await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'CHAT', conversationMove: 'ANSWER', reason: '分析当前歌曲', response: null, toolCall: { name: 'get_track_insight', arguments: {} } })
+    : response({ response: '当前这首也不错。' }), { scene: 'SONG_CHAT', meaning: '用户切换到当前歌曲 B', reference: { type: 'CURRENT_TRACK', value: null } }, { songUnderstandingAgent }).execute({ ...base, userMessage: '现在这首也不错', conversationHistory: [{ role: 'assistant', content: '歌曲 A 的表达很克制。', playbackTrack: trackA, discussionTrack: trackA }], currentTrack: trackB, playbackState: { status: 'playing', currentTrack: trackB } })
+  assert.equal(analyzedTrack.uri, trackB.uri)
+})
+
+test('unresolved previous-track reference never falls back to current track', async () => {
+  let calls = 0
+  let analyzed = false
+  const current = { uri: 'spotify:track:b', title: '歌曲 B', artist: '歌手 B' }
+  const songUnderstandingAgent = { analyze: async () => { analyzed = true; return {} } }
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'CHAT', conversationMove: 'CLARIFY', reason: '尝试读取上一首', response: null, toolCall: { name: 'get_track_insight', arguments: {} } })
+    : response({ response: '我还不能确定你指的是哪一首。' }), { scene: 'SONG_CHAT', meaning: '用户询问播放历史上一首', reference: { type: 'PREVIOUS_TRACK', value: null } }, { songUnderstandingAgent }).execute({ ...base, userMessage: '上一首讲什么？', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  const toolResult = result.trace.find((step) => step.type === 'TOOL_RESULT').data.result
+  assert.equal(analyzed, false)
+  assert.equal(toolResult.available, false)
+  assert.equal(toolResult.resolution.source, 'PLAYBACK_HISTORY_UNAVAILABLE')
+})
+
+test('conversationFocus is distinct from the current playback track', () => {
+  const focus = { uri: 'spotify:track:a', title: '歌曲 A', artist: '歌手 A' }
+  const current = { uri: 'spotify:track:b', title: '歌曲 B', artist: '歌手 B' }
+  const result = resolveTrackReference({ reference: { type: 'CONVERSATION_TRACK', value: null }, currentTrack: current, conversationFocus: focus })
+  assert.equal(result.track.uri, focus.uri)
+  assert.equal(result.resolution.source, 'CONVERSATION_FOCUS')
+})
+
+test('NAMED_TRACK requires exact artist disambiguation for same-title songs', () => {
+  const first = { uri: 'spotify:track:a', title: '同名歌', artist: '歌手 A' }
+  const second = { uri: 'spotify:track:b', title: '同名歌', artist: '歌手 B' }
+  const history = [{ role: 'assistant', content: '两首同名歌', playbackTrack: first, discussionTrack: second }]
+  const ambiguous = resolveTrackReference({ reference: { type: 'NAMED_TRACK', value: '同名歌' }, currentTrack: first, conversationHistory: history })
+  assert.equal(ambiguous.track, null)
+  assert.equal(ambiguous.resolution.source, 'AMBIGUOUS_NAMED_TRACK')
+  const exact = resolveTrackReference({ reference: { type: 'NAMED_TRACK', value: '同名歌｜歌手 B' }, currentTrack: first, conversationHistory: history })
+  assert.equal(exact.track.uri, second.uri)
+})
+
 test('rejects invalid Understanding output before decision', async () => {
   const result = await createRuntimeAgent(async () => response({}), { understandingLlm: understanding({ scene: 'UNKNOWN', meaning: 'x' }) }).execute(base)
   assert.equal(result.success, false)
   assert.match(result.error, /scene/)
+})
+
+test('allows a corrective daily-chat turn to carry a new listening request', async () => {
+  let calls = 0
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'RECOMMEND', conversationMove: 'ACKNOWLEDGE', reason: '纠正错误结果并重新执行', response: null, toolCall: { name: 'recommend_music', arguments: { query: '徐佳瑩', excludeUris: [] } } })
+    : response({ response: '我找到几首徐佳莹的歌，正准备播放。' }), {
+      scene: 'DAILY_CHAT',
+      meaning: '用户纠正刚才播放了错误歌手，并要求重新选择徐佳莹的歌曲',
+      listeningRequest: { type: 'RECOMMEND', song: null, artist: '徐佳瑩', preferences: [], excludeCurrentTrack: false },
+    }, { musicSearchMode: 'library' }).execute({ ...base, userMessage: '但是我想听徐佳莹的歌呀' })
+  assert.equal(result.success, true)
+  assert.equal(result.finalResponse, '我先把这个选歌请求交给播放器，等实际找到后再告诉你具体是哪一首。')
+  assert.equal(result.action.query, '徐佳瑩')
+})
+
+test('repairs action=tool with a missing toolCall once and follows listeningRequest', async () => {
+  let calls = 0
+  const result = await agent(async () => {
+    calls += 1
+    if (calls === 1) return response({ action: 'tool', intent: 'RECOMMEND', conversationMove: 'ANSWER', reason: '换歌', response: null, toolCall: null })
+    if (calls === 2) return response({ action: 'tool', intent: 'RECOMMEND', conversationMove: 'ANSWER', reason: '按请求推荐别的歌', response: null, toolCall: { name: 'recommend_music', arguments: { query: '', excludeUris: [] } } })
+    return response({ response: '正在处理。' })
+  }, { scene: 'LISTEN_REQUEST', meaning: '用户明确想听别的歌', listeningRequest: { type: 'RECOMMEND', song: null, artist: null, preferences: [], excludeCurrentTrack: true } }, { musicSearchMode: 'library' }).execute({ ...base, userMessage: '我想听别的歌' })
+  assert.equal(result.success, true)
+  assert.equal(result.trace.filter((step) => step.type === 'DECISION_REPAIR').length, 1)
+  assert.equal(result.action.intent, 'RECOMMEND')
+})
+
+test('repairs a music Tool call when listeningRequest is null', async () => {
+  let calls = 0
+  const result = await agent(async () => {
+    calls += 1
+    if (calls === 1) return response({ action: 'tool', intent: 'RECOMMEND', conversationMove: 'FOLLOW_UP', reason: '错误继承推荐', response: null, toolCall: { name: 'recommend_music', arguments: { query: '', excludeUris: [] } } })
+    return response({ action: 'respond', intent: 'CHAT', conversationMove: 'ANSWER', reason: '回答候选追问', response: '你是在问我刚才选了哪些歌。', toolCall: null })
+  }, { scene: 'DAILY_CHAT', meaning: '用户追问上一轮候选歌曲' }, { musicSearchMode: 'library' }).execute({ ...base, userMessage: '什么候选歌去' })
+  assert.equal(result.success, true)
+  assert.equal(result.action, undefined)
+  assert.equal(result.finalResponse, '你是在问我刚才选了哪些歌。')
+  assert.equal(result.trace.filter((step) => step.type === 'DECISION_REPAIR').length, 1)
+})
+
+test('normalizes omitted explanatory Decision fields without failing a safe response', async () => {
+  const result = await agent(async () => response({ action: 'respond', response: 'Hi，我在。', toolCall: null }), { scene: 'DAILY_CHAT', meaning: '用户打招呼' }).execute({ ...base, userMessage: 'hi' })
+  assert.equal(result.success, true)
+  assert.equal(result.finalResponse, 'Hi，我在。')
+  assert.equal(result.trace.some((step) => step.type === 'DECISION_REPAIR'), false)
+})
+
+test('Decision prompt forbids unsupported promises and language-only actions', () => {
+  const prompt = decisionSystemPrompt([{ name: 'search_memory', description: '检索记忆' }])
+  assert.match(prompt, /只能承诺当前系统实际支持的操作/)
+  assert.match(prompt, /没有对应 Tool 或客户端动作能力，不得声称将执行/)
+  assert.match(prompt, /不得用语言描述代替实际操作/)
+  assert.match(prompt, /用户询问能力时，应直接、准确地说明能否执行/)
+  assert.match(prompt, /不得再次提出同样无法执行的操作/)
+})
+
+test('uses deterministic music fallback when one Decision repair still chooses the wrong Tool', async () => {
+  let calls = 0
+  const result = await agent(async () => {
+    calls += 1
+    if (calls <= 2) return response({ action: 'tool', response: null, toolCall: { name: 'search_music', arguments: { query: '徐佳瑩', excludeUris: [] } } })
+    return response({ response: '正在处理。' })
+  }, { scene: 'LISTEN_REQUEST', meaning: '用户想听徐佳瑩的其他歌曲', listeningRequest: { type: 'RECOMMEND', song: null, artist: '徐佳瑩', preferences: [], excludeCurrentTrack: true } }, { musicSearchMode: 'library' }).execute({ ...base, userMessage: '我想听徐佳莹的歌' })
+  assert.equal(result.success, true)
+  assert.equal(result.action.intent, 'RECOMMEND')
+  assert.equal(result.action.query, '徐佳瑩')
+  assert.equal(result.trace.filter((step) => step.type === 'DECISION_REPAIR').length, 1)
+  assert.equal(result.trace.filter((step) => step.type === 'DECISION_FALLBACK').length, 1)
 })
 
 test('rejects malformed agent input', async () => {

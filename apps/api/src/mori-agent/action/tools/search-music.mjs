@@ -8,7 +8,7 @@ export function createSearchMusicTool(mode = 'delegate') {
     description: '按明确歌名、歌手或版本查找歌曲；先查用户完整曲库，未命中再查 Spotify',
     async execute(args) {
       const query = requiredQuery(args)
-      if (mode === 'delegate') return { operation: 'search_music', query, excludeUris: exclusions(args) }
+      if (mode === 'delegate') return { status: 'PENDING', operation: 'search_music', query, excludeUris: exclusions(args), tracks: [] }
       return { query, source: 'mock', results: [{ id: 'mock-track-1', title: query, artist: 'Mock Artist', note: 'Playground Mock Result' }] }
     },
   }

@@ -45,7 +45,7 @@ Action Tool → 显式注入的 Repository 或 Song Understanding
 - Perception 只建立事实和证据，不选择 Tool。
 - Brain 形成理解、意图和认知结果，不直接执行外部副作用。
 - Expression 只组织或检查面向用户的语言。
-- Action 只执行已授权能力，并将真实结果返回 Runtime。
+- Action 只执行已授权能力。服务端 Action 对客户端音乐操作只返回 `PENDING` 计划；Extension 读取真实 Playback State 后，通过动作结果回写接口更新最终回复与长期归档。
 - Runtime 只编排顺序、Trace 和错误边界，不复制四层内部判断。
 - Capability 之间禁止互相 import；Memory Capability 与 Memory Repository 是不同职责。
 - Moment 不是 Tool，Agent 不能主动创建 Moment。
@@ -69,7 +69,7 @@ State validation
 
 | 主题 | 文档 |
 |---|---|
-| 规则理解迁移到 LLM Understanding 的设计与评估 | [LLM 对话理解](../../../../docs/MORI_CONVERSATION_UNDERSTANDING_LLM_2026-11-22.md) |
+| 主链全部问题、根因、方案和状态 | [主链问题与改进总账](../../../../docs/MORI_MAIN_CHAIN_ISSUES.md) |
 | 三个用户场景与唯一主流程 | [三场景主流程](../../../../docs/MORI_THREE_SCENES_2026-11-21.md) |
 | 四层模块完成度、证据与验收标准 | [模块成熟度](../../../../docs/MORI_MODULE_MATURITY_2026-11-19.md) |
 | Memory 契约、存储与评判标准 | [Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md) |

@@ -44,7 +44,7 @@ export function createMoriGraphAgent(llm, options = {}) {
         // 使用 values stream 而不是一次 invoke：每次 State 更新都成为最新错误快照，节点异常时
         // 可以返回已完成阶段的 Trace，而不是只留下一个脱离上下文的 ERROR。
         for await (const state of await graph.stream(latest, { streamMode: 'values' })) latest = state
-        return completeRun(logRun, runId, started, latest.model, latest.tokenUsage, latest.finalResponse, latest.trace, latest.action)
+        return completeRun(logRun, runId, started, latest.model, latest.tokenUsage, latest.finalResponse, latest.trace, latest.action, latest.context)
       } catch (cause) {
         const error = cause instanceof Error ? cause.message : String(cause)
         const trace = [...(latest.trace ?? []), agentStep(runId, 'ERROR', { error })]

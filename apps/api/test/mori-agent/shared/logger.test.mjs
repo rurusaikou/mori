@@ -22,6 +22,24 @@ test('formats agent tool stages as readable Chinese text', () => {
   assert.match(line, /search_memory/)
 })
 
+test('marks pending playback control as a client action plan instead of completed execution', () => {
+  const toolLine = formatCapabilityLogLine({ timestamp: '2026-11-23T09:39:39.000Z', runId: 'agent-control-1', capability: 'conversation_agent', promptVersion: 'mori-agent-v1.0', stage: 'agent_tool_result', name: 'playback_control', result: { status: 'PENDING', operation: 'playback_control', command: 'NEXT' } })
+  assert.match(toolLine, /待客户端执行的动作计划/)
+  assert.match(toolLine, /尚未完成真实操作/)
+
+  const completedLine = formatCapabilityLogLine({ timestamp: '2026-11-23T09:39:43.000Z', runId: 'agent-control-1', capability: 'conversation_agent', promptVersion: 'mori-agent-v1.0', stage: 'completed', latency: 15383, output: { finalResponse: '正在切换。', plannedAction: { type: 'playback_control', command: 'NEXT' } } })
+  assert.match(completedLine, /服务端决策与动作规划完成/)
+  assert.match(completedLine, /仍待客户端执行和确认/)
+})
+
+test('formats the client playback result under the original Agent run', () => {
+  const line = formatCapabilityLogLine({ source: 'runtime', timestamp: '2026-11-23T09:39:50.000Z', runId: 'agent-control-1', capability: 'conversation_agent', promptVersion: 'mori-agent-v1.0', stage: 'agent_client_action_failed', command: 'NEXT', status: 'FAILED', error: 'Spotify 未确认歌曲已经切换' })
+  assert.match(line, /Run agent-control-1/)
+  assert.match(line, /\[错误\]/)
+  assert.match(line, /客户端播放动作执行失败/)
+  assert.match(line, /Spotify 未确认歌曲已经切换/)
+})
+
 test('marks runtime capability logs separately from test logs', () => {
   const line = formatCapabilityLogLine({ source: 'runtime', timestamp: '2026-11-17T12:00:00.000Z', runId: 'real-1', capability: 'conversation_agent', promptVersion: 'mori-agent-v0.6', stage: 'agent_final_response', response: '真实回复' })
   assert.match(line, /\[真实\] \[信息\]/)

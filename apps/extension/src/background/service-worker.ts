@@ -114,16 +114,46 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         // Brain 先判断三类场景；只有返回 music_request 时才在 Action 层访问曲库/Spotify。
         // 普通聊天不再由 Extension 猜测意图，也不会预加载数百首候选。
         const messages = await sendCompanionMessage(message.text, music.state, async (request) => {
+          if (request.type === 'playback_control') {
+            logInfo('conversation', 'agent_playback_control_started', { agentRunId: request.agentRunId ?? null, promptVersion: request.promptVersion ?? null, command: request.command })
+            try {
+              const previousUri = music.state.track?.uri ?? null
+              if (request.command === 'PAUSE') {
+                if (music.state.isPlaying) await music.toggle()
+                if (!await music.confirmPlaying(false)) throw new Error('Spotify 未确认暂停播放')
+              } else if (request.command === 'RESUME') {
+                if (!music.state.isPlaying) await music.toggle()
+                if (!await music.confirmPlaying(true)) throw new Error('Spotify 未确认继续播放')
+              } else {
+                await music.command(request.command === 'NEXT' ? 'next' : 'previous')
+                if (!await music.confirmTrackChanged(previousUri)) throw new Error('Spotify 未确认歌曲已经切换')
+              }
+              logInfo('conversation', 'agent_playback_control_completed', { agentRunId: request.agentRunId ?? null, promptVersion: request.promptVersion ?? null, command: request.command, isPlaying: music.state.isPlaying, trackUri: music.state.track?.uri ?? null })
+              return music.state.track
+            } catch (error) {
+              logError('conversation', 'agent_playback_control_failed', error, { agentRunId: request.agentRunId ?? null, promptVersion: request.promptVersion ?? null, command: request.command, isPlaying: music.state.isPlaying, trackUri: music.state.track?.uri ?? null })
+              throw error
+            }
+          }
+          logInfo('conversation', 'agent_music_action_started', { agentRunId: request.agentRunId ?? null, intent: request.intent, query: request.query, excludeCount: request.excludeUris.length })
           const candidates = await findMusicCandidates(request.query, request.intent)
           const available = candidates.filter((item) => !request.excludeUris.includes(item.uri))
           // 开放推荐没有足够证据做确定性排名时随机选择，避免曲库顺序让 Mori 总推荐
           // 同一首；明确搜索仍保留最相关结果的首项顺序。
           const track = request.intent === 'RECOMMEND' ? randomTrack(available) : available[0] ?? null
-          if (!track) return null
+          if (!track) {
+            logInfo('conversation', 'agent_music_action_completed', { agentRunId: request.agentRunId ?? null, status: 'NO_RESULTS', candidateCount: available.length })
+            return null
+          }
+          logInfo('conversation', 'agent_music_candidate_selected', { agentRunId: request.agentRunId ?? null, candidateCount: available.length, uri: track.uri, title: track.title, artist: track.artist })
           pendingListeningSource = 'agent_selected'
-          await music.playUri(track.uri, undefined, track)
+          // Agent 选中一首后仍要保留其余候选作为本次播放上下文，否则 Spotify 只收到
+          // 单曲 URI，随后执行 NEXT 时没有下一首可切。把选中项放在队首，既保证立即
+          // 播放目标曲，也让后续切歌沿同一批可信候选继续。
+          const navigationQueue = [track, ...available.filter((item) => item.uri !== track.uri)].slice(0, 50)
+          await music.playUri(track.uri, undefined, track, navigationQueue)
           if (!await music.confirmPlayback(track.uri)) throw new Error('Spotify 未确认目标歌曲开始播放')
-          logInfo('conversation', 'agent_track_played', { uri: track.uri, title: track.title, artist: track.artist })
+          logInfo('conversation', 'agent_track_played', { agentRunId: request.agentRunId ?? null, status: 'PLAYING', uri: track.uri, title: track.title, artist: track.artist })
           return track
         }, broadcastCompanionData)
         const exchange = messages.slice(-2)
@@ -209,12 +239,28 @@ async function findMusicCandidates(userText: string, intent: 'SEARCH' | 'RECOMME
   // 单字“我”会错误命中歌曲《我》，导致无条件推荐持续收敛到同一首。
   if (intent === 'RECOMMEND') {
     const preferenceSample = await music.getPreferenceTracks()
-    const candidates = preferenceSample
+    const libraryCandidates = preferenceSample
       .filter((track) => track.uri && track.title?.trim() && track.artist?.trim() && track.isPlayable !== false)
       .map((track) => ({ ...track, catalogSource: 'user_library' as const }))
       .slice(0, 500)
-    logInfo('conversation', 'music_recommendation_catalog_ready', { libraryTracks: preferenceSample.length, candidates: candidates.length, spotifyFallback: false })
-    return candidates
+    const constraint = userText.trim()
+    if (!constraint) {
+      logInfo('conversation', 'music_recommendation_catalog_ready', { query: '', libraryTracks: preferenceSample.length, candidates: libraryCandidates.length, spotifyFallback: false })
+      return libraryCandidates
+    }
+    // 带歌手、歌名或其他明确约束的推荐不能再从整个偏好样本随机选，否则
+    // “推荐徐佳莹”会播放无关歌手。先匹配本地样本，未命中再查询 Spotify。
+    const constrainedLibrary = rankTextMatches(libraryCandidates, constraint).slice(0, 30)
+    if (constrainedLibrary.length) {
+      logInfo('conversation', 'music_recommendation_catalog_ready', { query: constraint, libraryTracks: preferenceSample.length, candidates: constrainedLibrary.length, spotifyFallback: false })
+      return constrainedLibrary
+    }
+    let spotifyMatches: MusicTrack[] = []
+    try { spotifyMatches = await music.searchTracks(constraint, 10) }
+    catch (error) { logError('conversation', 'spotify_recommendation_search_failed', error, { query: constraint }) }
+    const constrainedSpotify = rankTextMatches(spotifyMatches, constraint).slice(0, 30)
+    logInfo('conversation', 'music_recommendation_catalog_ready', { query: constraint, libraryTracks: preferenceSample.length, candidates: constrainedSpotify.length, spotifyFallback: true })
+    return constrainedSpotify
   }
 
   const query = musicSearchQuery(userText)
