@@ -5,6 +5,7 @@
  */
 import type { ConversationMessage, MusicMemory, MusicMomentInput, MusicTrack, PlaybackState } from '@mori/domain'
 import { extensionStorage } from '../storage/extension-storage'
+import type { PendingAgentActionResult } from '../storage/extension-storage'
 import { syncMoment } from './memory-client'
 
 const musicMoods = new Set(['calm', 'happy', 'healing', 'moved', 'nostalgic', 'low'])
@@ -12,6 +13,7 @@ const musicMoods = new Set(['calm', 'happy', 'healing', 'moved', 'nostalgic', 'l
 const GREETING_ID = 'mori-welcome'
 
 export async function getCompanionData() {
+  await flushPendingAgentActionResults()
   const [storedMessages, memories] = await Promise.all([extensionStorage.getConversation(), extensionStorage.getMemories()])
   const now = new Date()
   const messages = storedMessages.filter((message) => message.text?.trim() && isSameLocalDay(message.createdAt, now))
@@ -94,7 +96,15 @@ export async function sendCompanionMessage(
   const next = [...messagesWithUser, moriMessage].slice(-100)
   await extensionStorage.setConversation(next)
   if (agentResult.action && agentResult.exchangeId && actionStatus) {
-    await reportAgentActionResult({ exchangeId: agentResult.exchangeId, finalResponse: reply, status: actionStatus, currentTrack: replyTrack })
+    await reportAgentActionResult({
+      exchangeId: agentResult.exchangeId,
+      runId: agentResult.action.agentRunId ?? '',
+      actionResultToken: agentResult.actionResultToken ?? '',
+      finalResponse: reply,
+      status: actionStatus,
+      currentTrack: replyTrack,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    })
   }
   return next
 }
@@ -140,6 +150,7 @@ async function requestAgentReply(
         playbackState: {
           status: playback.track ? (playback.isPlaying ? 'playing' : 'paused') : 'none',
           currentTrack: playback.track ? { uri: playback.track.uri, isrc: playback.track.isrc, title: playback.track.title, artist: playback.track.artist } : null,
+          previousTrack: compactTrack(playback.previousTrack),
           availability: playback.availability,
         },
         worldState: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
@@ -170,6 +181,7 @@ async function requestAgentReply(
       action?: AgentClientAction
       conversationContext?: { targetTrack: MusicTrack | null; resolution: { source: string; resolved: boolean; confidence: number; referenceType: string | null } }
       exchangeId?: string
+      actionResultToken?: string
       meta?: { runId?: string; version?: string }
     }
     if (!response.ok || !result.success || !result.finalResponse?.trim()) throw new Error(result.error || `Agent HTTP ${response.status}`)
@@ -178,6 +190,7 @@ async function requestAgentReply(
       action: result.action ? { ...result.action, agentRunId: result.meta?.runId, promptVersion: result.meta?.version } : undefined,
       conversationContext: result.conversationContext,
       exchangeId: result.exchangeId,
+      actionResultToken: result.actionResultToken,
     }
   } catch (error) {
     console.error('Mori Agent request failed:', error)
@@ -191,18 +204,38 @@ async function requestAgentReply(
   }
 }
 
-async function reportAgentActionResult(input: { exchangeId: string; finalResponse: string; status: 'COMPLETED' | 'FAILED'; currentTrack: MusicTrack | null }) {
+async function reportAgentActionResult(input: PendingAgentActionResult) {
+  if (!input.runId || !input.actionResultToken) return
+  const result = await sendAgentActionResult(input)
+  if (result !== 'retry') return
+  const pending = await extensionStorage.getPendingAgentActionResults()
+  await extensionStorage.setPendingAgentActionResults([input, ...pending.filter((item) => item.exchangeId !== input.exchangeId)].slice(0, 20))
+}
+
+async function flushPendingAgentActionResults() {
+  const pending = await extensionStorage.getPendingAgentActionResults()
+  if (!pending.length) return
+  const remaining: PendingAgentActionResult[] = []
+  for (const item of pending) if (await sendAgentActionResult(item) === 'retry') remaining.push(item)
+  await extensionStorage.setPendingAgentActionResults(remaining)
+}
+
+async function sendAgentActionResult(input: PendingAgentActionResult) {
   const apiBaseUrl = (await extensionStorage.getApiBaseUrl()).replace(/\/$/, '')
   try {
     const response = await fetch(`${apiBaseUrl}/agent/action-result`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...input, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
+      body: JSON.stringify(input),
     })
-    if (!response.ok) throw new Error(`Agent action result HTTP ${response.status}`)
+    if (response.ok) return 'sent' as const
+    // 4xx 表示 token/请求已经无效，继续重试只会制造永久队列；5xx 才保留等待恢复。
+    if (response.status >= 400 && response.status < 500) return 'drop' as const
+    throw new Error(`Agent action result HTTP ${response.status}`)
   } catch (error) {
-    // 本地对话已经保存成功；归档回写失败不能撤销用户刚看到的真实执行结果。
+    // 本地对话已经保存成功；调用方把回写放入持久待同步队列，连接恢复后重试。
     console.error('Mori Agent action result sync failed:', error)
+    return 'retry' as const
   }
 }
 

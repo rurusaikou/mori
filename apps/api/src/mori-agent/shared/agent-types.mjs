@@ -77,7 +77,7 @@ export function validateDecision(value) {
   return { action: 'tool', intent, conversationMove, reason, response: null, toolCall: { ...toolCall, arguments: argumentsValue } }
 }
 
-export function validateDecisionForUnderstanding(value, understanding) {
+export function validateDecisionForUnderstanding(value, understanding, context = {}) {
   const decision = validateDecision(value)
   const requestType = understanding?.listeningRequest?.type ?? null
   const expectedMusicTool = requestType === 'SEARCH' ? 'search_music' : requestType === 'RECOMMEND' ? 'recommend_music' : requestType === 'CONTROL' ? 'playback_control' : null
@@ -89,10 +89,16 @@ export function validateDecisionForUnderstanding(value, understanding) {
   if (!expectedMusicTool && decision.action === 'tool' && ['search_music', 'recommend_music', 'playback_control'].includes(decision.toolCall.name)) {
     throw new Error('listeningRequest 为空时不能调用音乐动作 Tool')
   }
+  if (expectedMusicTool) {
+    // Decision 只选择动作，不拥有重新解释歌曲条件或控制命令的权限。Tool 参数始终由
+    // Structured Understanding 与 Playback State 确定生成，避免“轻快”被改成“伤感”、
+    // NEXT 被改成 PAUSE，或模型遗漏当前歌曲排除项。
+    return { ...decision, toolCall: { ...decision.toolCall, arguments: musicToolArguments(understanding.listeningRequest, context) } }
+  }
   return decision
 }
 
-export function fallbackDecisionForUnderstanding(value, understanding) {
+export function fallbackDecisionForUnderstanding(value, understanding, context = {}) {
   const request = understanding?.listeningRequest
   if (!request) {
     if (typeof value?.response === 'string' && value.response.trim()) {
@@ -101,16 +107,21 @@ export function fallbackDecisionForUnderstanding(value, understanding) {
     throw new Error('Decision 修复失败且没有安全回复')
   }
   const name = request.type === 'SEARCH' ? 'search_music' : request.type === 'RECOMMEND' ? 'recommend_music' : 'playback_control'
-  const query = [request.song, request.artist, ...(request.preferences ?? [])].filter(Boolean).join(' ').trim()
-  const rejectedExclusions = Array.isArray(value?.toolCall?.arguments?.excludeUris) ? value.toolCall.arguments.excludeUris : []
   return {
     action: 'tool',
     intent: request.type,
     conversationMove: 'ACKNOWLEDGE',
     reason: 'Decision 修复失败，按 Structured Understanding 的明确音乐请求安全降级',
     response: null,
-    toolCall: { name, arguments: name === 'playback_control' ? { command: request.control } : { query, excludeUris: rejectedExclusions } },
+    toolCall: { name, arguments: musicToolArguments(request, context) },
   }
+}
+
+function musicToolArguments(request, context = {}) {
+  if (request.type === 'CONTROL') return { command: request.control }
+  const query = [request.song, request.artist, ...(request.preferences ?? [])].filter(Boolean).map((value) => String(value).trim()).filter(Boolean).join(' ')
+  const currentUri = context.playbackState?.currentTrack?.uri ?? context.currentTrack?.uri
+  return { query, excludeUris: request.excludeCurrentTrack && currentUri ? [currentUri] : [] }
 }
 
 export function validateFinalResponse(value) { return { response: text(object(value, 'final response').response, 'final response.response') } }

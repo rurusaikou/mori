@@ -27,9 +27,10 @@ function normalizePlaybackState(value, legacyTrack) {
   const status = ['playing', 'paused', 'none'].includes(value.status) ? value.status : null
   if (!status) throw new Error('playbackState.status 无效')
   const currentTrack = optionalTrack(value.currentTrack)
+  const previousTrack = optionalTrack(value.previousTrack)
   if (status === 'none' && currentTrack) throw new Error('playbackState.status=none 时不能包含 currentTrack')
   if (status !== 'none' && !currentTrack) throw new Error('播放或暂停状态必须包含 currentTrack')
-  return Object.freeze({ status, currentTrack, availability: typeof value.availability === 'string' ? value.availability : 'ready' })
+  return Object.freeze({ status, currentTrack, previousTrack, availability: typeof value.availability === 'string' ? value.availability : 'ready' })
 }
 function normalizeWorldState(value, timeZone) {
   if (value === undefined) return Object.freeze({ timeZone })

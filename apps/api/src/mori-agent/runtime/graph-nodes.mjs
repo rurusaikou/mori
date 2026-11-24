@@ -9,7 +9,7 @@ import { enforcePlaybackFact, responseQualityIssue } from '../expression/respons
 import { DECISION_REPAIR_PROMPT, decisionSystemPrompt, FINAL_RESPONSE_PROMPT, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
-import { clientAction, createRuntimeTools, mergeRunTokenUsage, safeToolResponse } from './runtime-support.mjs'
+import { clientAction, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, safeToolResponse } from './runtime-support.mjs'
 
 export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) {
   // Trace 与文件日志从同一个 record 入口产生，避免 Graph 可观测但 capability 日志缺阶段。
@@ -34,10 +34,13 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
     },
 
     async understanding(state) {
-      const result = await understandConversation(options.understandingLlm ?? llm, state.agentState, {
-        onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
-      })
-      const context = assembleConversationContext(state.agentState, result.understanding)
+      const [result, relevantMemory] = await Promise.all([
+        understandConversation(options.understandingLlm ?? llm, state.agentState, {
+          onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
+        }),
+        prepareRelevantMemory(state.agentState, options),
+      ])
+      const context = assembleConversationContext(state.agentState, result.understanding, relevantMemory)
       const resolutionLog = {
         referenceType: result.understanding.reference?.type ?? null,
         currentTrack: state.agentState.currentTrack ?? null,
@@ -67,7 +70,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
       let model = first.model
       let tokenUsage = first.tokenUsage
       try {
-        decision = validateDecisionForUnderstanding(first.data, state.conversationUnderstanding)
+        decision = validateDecisionForUnderstanding(first.data, state.conversationUnderstanding, state.context)
       } catch (error) {
         const issue = error instanceof Error ? error.message : 'Decision 无效'
         trace.push(record(state, 'DECISION_REPAIR', { issue, rejectedDecision: first.data }))
@@ -79,9 +82,9 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
         })
         capabilityStage(logRun, 'agent_decision_repair_raw', { output: repaired.data, model: repaired.model, tokenUsage: repaired.tokenUsage })
         try {
-          decision = validateDecisionForUnderstanding(repaired.data, state.conversationUnderstanding)
+          decision = validateDecisionForUnderstanding(repaired.data, state.conversationUnderstanding, state.context)
         } catch (repairError) {
-          decision = fallbackDecisionForUnderstanding(repaired.data, state.conversationUnderstanding)
+          decision = fallbackDecisionForUnderstanding(repaired.data, state.conversationUnderstanding, state.context)
           trace.push(record(state, 'DECISION_FALLBACK', { issue: repairError instanceof Error ? repairError.message : 'Decision 修复仍无效', decision }))
         }
         model = repaired.model

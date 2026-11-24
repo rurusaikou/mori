@@ -37,6 +37,29 @@ export function createRuntimeTools(state, options, musicSearchMode, context = nu
   return Object.fromEntries(tools.map((tool) => [tool.name, tool]))
 }
 
+export async function prepareRelevantMemory(state, options) {
+  const usesServerMemory = Boolean(options.memoryRepository?.available && options.memoryUserId)
+  const repository = usesServerMemory ? options.memoryRepository : createMockMemoryRepository(state.fakeMemory)
+  const query = [state.userMessage, state.currentTrack?.title, state.currentTrack?.artist].filter(Boolean).join(' ').trim()
+  if (!query) return { query: '', matches: [], source: usesServerMemory ? 'SERVER_MEMORY' : 'LOCAL_MEMORY' }
+  try {
+    const [matches, tasteProfile, associations] = usesServerMemory
+      ? await Promise.all([(typeof repository.retrieveRelevant === 'function'
+          ? repository.retrieveRelevant({ userId: options.memoryUserId, query, trackUri: state.currentTrack?.uri ?? null, limit: 5 })
+          : repository.search({ userId: options.memoryUserId, query, limit: 5 })),
+        typeof repository.listTasteProfile === 'function' ? repository.listTasteProfile({ userId: options.memoryUserId }) : Promise.resolve([]),
+        typeof repository.retrieveAssociations === 'function'
+          ? repository.retrieveAssociations({ userId: options.memoryUserId, trackUri: state.currentTrack?.uri ?? null, limit: 10 })
+          : Promise.resolve([])])
+      : [await repository.search(query), [], []]
+    return { query, matches, tasteProfile, associations, source: usesServerMemory ? 'SERVER_MEMORY' : 'LOCAL_MEMORY' }
+  } catch {
+    // 相关记忆是增强上下文，不是回复成功条件。检索失败保持空结果，由显式 Tool 在确有
+    // 需要时仍可独立尝试，不能让 Memory 可用性阻断当前对话。
+    return { query, matches: [], tasteProfile: [], associations: [], source: usesServerMemory ? 'SERVER_MEMORY_UNAVAILABLE' : 'LOCAL_MEMORY_UNAVAILABLE' }
+  }
+}
+
 export function completeRun(logRun, runId, started, model, tokenUsage, finalResponse, trace, action, context = null) {
   const meta = { runId, version: MORI_AGENT_PROMPT_VERSION, model, latency: Date.now() - started, tokenUsage }
   // client action 只代表服务端规划结果。把它写进 completed 日志，使日志不会把

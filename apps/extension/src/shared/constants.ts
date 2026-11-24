@@ -17,6 +17,7 @@ export const STORAGE_KEYS = {
   memories: 'mori.memories',
   libraryCache: 'mori.spotify.library-cache',
   musicPreference: 'mori.music-preference',
+  pendingAgentActionResults: 'mori.agent.pending-action-results',
 } as const
 
 export const DEFAULT_PLAYBACK_HOST_URL = 'http://127.0.0.1:3210/playback-host/'

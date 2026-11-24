@@ -23,6 +23,7 @@ import { createMemoryRoutes } from './routes/memory.mjs'
 import { createMemoryCapability } from './mori-agent/brain/capabilities/memory/memory.service.mjs'
 import { createSongUnderstandingAgent } from './mori-agent/perception/song-understanding/song-understanding-agent.mjs'
 import { createSongEvidenceProviders } from './mori-agent/perception/song-understanding/providers.mjs'
+import { createPostTurnMemoryProcessor } from './mori-agent/brain/memory/post-turn-processor.mjs'
 
 const port = Number(process.env.MORI_API_PORT || 3211)
 const dataDirectory = fileURLToPath(new URL('../data/', import.meta.url))
@@ -47,6 +48,12 @@ const memoryRepository = await createPostgresMemoryRepository({
 // V0.1 暂无账号系统；开发身份必须由服务端环境变量固定，不能相信 Extension 请求体。
 const memoryUserId = process.env.MORI_MEMORY_USER_ID?.trim() || null
 const memoryCandidateCapability = createMemoryCapability(agentLlm)
+const postTurnMemoryProcessor = createPostTurnMemoryProcessor({
+  extractor: (input) => memoryCandidateCapability.execute(input),
+  repository: memoryRepository,
+  userId: memoryUserId,
+  logError,
+})
 const songUnderstandingAgent = createSongUnderstandingAgent({
   llm: agentLlm,
   resolveFeatures: (isrc) => featureStore.get(isrc),
@@ -59,7 +66,7 @@ const handleAgentRequest = createAgentRoutes({
   playgroundAgent: createMoriAgent(agentLlm, { logSource: 'debug' }),
   memoryRepository,
   memoryUserId,
-  detectMemoryCandidate: (input) => memoryCandidateCapability.execute(input),
+  postTurnMemoryProcessor,
 })
 const handleMemoryRequest = createMemoryRoutes({ repository: memoryRepository, userId: memoryUserId })
 

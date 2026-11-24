@@ -24,6 +24,15 @@ export function createMemoryRoutes({ repository, userId }) {
         json(request, response, 200, { memories: await repository.list({ userId, limit: 100 }) })
         return true
       }
+      if (request.method === 'GET' && request.url === '/memory/taste-profile') {
+        json(request, response, 200, { profile: await repository.listTasteProfile({ userId }) })
+        return true
+      }
+      const associationsMatch = request.method === 'GET' && request.url?.match(/^\/memory\/associations\?trackUri=(.+)$/u)
+      if (associationsMatch) {
+        json(request, response, 200, { associations: await repository.retrieveAssociations({ userId, trackUri: decodeURIComponent(associationsMatch[1]), limit: 25 }) })
+        return true
+      }
       const deleteMatch = request.method === 'DELETE' && request.url?.match(/^\/memory\/memories\/([0-9a-f-]+)$/i)
       if (deleteMatch) {
         const deleted = await repository.softDelete({ userId, id: deleteMatch[1] })
@@ -34,6 +43,32 @@ export function createMemoryRoutes({ repository, userId }) {
       if (request.method === 'POST' && request.url === '/memory/moments') {
         const result = await repository.createMoment({ ...body, userId })
         json(request, response, 201, { stored: true, id: result.id })
+        return true
+      }
+      if (request.method === 'POST' && request.url === '/memory/music-facts') {
+        const result = await repository.upsertMusicFact({ ...body, userId })
+        // 画像是 Fact 的派生视图；Fact 先成功落库，再同步刷新，避免两套独立写入真值。
+        if (typeof repository.refreshTasteProfile === 'function') await repository.refreshTasteProfile({ userId, updatedAt: body.createdAt })
+        json(request, response, result.deduplicated ? 200 : 201, {
+          stored: true,
+          id: result.id,
+          status: result.status,
+          deduplicated: result.deduplicated,
+        })
+        return true
+      }
+      if (request.method === 'POST' && request.url === '/memory/music-moments') {
+        const result = await repository.createMusicMoment({ ...body, userId })
+        json(request, response, 201, { stored: true, id: result.id, status: result.status })
+        return true
+      }
+      if (request.method === 'POST' && request.url === '/memory/taste-profile/refresh') {
+        const profile = await repository.refreshTasteProfile({ userId, updatedAt: body.updatedAt })
+        json(request, response, 200, { profile })
+        return true
+      }
+      if (request.method === 'POST' && request.url === '/memory/associations/rebuild') {
+        json(request, response, 200, await repository.rebuildAssociations({ userId }))
         return true
       }
       if (request.method === 'POST' && request.url === '/memory/events/listening') {

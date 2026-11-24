@@ -8,6 +8,15 @@ import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicPreferencePr
 
 export type SpotifyToken = { accessToken: string; refreshToken?: string; expiresAt: number }
 export type PresencePosition = { x: number; y: number }
+export type PendingAgentActionResult = {
+  exchangeId: string
+  runId: string
+  actionResultToken: string
+  finalResponse: string
+  status: 'COMPLETED' | 'FAILED'
+  currentTrack: MusicTrack | null
+  timeZone: string
+}
 export type SpotifyLibraryCache = {
   version: 4
   playlists?: { fetchedAt: number; data: MusicPlaylist[] }
@@ -39,6 +48,8 @@ export const extensionStorage = {
   setPosition: (value: PresencePosition) => chrome.storage.local.set({ [STORAGE_KEYS.position]: value }),
   getConversation: () => localGet<ConversationMessage[]>(STORAGE_KEYS.conversation, []),
   setConversation: (value: ConversationMessage[]) => chrome.storage.local.set({ [STORAGE_KEYS.conversation]: value }),
+  getPendingAgentActionResults: () => localGet<PendingAgentActionResult[]>(STORAGE_KEYS.pendingAgentActionResults, []),
+  setPendingAgentActionResults: (value: PendingAgentActionResult[]) => chrome.storage.local.set({ [STORAGE_KEYS.pendingAgentActionResults]: value }),
   getMemories: () => localGet<MusicMemory[]>(STORAGE_KEYS.memories, []),
   setMemories: (value: MusicMemory[]) => chrome.storage.local.set({ [STORAGE_KEYS.memories]: value }),
   getMusicPreference: () => localGet<MusicPreferenceProfile | null>(STORAGE_KEYS.musicPreference, null),

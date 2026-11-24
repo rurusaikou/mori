@@ -33,6 +33,8 @@ export type PlaybackState = {
   availability: PlaybackAvailability
   isPlaying: boolean
   track: MusicTrack | null
+  /** 当前会话内最近一首已确认离开的歌曲；只用于对话引用，不代表完整播放历史。 */
+  previousTrack?: MusicTrack | null
   progressMs: number
   durationMs: number
   shuffle: boolean
@@ -65,6 +67,7 @@ export const INITIAL_PLAYBACK_STATE: PlaybackState = {
   availability: 'needs-auth',
   isPlaying: false,
   track: null,
+  previousTrack: null,
   progressMs: 0,
   durationMs: 0,
   shuffle: false,

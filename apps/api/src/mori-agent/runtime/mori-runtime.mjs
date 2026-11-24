@@ -12,7 +12,7 @@ import { enforcePlaybackFact, responseQualityIssue } from '../expression/respons
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
-import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
+import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
 
 export function createLegacyMoriAgent(llm, options = {}) {
   const { musicSearchMode } = validateRuntimeOptions(options)
@@ -33,12 +33,15 @@ export function createLegacyMoriAgent(llm, options = {}) {
         push('INPUT', input)
         const state = createAgentState(input)
         push('STATE_BEFORE', { worldState: state.worldState, playbackState: state.playbackState })
-        const understood = await understandConversation(options.understandingLlm ?? llm, state, {
-          onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
-        })
+        const [understood, relevantMemory] = await Promise.all([
+          understandConversation(options.understandingLlm ?? llm, state, {
+            onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
+          }),
+          prepareRelevantMemory(state, options),
+        ])
         const conversationUnderstanding = understood.understanding
         push('CONVERSATION_UNDERSTANDING', conversationUnderstanding)
-        const context = assembleConversationContext(state, conversationUnderstanding)
+        const context = assembleConversationContext(state, conversationUnderstanding, relevantMemory)
         push('TRACK_REFERENCE_RESOLUTION', {
           referenceType: conversationUnderstanding.reference?.type ?? null,
           currentTrack: state.currentTrack,
@@ -65,7 +68,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
         let decision
         let decisionTokenUsage = first.tokenUsage
         try {
-          decision = validateDecisionForUnderstanding(first.data, conversationUnderstanding)
+          decision = validateDecisionForUnderstanding(first.data, conversationUnderstanding, context)
         } catch (error) {
           const issue = error instanceof Error ? error.message : 'Decision 无效'
           push('DECISION_REPAIR', { issue, rejectedDecision: first.data })
@@ -77,9 +80,9 @@ export function createLegacyMoriAgent(llm, options = {}) {
           })
           capabilityStage(logRun, 'agent_decision_repair_raw', { output: repaired.data, model: repaired.model, tokenUsage: repaired.tokenUsage })
           try {
-            decision = validateDecisionForUnderstanding(repaired.data, conversationUnderstanding)
+            decision = validateDecisionForUnderstanding(repaired.data, conversationUnderstanding, context)
           } catch (repairError) {
-            decision = fallbackDecisionForUnderstanding(repaired.data, conversationUnderstanding)
+            decision = fallbackDecisionForUnderstanding(repaired.data, conversationUnderstanding, context)
             push('DECISION_FALLBACK', { issue: repairError instanceof Error ? repairError.message : 'Decision 修复仍无效', decision })
           }
           logRun.model = repaired.model

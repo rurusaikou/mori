@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+import { consolidateTasteProfile } from './taste-profile.mjs'
 
 const schemaPath = fileURLToPath(new URL('./schema.sql', import.meta.url))
 
@@ -109,6 +110,212 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
       logInfo('memory', 'candidate_created', { userId: value.userId, memoryId: id, confidence: value.confidence, sourceMessageId: value.sourceMessageId })
       return { id, ...value }
     },
+    async upsertMusicFact(input) {
+      const value = musicFactInput(input)
+      const vector = await optionalEmbedding(embeddingProvider, value.content, logError)
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        if (value.supersedesId) {
+          const superseded = await client.query(`UPDATE agent_memories SET status='superseded',updated_at=now() WHERE user_id=$1 AND id=$2 AND status IN ('candidate','confirmed') RETURNING id`, [value.userId, value.supersedesId])
+          if (!superseded.rowCount) throw new Error('需要修正的 Music Fact 不存在')
+        } else {
+          const duplicate = await client.query(`
+            SELECT id,status,confidence FROM agent_memories
+            WHERE user_id=$1 AND kind='preference' AND status IN ('candidate','confirmed')
+              AND lower(content)=lower($2) AND track_uri IS NOT DISTINCT FROM $3
+            ORDER BY updated_at DESC LIMIT 1
+          `, [value.userId, value.content, value.track?.uri ?? null])
+          if (duplicate.rows[0]) {
+            const existing = duplicate.rows[0]
+            await client.query(`UPDATE agent_memories SET confidence=GREATEST(confidence,$3),status=CASE WHEN $4 THEN 'confirmed' ELSE status END,updated_at=now() WHERE user_id=$1 AND id=$2`, [value.userId, existing.id, value.confidence, value.confirmed])
+            await insertEvidence(client, { userId: value.userId, memoryId: existing.id, type: 'message', sourceId: value.sourceMessageId, content: value.evidence, occurredAt: value.createdAt })
+            await client.query('COMMIT')
+            return { id: existing.id, ...value, status: value.confirmed ? 'confirmed' : existing.status, deduplicated: true }
+          }
+        }
+        const id = randomUUID()
+        await client.query(`
+          INSERT INTO agent_memories
+            (id,user_id,kind,content,status,confidence,source,track_uri,track_title,track_artist,tags,embedding,embedding_model,supersedes_id,created_at,updated_at)
+          VALUES ($1,$2,'preference',$3,$4,$5,'user_statement',$6,$7,$8,$9,$10::vector,$11,$12,$13,$13)
+        `, [id, value.userId, value.content, value.confirmed ? 'confirmed' : 'candidate', value.confidence,
+          value.track?.uri ?? null, value.track?.title ?? null, value.track?.artist ?? null,
+          [value.category, ...(value.dimension ? [`dimension:${value.dimension}`] : [])], vector ? vectorLiteral(vector) : null,
+          vector ? embeddingProvider.model : null, value.supersedesId, value.createdAt])
+        const evidenceId = await insertEvidence(client, { userId: value.userId, memoryId: id, type: 'message', sourceId: value.sourceMessageId, content: value.evidence, occurredAt: value.createdAt })
+        await indexMemoryAssociations(client, {
+          userId: value.userId, memoryId: id, kind: 'FACT', label: value.content, track: value.track,
+          dimension: value.dimension, evidenceId,
+        })
+        await client.query('COMMIT')
+        logInfo('memory', 'music_fact_upserted', { userId: value.userId, memoryId: id, category: value.category, supersedesId: value.supersedesId })
+        return { id, ...value, status: value.confirmed ? 'confirmed' : 'candidate', deduplicated: false }
+      } catch (error) {
+        await client.query('ROLLBACK'); throw error
+      } finally { client.release() }
+    },
+    async createMusicMoment(input) {
+      const value = musicMomentInput(input)
+      const content = [value.summary, value.userReflection].filter(Boolean).join('；')
+      const vector = await optionalEmbedding(embeddingProvider, content, logError)
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        await client.query(`
+          INSERT INTO agent_memories
+            (id,user_id,kind,content,status,confidence,source,track_uri,track_title,track_artist,tags,embedding,embedding_model,created_at,updated_at)
+          VALUES ($1,$2,'moment',$3,$4,1,'user_moment',$5,$6,$7,$8,$9::vector,$10,$11,$11)
+          ON CONFLICT (id) DO NOTHING
+        `, [value.id, value.userId, content, value.confirmed ? 'confirmed' : 'candidate', value.track?.uri ?? null,
+          value.track?.title ?? null, value.track?.artist ?? null, ['music_moment'], vector ? vectorLiteral(vector) : null,
+          vector ? embeddingProvider.model : null, value.occurredAt])
+        let associationEvidenceId = null
+        for (const sourceId of value.sourceMessageIds) associationEvidenceId = await insertEvidence(client, { userId: value.userId, memoryId: value.id, type: 'message', sourceId, content, occurredAt: value.occurredAt })
+        await indexMemoryAssociations(client, {
+          userId: value.userId, memoryId: value.id, kind: 'MOMENT', label: content, track: value.track,
+          evidenceId: associationEvidenceId,
+        })
+        await client.query('COMMIT')
+        logInfo('memory', 'music_moment_persisted', { userId: value.userId, memoryId: value.id, trackUri: value.track?.uri ?? null, sourceCount: value.sourceMessageIds.length })
+        return { ...value, content, status: value.confirmed ? 'confirmed' : 'candidate' }
+      } catch (error) {
+        await client.query('ROLLBACK'); throw error
+      } finally { client.release() }
+    },
+    async retrieveRelevant({ userId, query, trackUri = null, limit = 5 }) {
+      required(userId, 'userId'); required(query, 'query')
+      const boundedLimit = Math.max(1, Math.min(Number(limit) || 5, 10))
+      const result = await pool.query(`
+        SELECT m.id,m.kind,m.content,m.status,m.confidence,m.source,m.track_uri,m.track_title,m.track_artist,m.mood,m.tags,m.created_at,
+          CASE WHEN m.track_uri=$2 THEN 1 ELSE similarity(m.content,$3) END AS keyword_score,
+          0::double precision AS semantic_score, evidence.items AS evidence
+        FROM agent_memories m
+        LEFT JOIN LATERAL (
+          SELECT jsonb_agg(jsonb_build_object('id',e.id,'type',e.evidence_type,'content',e.content,'occurredAt',e.occurred_at) ORDER BY e.occurred_at) AS items
+          FROM memory_evidence e WHERE e.user_id=m.user_id AND e.memory_id=m.id
+        ) evidence ON true
+        WHERE m.user_id=$1 AND m.status IN ('candidate','confirmed')
+          AND (($2::text IS NOT NULL AND m.track_uri=$2) OR m.content ILIKE '%' || $3 || '%')
+        ORDER BY CASE WHEN m.track_uri=$2 THEN 0 ELSE 1 END, keyword_score DESC, m.updated_at DESC
+        LIMIT $4
+      `, [userId, trackUri, query, boundedLimit])
+      return result.rows.map(memoryRow)
+    },
+    async listActiveMusicFacts({ userId, trackUri = null, limit = 20 }) {
+      required(userId, 'userId')
+      const result = await pool.query(`
+        SELECT id,kind,content,status,confidence,source,track_uri,track_title,track_artist,tags,created_at,
+          0::double precision AS semantic_score,0::double precision AS keyword_score,'[]'::jsonb AS evidence
+        FROM agent_memories
+        WHERE user_id=$1 AND kind='preference' AND source='user_statement' AND status IN ('candidate','confirmed')
+        ORDER BY CASE WHEN $2::text IS NOT NULL AND track_uri=$2 THEN 0 ELSE 1 END,updated_at DESC
+        LIMIT $3
+      `, [userId, trackUri, Math.max(1, Math.min(Number(limit) || 20, 50))])
+      return result.rows.map(memoryRow)
+    },
+    async refreshTasteProfile({ userId, updatedAt = new Date().toISOString() }) {
+      required(userId, 'userId')
+      const factRows = await pool.query(`
+        SELECT id,content,status,confidence,tags,created_at
+        FROM agent_memories
+        WHERE user_id=$1 AND kind='preference' AND source='user_statement' AND status IN ('candidate','confirmed')
+        ORDER BY updated_at DESC
+      `, [userId])
+      const profile = consolidateTasteProfile(factRows.rows, iso(updatedAt, 'updatedAt'))
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        for (const dimension of profile) {
+          const existing = await client.query(`
+            SELECT id,content,confidence FROM agent_memories
+            WHERE user_id=$1 AND kind='preference' AND source='derived_profile'
+              AND status='confirmed' AND tags @> ARRAY[$2]::text[]
+            ORDER BY updated_at DESC LIMIT 1
+          `, [userId, `dimension:${dimension.dimension}`])
+          const content = `${dimension.stance}:${dimension.summary}`
+          if (existing.rows[0]?.content === content && Number(existing.rows[0]?.confidence) === dimension.confidence) {
+            dimension.id = existing.rows[0].id
+            continue
+          }
+          if (existing.rows[0]) await client.query(`UPDATE agent_memories SET status='superseded',updated_at=$3 WHERE user_id=$1 AND id=$2`, [userId, existing.rows[0].id, dimension.updatedAt])
+          const id = randomUUID()
+          await client.query(`
+            INSERT INTO agent_memories (id,user_id,kind,content,status,confidence,source,tags,created_at,updated_at)
+            VALUES ($1,$2,'preference',$3,'confirmed',$4,'derived_profile',$5,$6,$6)
+          `, [id, userId, content, dimension.confidence, ['taste_profile', `dimension:${dimension.dimension}`, `stance:${dimension.stance}`], dimension.updatedAt])
+          for (const factId of dimension.evidenceIds) await insertEvidence(client, {
+            userId, memoryId: id, type: 'profile', sourceId: factId,
+            content: `Taste Profile 由 Music Fact ${factId} 支持`, occurredAt: dimension.updatedAt,
+          })
+          dimension.id = id
+        }
+        await client.query('COMMIT')
+        logInfo('memory', 'taste_profile_refreshed', { userId, dimensionCount: profile.length })
+        return profile
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally { client.release() }
+    },
+    async listTasteProfile({ userId }) {
+      required(userId, 'userId')
+      const result = await pool.query(`
+        SELECT id,content,confidence,tags,updated_at,
+          COALESCE((SELECT jsonb_agg(e.source_id ORDER BY e.occurred_at) FROM memory_evidence e
+            WHERE e.user_id=m.user_id AND e.memory_id=m.id AND e.evidence_type='profile'),'[]'::jsonb) AS evidence_ids
+        FROM agent_memories m
+        WHERE user_id=$1 AND kind='preference' AND source='derived_profile' AND status='confirmed'
+        ORDER BY confidence DESC,updated_at DESC
+      `, [userId])
+      return result.rows.map(profileRow)
+    },
+    async retrieveAssociations({ userId, trackUri = null, memoryId = null, limit = 10 }) {
+      required(userId, 'userId')
+      if (!trackUri && !memoryId) return []
+      const result = await pool.query(`
+        WITH seed AS (
+          SELECT id FROM memory_nodes
+          WHERE user_id=$1 AND status='active'
+            AND (($2::text IS NOT NULL AND node_type='CATALOG_TRACK' AND entity_key=$2)
+              OR ($3::text IS NOT NULL AND node_type IN ('FACT','MOMENT') AND entity_key=$3))
+        )
+        SELECT e.relation,e.weight,e.properties,
+          source.node_type AS source_type,source.entity_key AS source_key,source.label AS source_label,
+          target.node_type AS target_type,target.entity_key AS target_key,target.label AS target_label
+        FROM memory_edges e
+        JOIN memory_nodes source ON source.id=e.from_node_id AND source.status='active'
+        JOIN memory_nodes target ON target.id=e.to_node_id AND target.status='active'
+        WHERE e.user_id=$1 AND e.status='active'
+          AND (e.from_node_id IN (SELECT id FROM seed) OR e.to_node_id IN (SELECT id FROM seed))
+        ORDER BY e.weight DESC,e.updated_at DESC LIMIT $4
+      `, [userId, trackUri, memoryId, Math.max(1, Math.min(Number(limit) || 10, 25))])
+      return result.rows.map(associationRow)
+    },
+    async rebuildAssociations({ userId }) {
+      required(userId, 'userId')
+      const memories = await pool.query(`
+        SELECT id,kind,content,track_uri,track_title,track_artist,tags
+        FROM agent_memories
+        WHERE user_id=$1 AND status IN ('candidate','confirmed') AND source IN ('user_statement','user_moment')
+      `, [userId])
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        for (const memory of memories.rows) await indexMemoryAssociations(client, {
+          userId, memoryId: memory.id, kind: memory.kind === 'moment' ? 'MOMENT' : 'FACT', label: memory.content,
+          track: memory.track_uri ? { uri: memory.track_uri, title: memory.track_title, artist: memory.track_artist } : null,
+          dimension: memory.tags?.find((tag) => tag.startsWith('dimension:'))?.slice('dimension:'.length) ?? null,
+          evidenceId: null,
+        })
+        await client.query('COMMIT')
+        logInfo('memory', 'associations_rebuilt', { userId, memoryCount: memories.rows.length })
+        return { indexed: memories.rows.length }
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally { client.release() }
+    },
     async search({ userId, query, limit = 5 }) {
       required(userId, 'userId'); required(query, 'query')
       const boundedLimit = Math.max(1, Math.min(Number(limit) || 5, 10))
@@ -178,6 +385,14 @@ export function createUnavailableMemoryRepository(reason) {
     appendConversationMessage: async () => ({ stored: false, reason }),
     appendListeningEvent: async () => ({ stored: false, reason }),
     createMoment: async () => ({ stored: false, reason }),
+    upsertMusicFact: async () => ({ stored: false, reason }),
+    createMusicMoment: async () => ({ stored: false, reason }),
+    retrieveRelevant: async () => [],
+    listActiveMusicFacts: async () => [],
+    refreshTasteProfile: async () => [],
+    listTasteProfile: async () => [],
+    retrieveAssociations: async () => [],
+    rebuildAssociations: async () => ({ indexed: 0 }),
     createCandidate: async () => ({ stored: false, reason }),
     search: async () => [],
     list: async () => [],
@@ -257,6 +472,35 @@ async function optionalEmbedding(provider, text, logError) {
   catch (error) { logError('memory', 'embedding_failed', error, { model: provider.model }); return null }
 }
 
+async function insertEvidence(client, { userId, memoryId, type, sourceId, content, occurredAt }) {
+  const id = randomUUID()
+  const inserted = await client.query(`
+    INSERT INTO memory_evidence (id,user_id,memory_id,evidence_type,source_id,content,occurred_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7)
+    ON CONFLICT (user_id,memory_id,evidence_type,source_id) DO NOTHING
+    RETURNING id
+  `, [id, userId, memoryId, type, sourceId, content, occurredAt])
+  if (inserted.rows?.[0]?.id) return inserted.rows[0].id
+  const existing = await client.query(`SELECT id FROM memory_evidence WHERE user_id=$1 AND memory_id=$2 AND evidence_type=$3 AND source_id=$4`, [userId, memoryId, type, sourceId])
+  return existing.rows[0]?.id ?? null
+}
+
+async function indexMemoryAssociations(client, { userId, memoryId, kind, label, track, dimension = null, evidenceId = null }) {
+  const userNode = await upsertNode(client, userId, 'USER', userId, 'Mori 用户', {})
+  const memoryNode = await upsertNode(client, userId, kind, memoryId, label, {})
+  await connectAggregate(client, userId, userNode, kind === 'MOMENT' ? 'SAVED_MOMENT' : 'HAS_FACT', memoryNode, 1, {})
+  if (track) {
+    const trackNode = await upsertNode(client, userId, 'CATALOG_TRACK', track.uri, track.title, { artist: track.artist })
+    if (evidenceId) await connect(client, userId, memoryNode, 'ABOUT_TRACK', trackNode, evidenceId, 1, {})
+    else await connectAggregate(client, userId, memoryNode, 'ABOUT_TRACK', trackNode, 1, {})
+  }
+  if (dimension) {
+    const dimensionNode = await upsertNode(client, userId, 'TASTE_DIMENSION', dimension, dimension, {})
+    if (evidenceId) await connect(client, userId, memoryNode, 'DESCRIBES_TASTE', dimensionNode, evidenceId, 1, {})
+    else await connectAggregate(client, userId, memoryNode, 'DESCRIBES_TASTE', dimensionNode, 1, {})
+  }
+}
+
 function conversationInput(input) {
   const createdAt = iso(input.createdAt, 'createdAt'); const timeZone = validTimeZone(input.timeZone)
   return { id: input.id ?? randomUUID(), userId: required(input.userId, 'userId'), exchangeId: required(input.exchangeId, 'exchangeId'),
@@ -280,10 +524,61 @@ function candidateInput(input) {
     sourceMessageId: required(input.sourceMessageId, 'sourceMessageId'), evidence: required(input.evidence, 'evidence'),
     track: optionalTrack(input.track), createdAt: iso(input.createdAt, 'createdAt') }
 }
+function musicFactInput(input) {
+  const confidence = Number(input.confidence ?? 1)
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw new Error('confidence 无效')
+  return {
+    userId: required(input.userId, 'userId'),
+    category: oneOf(input.category, ['preference', 'dislike', 'music_fact'], 'category'),
+    content: required(input.content, 'content'),
+    dimension: input.dimension ? required(input.dimension, 'dimension') : null,
+    sourceMessageId: required(input.sourceMessageId, 'sourceMessageId'),
+    evidence: required(input.evidence, 'evidence'),
+    track: optionalTrack(input.track),
+    confidence,
+    confirmed: input.confirmed === true,
+    supersedesId: input.supersedesId ? required(input.supersedesId, 'supersedesId') : null,
+    createdAt: iso(input.createdAt, 'createdAt'),
+  }
+}
+function musicMomentInput(input) {
+  if (!Array.isArray(input.sourceMessageIds) || input.sourceMessageIds.length === 0) throw new Error('sourceMessageIds 不能为空')
+  return {
+    id: input.id ? required(input.id, 'id') : randomUUID(),
+    userId: required(input.userId, 'userId'),
+    summary: required(input.summary, 'summary'),
+    userReflection: input.userReflection ? required(input.userReflection, 'userReflection') : null,
+    sourceMessageIds: [...new Set(input.sourceMessageIds.map((value) => required(value, 'sourceMessageIds[]')))].slice(0, 50),
+    track: optionalTrack(input.track),
+    confirmed: input.confirmed === true,
+    occurredAt: iso(input.occurredAt, 'occurredAt'),
+  }
+}
 function memoryRow(row) { return { id: row.id, kind: row.kind, content: row.content, status: row.status, confidence: Number(row.confidence), source: row.source,
   score: Math.max(Number(row.semantic_score) || 0, Number(row.keyword_score) || 0), mood: row.mood ?? undefined, tags: row.tags ?? [], createdAt: row.created_at,
   evidence: row.evidence ?? [],
   ...(row.track_uri ? { track: { uri: row.track_uri, title: row.track_title, artist: row.track_artist } } : {}) } }
+function profileRow(row) {
+  const tags = row.tags ?? []
+  return {
+    id: row.id,
+    dimension: tags.find((tag) => tag.startsWith('dimension:'))?.slice('dimension:'.length) ?? 'unknown',
+    stance: tags.find((tag) => tag.startsWith('stance:'))?.slice('stance:'.length) ?? 'mixed',
+    summary: String(row.content).replace(/^[^:]+:/u, ''),
+    confidence: Number(row.confidence),
+    evidenceIds: row.evidence_ids ?? [],
+    updatedAt: row.updated_at,
+  }
+}
+function associationRow(row) {
+  return {
+    relation: row.relation,
+    weight: Number(row.weight),
+    source: { type: row.source_type, key: row.source_key, label: row.source_label },
+    target: { type: row.target_type, key: row.target_key, label: row.target_label },
+    properties: row.properties ?? {},
+  }
+}
 function optionalTrack(value) { return value ? requiredTrack(value) : null }
 function requiredTrack(value) { if (!value || typeof value !== 'object') throw new Error('track 必须是对象'); return { uri: required(value.uri, 'track.uri'), title: required(value.title, 'track.title'), artist: required(value.artist, 'track.artist'), ...(value.isrc ? { isrc: String(value.isrc) } : {}) } }
 function required(value, name) { if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} 不能为空`); return value.trim() }

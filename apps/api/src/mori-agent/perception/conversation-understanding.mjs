@@ -1,19 +1,21 @@
 /** Conversation Understanding 使用结构化 LLM，不包含关键词、正则或 Tool 路由规则。 */
 import { object, text } from '../shared/executor.mjs'
 
-export const CONVERSATION_UNDERSTANDING_PROMPT_VERSION = 'conversation-understanding-v1.1'
+export const CONVERSATION_UNDERSTANDING_PROMPT_VERSION = 'conversation-understanding-v1.3'
 export const CONVERSATION_SCENES = ['LISTEN_REQUEST', 'DAILY_CHAT', 'SONG_CHAT']
 export const TRACK_REFERENCE_TYPES = ['CURRENT_TRACK', 'PREVIOUS_TRACK', 'CONVERSATION_TRACK', 'NAMED_TRACK', 'RECOMMENDED_TRACK', 'UNKNOWN']
+export const TURN_RELATIONS = ['INDEPENDENT', 'CONTINUATION', 'ACCEPTS_ACTION_PROPOSAL', 'REJECTS_ACTION_PROPOSAL', 'RESULT_FOLLOWUP', 'CORRECTION']
 export const CONVERSATION_UNDERSTANDING_SCHEMA = {
   type: 'object',
   properties: {
     scene: { type: 'string', enum: CONVERSATION_SCENES }, meaning: { type: 'string' },
+    turnRelation: { type: 'string', enum: TURN_RELATIONS },
     reference: { anyOf: [{ type: 'null' }, { type: 'object', properties: { type: { type: 'string', enum: TRACK_REFERENCE_TYPES }, value: { anyOf: [{ type: 'null' }, { type: 'string' }] } }, required: ['type', 'value'], additionalProperties: false }] },
     listeningRequest: { anyOf: [{ type: 'null' }, { type: 'object', properties: { type: { type: 'string', enum: ['SEARCH', 'RECOMMEND', 'CONTROL'] }, control: { anyOf: [{ type: 'null' }, { type: 'string', enum: ['PAUSE', 'RESUME', 'NEXT', 'PREVIOUS'] }] }, song: { anyOf: [{ type: 'null' }, { type: 'string' }] }, artist: { anyOf: [{ type: 'null' }, { type: 'string' }] }, preferences: { type: 'array', items: { type: 'string' } }, excludeCurrentTrack: { type: 'boolean' } }, required: ['type', 'control', 'song', 'artist', 'preferences', 'excludeCurrentTrack'], additionalProperties: false }] },
-    emotion: { anyOf: [{ type: 'null' }, { type: 'object', properties: { description: { type: 'string' }, confidence: { type: 'number' } }, required: ['description', 'confidence'], additionalProperties: false }] },
+    emotion: { anyOf: [{ type: 'null' }, { type: 'object', properties: { description: { type: 'string' }, evidence: { type: 'string' }, confidence: { type: 'number' } }, required: ['description', 'evidence', 'confidence'], additionalProperties: false }] },
     confidence: { type: 'number' }, ambiguity: { anyOf: [{ type: 'null' }, { type: 'string' }] },
   },
-  required: ['scene', 'meaning', 'reference', 'listeningRequest', 'emotion', 'confidence', 'ambiguity'], additionalProperties: false,
+  required: ['scene', 'meaning', 'turnRelation', 'reference', 'listeningRequest', 'emotion', 'confidence', 'ambiguity'], additionalProperties: false,
 }
 
 export const CONVERSATION_UNDERSTANDING_PROMPT = `
@@ -28,9 +30,20 @@ export const CONVERSATION_UNDERSTANDING_PROMPT = `
 4. 不要把 conversationHistory 中过去的请求、意图或情绪自动继承到当前轮。
 5. 如果过去的请求已经得到响应或执行，除非 latestMessage 明确继续该请求，否则不要把它判断为当前请求。
 6. meaning 必须描述 latestMessage 当前表达的意思，不要总结历史对话。
-7. 先判断 latestMessage 与上一轮操作的关系：新的操作请求、结果追问、确认、质疑、纠正或重新执行。只有“新的操作请求”和“明确要求重新执行”才能生成新的 listeningRequest。
+7. 先判断 latestMessage 与上一轮操作的关系：新的操作请求、结果追问、确认、质疑、纠正或重新执行。只有“新的操作请求”“明确要求重新执行”或“接受紧邻的尚未执行动作提议”才能生成新的 listeningRequest。
 8. “我想听别的歌”“换一首”“来点别的”是当前消息明确提出的新音乐动作，必须生成 listeningRequest，不能解释成对当前歌曲的评价、追问或喜爱。
 9. “hi / hello / 你好 / 嗯？”等独立短招呼或简短确认仍以 latestMessage 为主体；除非其中有明确指代，不得用历史请求替换它的含义。
+
+【turnRelation】
+- INDEPENDENT：当前消息与上一轮没有直接承接关系。
+- CONTINUATION：继续分享或讨论同一话题，但没有接受一个待执行动作。
+- ACCEPTS_ACTION_PROPOSAL：用户立即接受上一条 assistant 消息中明确提出的、系统可执行的音乐动作建议。
+- REJECTS_ACTION_PROPOSAL：用户拒绝上一条 assistant 的动作建议。
+- RESULT_FOLLOWUP：追问、确认或质疑上一轮已经产生的结果。
+- CORRECTION：纠正上一轮理解或执行结果。
+只允许检查紧邻的上一条 assistant 消息来判断 ACCEPTS_ACTION_PROPOSAL，不得从更早历史恢复动作。
+“行 / 好 / 可以 / 嗯”本身没有固定意图：如果上一条只是问候或聊天，它是 CONTINUATION；如果上一条明确建议“听轻快的歌”“要不要换一首”且该动作尚未执行，它是 ACCEPTS_ACTION_PROPOSAL。
+当 turnRelation=ACCEPTS_ACTION_PROPOSAL 时，必须把紧邻提议中的动作和约束恢复为 listeningRequest。例如上一句“可以听听轻快的歌”，用户回答“行”，应输出 RECOMMEND，preferences 包含“轻快”；不能说“不是新的音乐请求”。
 
 【scene】
 LISTEN_REQUEST：
@@ -46,6 +59,7 @@ DAILY_CHAT：
 
 【listeningRequest】
 只有 latestMessage 当前确实提出搜索或推荐音乐的请求时才生成。
+用户对紧邻上一条 assistant 音乐动作提议的明确接受，也视为当前轮授权执行，必须生成 listeningRequest。
 历史中已经提出或执行过的音乐请求不能自动继承到当前轮。
 “换一批”“再推荐几首”是重新执行，应生成 listeningRequest；“但是我想听徐佳莹的歌呀”在实际播放了其他歌时既是纠正，也明确要求满足原请求，应生成 listeningRequest。
 scene 描述当前表达的主要对话行为，listeningRequest 描述是否存在需要执行的音乐动作；纠正可以是 DAILY_CHAT 或 SONG_CHAT，同时包含 listeningRequest，两者不要求互斥。
@@ -64,6 +78,7 @@ scene 描述当前表达的主要对话行为，listeningRequest 描述是否存
 【emotion】
 只提取 latestMessage 当前明确表达的用户情绪。
 不要从 conversationHistory 继承过去的情绪。
+emotion 非空时，evidence 必须逐字引用 latestMessage 中直接支持该情绪的连续片段；找不到原文证据就返回 null。“行 / 好 / 嗯”等确认本身不支持“疲惫、低落”等情绪。
 
 你不回复用户、不选择 Tool、不执行动作，只返回给定 Schema。
 `
@@ -75,32 +90,38 @@ export async function understandConversation(llm, state, { onRawOutput } = {}) {
     prompt: CONVERSATION_UNDERSTANDING_PROMPT,
     input: { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), currentState: { worldState: state.worldState, playbackState: state.playbackState, conversationFocus: state.conversationFocus } },
     schema: CONVERSATION_UNDERSTANDING_SCHEMA,
-    schemaName: 'mori_conversation_understanding_v1',
+    schemaName: 'mori_conversation_understanding_v1_3',
   })
   onRawOutput?.({ promptVersion: CONVERSATION_UNDERSTANDING_PROMPT_VERSION, output: result.data, model: result.model, tokenUsage: result.tokenUsage })
-  return { understanding: validateConversationUnderstanding(result.data), model: result.model, tokenUsage: result.tokenUsage }
+  return { understanding: validateConversationUnderstanding(result.data, state.userMessage), model: result.model, tokenUsage: result.tokenUsage }
 }
 
-export function validateConversationUnderstanding(value) {
+export function validateConversationUnderstanding(value, latestMessage = null) {
   object(value, 'conversation understanding')
   if (!CONVERSATION_SCENES.includes(value.scene)) throw new Error('conversation understanding scene 无效')
   text(value.meaning, 'conversation understanding meaning')
+  if (!TURN_RELATIONS.includes(value.turnRelation)) throw new Error('conversation understanding turnRelation 无效')
   if (!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1) throw new Error('conversation understanding confidence 无效')
   if (value.reference && !TRACK_REFERENCE_TYPES.includes(value.reference.type)) throw new Error('conversation understanding reference.type 无效')
+  if (value.emotion) {
+    const evidence = text(value.emotion.evidence, 'conversation understanding emotion.evidence')
+    if (typeof latestMessage === 'string' && !latestMessage.includes(evidence)) throw new Error('emotion.evidence 必须来自 latestMessage 原文')
+  }
   // scene 描述对话行为，listeningRequest 独立描述副作用请求。纠正表达可能以 DAILY_CHAT
   // 为主但仍要求重新选歌；不能让合法的组合语义因为字段互斥而导致整轮失败。
   if (value.scene === 'LISTEN_REQUEST' && !value.listeningRequest) throw new Error('LISTEN_REQUEST 必须包含 listeningRequest')
+  if (value.turnRelation === 'ACCEPTS_ACTION_PROPOSAL' && !value.listeningRequest) throw new Error('接受动作提议时必须包含 listeningRequest')
   return value
 }
 
-export function assembleConversationContext(state, understanding) {
+export function assembleConversationContext(state, understanding, relevantMemory = { matches: [], query: '', source: 'NONE' }) {
   // 原始消息只帮助 Decision 组织自然回复和承接；音乐副作用仍由 Structured Understanding
   // 与运行时一致性校验约束，不能根据原文绕过 listeningRequest 新建动作。
-  const resolved = resolveTrackReference({ reference: understanding.reference, currentTrack: state.currentTrack, conversationHistory: state.conversationHistory, conversationFocus: state.conversationFocus })
-  return { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), understanding, worldState: state.worldState, playbackState: state.playbackState, targetTrack: resolved.track, trackResolution: resolved.resolution }
+  const resolved = resolveTrackReference({ reference: understanding.reference, currentTrack: state.currentTrack, previousTrack: state.playbackState.previousTrack, conversationHistory: state.conversationHistory, conversationFocus: state.conversationFocus })
+  return { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), understanding, worldState: state.worldState, playbackState: state.playbackState, targetTrack: resolved.track, trackResolution: resolved.resolution, relevantMemory }
 }
 
-export function resolveTrackReference({ reference, currentTrack, conversationHistory = [], conversationFocus = null }) {
+export function resolveTrackReference({ reference, currentTrack, previousTrack = null, conversationHistory = [], conversationFocus = null }) {
   const unresolved = (source = 'UNRESOLVED') => ({ track: null, resolution: { source, confidence: 0, resolved: false, referenceType: reference?.type ?? null } })
   if (!reference) return unresolved('NO_REFERENCE')
   if (reference.type === 'CURRENT_TRACK') return currentTrack
@@ -121,8 +142,10 @@ export function resolveTrackReference({ reference, currentTrack, conversationHis
     if (matches.length === 1) return resolved(matches[0], 'KNOWN_TRACK_MATCH', 0.95, reference.type)
     return unresolved(matches.length > 1 ? 'AMBIGUOUS_NAMED_TRACK' : 'KNOWN_TRACK_MATCH')
   }
-  // P0 没有可靠 playbackHistory；PREVIOUS_TRACK 和 UNKNOWN 必须保持未解析，不能静默回退。
-  return unresolved(reference.type === 'PREVIOUS_TRACK' ? 'PLAYBACK_HISTORY_UNAVAILABLE' : 'UNKNOWN_REFERENCE')
+  if (reference.type === 'PREVIOUS_TRACK') return previousTrack
+    ? resolved(previousTrack, 'PLAYBACK_STATE_PREVIOUS', 1, reference.type)
+    : unresolved('PLAYBACK_HISTORY_UNAVAILABLE')
+  return unresolved('UNKNOWN_REFERENCE')
 }
 
 function resolved(track, source, confidence, referenceType) { return { track, resolution: { source, confidence, resolved: true, referenceType } } }

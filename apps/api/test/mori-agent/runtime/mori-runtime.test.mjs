@@ -2,12 +2,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createMoriAgent as createRuntimeAgent } from '../../../src/mori-agent/runtime/index.mjs'
-import { CONVERSATION_UNDERSTANDING_PROMPT_VERSION, understandConversation, resolveTrackReference } from '../../../src/mori-agent/perception/conversation-understanding.mjs'
+import { CONVERSATION_UNDERSTANDING_PROMPT_VERSION, understandConversation, resolveTrackReference, validateConversationUnderstanding } from '../../../src/mori-agent/perception/conversation-understanding.mjs'
 import { decisionSystemPrompt } from '../../../src/mori-agent/expression/prompts.mjs'
 
 const response = (data) => ({ data, model: 'test-model', tokenUsage: { total_tokens: 10 } })
 const base = { userMessage: '你好', currentTrack: null, playbackState: { status: 'none', currentTrack: null }, conversationHistory: [], fakeMemory: [] }
-const understanding = (data) => async () => response({ reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null, ...data })
+const understanding = (data) => async () => response({ turnRelation: 'INDEPENDENT', reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null, ...data })
 const agent = (llm, understood, options = {}) => createRuntimeAgent(llm, { ...options, understandingLlm: understanding(understood) })
 
 test('daily chat responds without a tool', async () => {
@@ -21,15 +21,54 @@ test('passes all twelve normalized history messages into Conversation Understand
   let understandingInput
   const understandingLlm = async ({ input }) => {
     understandingInput = input
-    return response({ scene: 'DAILY_CHAT', meaning: '用户继续聊天', reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null })
+    return response({ scene: 'DAILY_CHAT', meaning: '用户继续聊天', turnRelation: 'CONTINUATION', reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null })
   }
   const runtime = createRuntimeAgent(async () => response({ action: 'respond', intent: 'CHAT', conversationMove: 'ANSWER', reason: '回应', response: '好。', toolCall: null }), { understandingLlm })
   await runtime.execute({ ...base, conversationHistory: history })
   assert.deepEqual(understandingInput.conversationHistory, history)
 })
 
+test('prepares relevant memory once and exposes it through the shared Conversation Context', async () => {
+  let decisionInput
+  await agent(async ({ input }) => {
+    decisionInput = input
+    return response({ action: 'respond', response: '我记得你喜欢这种表达。', toolCall: null })
+  }, { scene: 'DAILY_CHAT', meaning: '用户继续聊偏好' }).execute({
+    ...base,
+    userMessage: '含蓄',
+    fakeMemory: [
+      { id: 'm1', content: '用户喜欢含蓄的情绪表达', context: '言不由衷' },
+      { id: 'm2', content: '用户喜欢强烈电子音', context: '其他话题' },
+    ],
+  })
+  assert.equal(decisionInput.context.relevantMemory.source, 'LOCAL_MEMORY')
+  assert.equal(decisionInput.context.relevantMemory.matches[0].id, 'm1')
+})
+
+test('exposes the evidence-backed taste profile through formal Conversation Context', async () => {
+  let decisionInput
+  const repository = {
+    available: true,
+    retrieveRelevant: async ({ trackUri }) => [{ id: 'fact-1', content: `歌曲相关记忆:${trackUri}` }],
+    listTasteProfile: async () => [{ id: 'profile-1', dimension: 'vocal', stance: 'likes', confidence: 0.8, evidenceIds: ['fact-1'] }],
+    retrieveAssociations: async () => [{ relation: 'ABOUT_TRACK', source: { type: 'MOMENT', key: 'moment-1' }, target: { type: 'CATALOG_TRACK', key: 'spotify:track:current' } }],
+  }
+  const currentTrack = { uri: 'spotify:track:current', title: '当前歌曲', artist: '歌手' }
+  await agent(async ({ input }) => {
+    decisionInput = input
+    return response({ action: 'respond', response: '我记得你偏爱这种人声。', toolCall: null })
+  }, { scene: 'SONG_CHAT', meaning: '用户讨论当前歌曲' }, { memoryRepository: repository, memoryUserId: 'u1' }).execute({
+    ...base, userMessage: '这种声音我喜欢', currentTrack, playbackState: { status: 'playing', currentTrack },
+  })
+
+  assert.equal(decisionInput.context.relevantMemory.matches[0].id, 'fact-1')
+  assert.equal(decisionInput.context.relevantMemory.tasteProfile[0].dimension, 'vocal')
+  assert.deepEqual(decisionInput.context.relevantMemory.tasteProfile[0].evidenceIds, ['fact-1'])
+  assert.equal(decisionInput.context.relevantMemory.associations[0].source.key, 'moment-1')
+})
+
 test('reports the actual Understanding prompt version and raw output before validation', async () => {
-  const raw = { scene: 'DAILY_CHAT', meaning: '用户打招呼', reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null }
+  const raw = { scene: 'DAILY_CHAT', meaning: '用户打招呼', turnRelation: 'INDEPENDENT', reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null }
   let observed
   const result = await understandConversation(async () => response(raw), { ...base, worldState: { timeZone: 'UTC' } }, { onRawOutput: (value) => { observed = value } })
   assert.equal(observed.promptVersion, CONVERSATION_UNDERSTANDING_PROMPT_VERSION)
@@ -59,6 +98,64 @@ test('listen request delegates recommendation and excludes current track', async
     ? response({ action: 'tool', intent: 'RECOMMEND', conversationMove: 'ANSWER', reason: '开放推荐', response: null, toolCall: { name: 'recommend_music', arguments: { query: '', excludeUris: [current.uri] } } })
     : response({ response: '我来选一首。' }), { scene: 'LISTEN_REQUEST', meaning: '用户要随机推荐', listeningRequest: { type: 'RECOMMEND', song: null, artist: null, preferences: [], excludeCurrentTrack: true } }, { musicSearchMode: 'library' }).execute({ ...base, userMessage: '随便推荐一首', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
   assert.deepEqual(result.action, { type: 'music_request', intent: 'RECOMMEND', query: '', excludeUris: [current.uri] })
+})
+
+test('immediate acceptance of the previous music proposal becomes an authorized recommendation', async () => {
+  let calls = 0
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'RECOMMEND', conversationMove: 'ACKNOWLEDGE', reason: '用户接受轻快音乐提议', response: null, toolCall: { name: 'recommend_music', arguments: { query: '轻快', excludeUris: [] } } })
+    : response({ response: '我来选一首轻快的歌。' }), {
+      scene: 'LISTEN_REQUEST',
+      meaning: '用户接受上一轮听轻快歌曲的提议',
+      turnRelation: 'ACCEPTS_ACTION_PROPOSAL',
+      listeningRequest: { type: 'RECOMMEND', control: null, song: null, artist: null, preferences: ['轻快'], excludeCurrentTrack: false },
+    }, { musicSearchMode: 'library' }).execute({
+      ...base,
+      userMessage: '行',
+      conversationHistory: [
+        { role: 'user', content: '明天要上班，心情一般', playbackTrack: null, discussionTrack: null },
+        { role: 'assistant', content: '或许可以试着听听轻快的歌来转移注意力？', playbackTrack: null, discussionTrack: null },
+      ],
+    })
+  assert.deepEqual(result.action, { type: 'music_request', intent: 'RECOMMEND', query: '轻快', excludeUris: [] })
+})
+
+test('runtime replaces Decision music arguments with Structured Understanding constraints', async () => {
+  let calls = 0
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'RECOMMEND', response: null, toolCall: { name: 'recommend_music', arguments: { query: '伤感', excludeUris: [] } } })
+    : response({ response: '我来选歌。' }), {
+      scene: 'LISTEN_REQUEST', meaning: '用户接受轻快音乐提议', turnRelation: 'ACCEPTS_ACTION_PROPOSAL',
+      listeningRequest: { type: 'RECOMMEND', control: null, song: null, artist: null, preferences: ['轻快'], excludeCurrentTrack: true },
+    }, { musicSearchMode: 'library' }).execute({ ...base, userMessage: '行', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  assert.deepEqual(result.action, { type: 'music_request', intent: 'RECOMMEND', query: '轻快', excludeUris: [current.uri] })
+})
+
+test('runtime replaces a mismatched playback command with the Understanding command', async () => {
+  let calls = 0
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'tool', intent: 'CONTROL', response: null, toolCall: { name: 'playback_control', arguments: { command: 'PAUSE' } } })
+    : response({ response: '正在切歌。' }), {
+      scene: 'LISTEN_REQUEST', meaning: '用户要求下一首',
+      listeningRequest: { type: 'CONTROL', control: 'NEXT', song: null, artist: null, preferences: [], excludeCurrentTrack: false },
+    }).execute({ ...base, userMessage: '下一首', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  assert.deepEqual(result.action, { type: 'playback_control', command: 'NEXT' })
+})
+
+test('accepted action proposal without a listening request is rejected', () => {
+  assert.throws(() => validateConversationUnderstanding({
+    scene: 'DAILY_CHAT', meaning: '用户说行', turnRelation: 'ACCEPTS_ACTION_PROPOSAL', reference: null,
+    listeningRequest: null, emotion: null, confidence: 0.9, ambiguity: null,
+  }), /必须包含 listeningRequest/)
+})
+
+test('emotion evidence cannot be inherited from conversation history', () => {
+  assert.throws(() => validateConversationUnderstanding({
+    scene: 'DAILY_CHAT', meaning: '用户表示同意', turnRelation: 'CONTINUATION', reference: null,
+    listeningRequest: null, emotion: { description: '疲惫、低落', evidence: '明天要上班', confidence: 0.95 }, confidence: 0.9, ambiguity: null,
+  }, '行'), /必须来自 latestMessage/)
 })
 
 test('playback control delegates pause to the Extension', async () => {
@@ -166,6 +263,14 @@ test('unresolved previous-track reference never falls back to current track', as
   assert.equal(analyzed, false)
   assert.equal(toolResult.available, false)
   assert.equal(toolResult.resolution.source, 'PLAYBACK_HISTORY_UNAVAILABLE')
+})
+
+test('PREVIOUS_TRACK resolves from the confirmed playback previousTrack fact', () => {
+  const previous = { uri: 'spotify:track:previous', title: '上一首', artist: 'A' }
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'B' }
+  const result = resolveTrackReference({ reference: { type: 'PREVIOUS_TRACK', value: null }, currentTrack: current, previousTrack: previous })
+  assert.equal(result.track.uri, previous.uri)
+  assert.equal(result.resolution.source, 'PLAYBACK_STATE_PREVIOUS')
 })
 
 test('conversationFocus is distinct from the current playback track', () => {

@@ -44,7 +44,7 @@ export class MusicController {
     await this.provider.disconnect()
     this.#navigationQueue = []
     await extensionStorage.removeNavigationQueue()
-    await this.replace({ ...INITIAL_PLAYBACK_STATE, availability: 'needs-auth' })
+    await this.replace({ ...INITIAL_PLAYBACK_STATE, availability: 'needs-auth' }, true)
     logInfo('spotify', 'authorization_disconnected')
   }
 
@@ -163,7 +163,7 @@ export class MusicController {
       this.#navigationQueue = previousNavigationQueue
       await extensionStorage.setNavigationQueue(previousNavigationQueue)
       const message = readablePlaybackError(error)
-      await this.replace({ ...previous, availability: playbackAvailabilityFor(message), error: message })
+      await this.replace({ ...previous, availability: playbackAvailabilityFor(message), error: message }, true)
       throw error
     }
   }
@@ -236,16 +236,22 @@ export class MusicController {
     return this.update({ availability: 'ready', isPlaying: !event.paused, track, progressMs: event.position, durationMs: event.duration, error: null })
   }
 
-  private async replace(state: PlaybackState) {
-    this.#state = state
+  private async replace(state: PlaybackState, preserveProvidedHistory = false) {
+    this.#state = preserveProvidedHistory ? state : this.withPreviousTrack(state)
     this.logCurrentTrack()
     await this.persistAndBroadcast()
   }
 
   private async update(patch: Partial<PlaybackState>) {
-    this.#state = { ...this.#state, ...patch }
+    this.#state = this.withPreviousTrack({ ...this.#state, ...patch })
     this.logCurrentTrack()
     await this.persistAndBroadcast()
+  }
+
+  private withPreviousTrack(next: PlaybackState) {
+    const current = this.#state.track
+    const changed = Boolean(current?.uri && next.track?.uri && current.uri !== next.track.uri)
+    return { ...next, previousTrack: changed ? current : this.#state.previousTrack ?? null }
   }
 
   private logCurrentTrack() {

@@ -1,6 +1,12 @@
 # Mori Agent 模块说明
 
-本目录按 Mori 的四个主体能力组织。四层定义见 [系统架构](../../../../docs/ARCHITECTURE.md)，物理目录见 [代码结构](../../../../docs/CODE_STRUCTURE.md)，一次对话的执行顺序见 [实现说明](../../../../docs/IMPLEMENTATION.md)。
+Mori 的产品智能由 Conversation Intelligence、Music Intelligence 和 Personal Intelligence 组成；本目录再按 Perception、Brain、Expression、Action 四个工程主体组织实现。产品智能回答“用户为什么觉得 Mori 聪明”，工程分层回答“代码职责放在哪里”，两者不是同一套分类。完整定义见 [实现说明](../../../../docs/IMPLEMENTATION.md)，四层架构见 [系统架构](../../../../docs/ARCHITECTURE.md)，物理目录见 [代码结构](../../../../docs/CODE_STRUCTURE.md)。
+
+| 产品智能 | 主要工程落点 |
+|---|---|
+| Conversation Intelligence | `perception/conversation-understanding`、Runtime Context、Decision、Expression |
+| Music Intelligence | `perception/song-understanding`、音乐 Action Tools、Spotify 客户端执行 |
+| Personal Intelligence | `brain/memory`、Conversation/Listening 事实、Preference 与 Graph |
 
 ## 目录边界
 
@@ -73,6 +79,7 @@ State validation
 | 三个用户场景与唯一主流程 | [三场景主流程](../../../../docs/MORI_THREE_SCENES_2026-11-21.md) |
 | 四层模块完成度、证据与验收标准 | [模块成熟度](../../../../docs/MORI_MODULE_MATURITY_2026-11-19.md) |
 | Memory 契约、存储与评判标准 | [Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md) |
+| P0–P3 实施与缺陷复盘 | [Memory 演进记录](../../../../docs/MORI_MEMORY_EVOLUTION_2026-11-24.md) |
 | 歌曲四层证据与协作边界 | [Song Understanding V0.1](../../../../docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md) |
 | 日志来源与排查方式 | [日志说明](../../../../docs/LOGGING.md) |
 | LangGraph 迁移范围与回退策略 | [迁移记录](../../../../docs/MORI_LANGGRAPH_MIGRATION_2026-11-19.md) |
