@@ -2,9 +2,9 @@
  * Ackem 风格的 Post-turn Memory Processing：检索旧事实 → 双提取 → 校验 → 存储 → 画像更新。
  * 原始对话先落库；本流程属于可重试派生任务，失败不得影响用户已经收到的回复。
  */
-export function createPostTurnMemoryProcessor({ extractor, repository, userId, logError = () => {} }) {
+export function createPostTurnMemoryProcessor({ extractor, repository, userId, logInfo = () => {}, logError = () => {} }) {
   return {
-    async process({ input, userMessage, assistantMessage }) {
+    async process({ input, userMessage, assistantMessage, agentRunId = null }) {
       if (!repository?.available || !userId || !extractor || !userMessage?.id || !assistantMessage?.id) return { processed: false, reason: 'unavailable' }
       const track = normalizedTrack(input.currentTrack)
       try {
@@ -23,7 +23,10 @@ export function createPostTurnMemoryProcessor({ extractor, repository, userId, l
           currentTrack: track,
           existingFacts,
         })
-        if (!extracted?.success) return { processed: false, reason: 'extraction_failed' }
+        if (!extracted?.success) {
+          logError('memory', 'post_turn_extraction_failed', new Error(extracted?.error ?? 'Memory extraction failed'), { userId, exchangeId: userMessage.exchangeId, agentRunId })
+          return { processed: false, reason: 'extraction_failed' }
+        }
         const facts = []
         for (const fact of extracted.data.facts) facts.push(await repository.upsertMusicFact({
           userId, ...fact, sourceMessageId: userMessage.id, track,
@@ -38,9 +41,11 @@ export function createPostTurnMemoryProcessor({ extractor, repository, userId, l
         }))
         const tasteProfile = facts.length && typeof repository.refreshTasteProfile === 'function'
           ? await repository.refreshTasteProfile({ userId, updatedAt: assistantMessage.createdAt }) : []
-        return { processed: true, factCount: facts.length, momentCount: moments.length, tasteDimensionCount: tasteProfile.length }
+        const result = { processed: true, factCount: facts.length, momentCount: moments.length, tasteDimensionCount: tasteProfile.length }
+        logInfo('memory', 'post_turn_processing_completed', { userId, exchangeId: userMessage.exchangeId, agentRunId, ...result })
+        return result
       } catch (error) {
-        logError('memory', 'post_turn_processing_failed', error, { userId, exchangeId: userMessage.exchangeId })
+        logError('memory', 'post_turn_processing_failed', error, { userId, exchangeId: userMessage.exchangeId, agentRunId })
         return { processed: false, reason: 'processing_failed' }
       }
     },

@@ -19,6 +19,7 @@ ${tools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')}
 - Structured Understanding 是本轮结构化语义判断的依据。动作选择遵循其中的 scene、listeningRequest 和 reference，不擅自重新分类或生成新的音乐请求。
 - conversationHistory 用于理解对话承接，不得把已经完成的历史请求当作当前请求。
 - playbackState 是播放事实，targetTrack 是本轮已解析的目标歌曲，不重新猜测歌曲 URI。
+- relevantMemory.matches 中 confirmed 可作为已保存事实；candidate 只能作为待确认线索，回复时不得说成“我确定记得”。tasteProfile 是由多条 Fact 派生的品味假设，不是用户原话；associations 只用于找到相关对象，不能单独证明任何结论。
 - Tool Result 是外部事实依据，不得虚构搜索、播放、记忆或歌曲信息。
 
 【动作决策】
@@ -28,7 +29,7 @@ ${tools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')}
   - 暂停、继续播放、下一首/切歌、上一首：playback_control，并传入对应 command。
 - listeningRequest 为空时，不调用 search_music、recommend_music 或 playback_control。对上一轮搜索、推荐结果的追问、确认或质疑，不得当成新的音乐请求。
 - SONG_CHAT 在需要获取歌曲信息时使用 get_track_insight；已有信息足以回应时直接回复。
-- DAILY_CHAT 仅在确实需要检索历史事实时使用 search_memory，否则直接回复。
+- relevantMemory 已包含足够证据时直接回复；DAILY_CHAT 只有仍需检索其他历史事实时才使用 search_memory。
 - 一次最多调用一个 Tool。
 - Moment 不是 Tool，不得主动创建。
 - search_music、recommend_music 和 playback_control 的参数由运行时代码根据 Structured Understanding 确定覆盖；你只选择匹配的 Tool，不重新解释 query、excludeUris 或 command。读取歌曲信息的 Tool 使用空参数对象。
@@ -69,5 +70,6 @@ listeningRequest 是所有音乐副作用的唯一授权：SEARCH、RECOMMEND、
 
 export const FINAL_RESPONSE_PROMPT = `你是 Mori Conversation Agent。请基于原始上下文、模型决策和 Tool Result 生成最终回复。
 回复自然、简洁、有音乐陪伴感，控制在 1～4 句，不暴露 Mock、Tool、Context 等内部实现词汇。必须服从 intent、真实 Tool Result、actionResult 和 stateAfter。actionResult.status=planned 只表示动作请求准备交给客户端，不能说已经找到候选、即将播放或已经完成。只有客户端确认成功后才能使用完成语气。
+Context 中 confirmed Memory 可以自然承接，但不要逐条展示内部字段；candidate 只能以不确定方式表达，Taste Profile 只能说成有证据的偏好倾向，Association 不能单独作为事实。不得把 Mori 的历史回复误说成用户偏好。
 search_memory 结果只是调用方提供的历史片段，不代表完整记忆库；search_music/recommend_music 返回 status=PENDING、tracks=[] 时只表示请求已提交，不能声称已有候选、已经找到或即将播放。只有 RESULTS_READY 且 tracks 非空才能描述具体候选。source=mock 时自然说明暂时无法完成实时搜索，不展示 Mock 条目。
 get_track_insight 的 missingLayers 表示证据缺失：只能使用 available=true 的层；不得用声音层推断歌词含义，不得把听众标签说成客观事实。若资料不完整，先回答已有证据，再自然说明目前不知道的部分。不得声称创建了 Moment、记忆或未经 Tool Result 支持的外部状态。只返回给定 JSON Schema。`

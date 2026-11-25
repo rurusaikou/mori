@@ -36,7 +36,15 @@ export function createMemoryRoutes({ repository, userId }) {
       const deleteMatch = request.method === 'DELETE' && request.url?.match(/^\/memory\/memories\/([0-9a-f-]+)$/i)
       if (deleteMatch) {
         const deleted = await repository.softDelete({ userId, id: deleteMatch[1] })
+        if (deleted && typeof repository.refreshTasteProfile === 'function') await repository.refreshTasteProfile({ userId })
         json(request, response, deleted ? 200 : 404, { deleted })
+        return true
+      }
+      const confirmMatch = request.method === 'POST' && request.url?.match(/^\/memory\/memories\/([0-9a-f-]+)\/confirm$/i)
+      if (confirmMatch) {
+        const confirmed = await repository.confirmMemory({ userId, id: confirmMatch[1] })
+        if (confirmed?.kind === 'preference' && typeof repository.refreshTasteProfile === 'function') await repository.refreshTasteProfile({ userId })
+        json(request, response, confirmed ? 200 : 404, { confirmed: Boolean(confirmed), memory: confirmed })
         return true
       }
       const body = await readRequestJson(request)

@@ -67,6 +67,27 @@ test('exposes the evidence-backed taste profile through formal Conversation Cont
   assert.equal(decisionInput.context.relevantMemory.associations[0].source.key, 'moment-1')
 })
 
+test('re-runs Relevant Memory retrieval against the resolved non-current target track', async () => {
+  const retrievals = []
+  let decisionInput
+  const repository = {
+    available: true,
+    retrieveRelevant: async (input) => { retrievals.push(input.trackUri); return [{ id: `memory:${input.trackUri}`, kind: 'moment', content: '歌曲经历', matchReason: 'TRACK_URI', score: 1 }] },
+    listTasteProfile: async () => [], retrieveAssociations: async () => [],
+  }
+  const current = { uri: 'spotify:track:b', title: 'B', artist: '歌手 B' }
+  const previous = { uri: 'spotify:track:a', title: 'A', artist: '歌手 A' }
+  await agent(async ({ input }) => {
+    decisionInput = input
+    return response({ action: 'respond', response: '我记得我们聊过 A。', toolCall: null })
+  }, { scene: 'SONG_CHAT', meaning: '用户继续讨论上一首', reference: { type: 'PREVIOUS_TRACK', value: null } }, {
+    memoryRepository: repository, memoryUserId: 'u1',
+  }).execute({ ...base, userMessage: '刚才那首我以前也听过', currentTrack: current, playbackState: { status: 'playing', currentTrack: current, previousTrack: previous } })
+
+  assert.deepEqual(retrievals, ['spotify:track:b', 'spotify:track:a'])
+  assert.equal(decisionInput.context.relevantMemory.matches[0].id, 'memory:spotify:track:a')
+})
+
 test('reports the actual Understanding prompt version and raw output before validation', async () => {
   const raw = { scene: 'DAILY_CHAT', meaning: '用户打招呼', turnRelation: 'INDEPENDENT', reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null }
   let observed
@@ -174,20 +195,44 @@ test('playback control cannot bypass an Understanding CONTROL omission', async (
     ? response({ action: 'tool', response: null, toolCall: { name: 'playback_control', arguments: { command: 'PAUSE' } } })
     : response({ response: '正在暂停。' }), { scene: 'DAILY_CHAT', meaning: '用户希望暂停，但 Understanding 漏标了控制请求' }).execute({ ...base, userMessage: '暂停一下', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
   assert.equal(result.action, undefined)
-  assert.equal(result.finalResponse, '我还没有暂停播放。')
+  assert.equal(result.finalResponse, '音乐还在继续。你想安静一下的话，告诉我一声，我可以替你暂停。')
   assert.equal(result.trace.some((step) => step.type === 'DECISION_REPAIR'), true)
+  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_REPAIR'), true)
 })
 
 test('direct response cannot claim playback paused while state is still playing', async () => {
   const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
   const result = await agent(async () => response({ action: 'respond', response: '好的，音乐已经暂停了。', toolCall: null }), { scene: 'DAILY_CHAT', meaning: '普通回复' }).execute({ ...base, userMessage: '嗯', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
-  assert.equal(result.finalResponse, '我还没有暂停播放。')
+  assert.equal(result.finalResponse, '音乐还在继续。你想安静一下的话，告诉我一声，我可以替你暂停。')
+  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_REPAIR'), true)
+  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_FACT_FALLBACK'), true)
+})
+
+test('direct response may offer playback control without being rewritten as completed', async () => {
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
+  const offered = '听起来好累啊。如果需要休息，我可以帮你暂停播放，或者换到下一首舒缓的歌。'
+  const result = await agent(async () => response({ action: 'respond', response: offered, toolCall: null }), { scene: 'DAILY_CHAT', meaning: '用户说今天很忙' })
+    .execute({ ...base, userMessage: '一般，忙忙的', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  assert.equal(result.finalResponse, offered)
+  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_FACT_REPAIR'), false)
+})
+
+test('playback fact conflict is repaired in Mori voice before deterministic fallback', async () => {
+  let calls = 0
+  const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'respond', response: '好的，音乐已经暂停了。', toolCall: null })
+    : response({ response: '听起来今天确实很满。音乐还在继续，你想安静一下时，我可以替你暂停。' }),
+  { scene: 'DAILY_CHAT', meaning: '用户说今天很忙' }).execute({ ...base, userMessage: '一般，忙忙的', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
+  assert.equal(result.finalResponse, '听起来今天确实很满。音乐还在继续，你想安静一下时，我可以替你暂停。')
+  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_REPAIR'), true)
+  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_FACT_FALLBACK'), false)
 })
 
 test('direct response cannot claim a track switch without a client action', async () => {
   const current = { uri: 'spotify:track:current', title: '当前歌曲', artist: 'A' }
   const result = await agent(async () => response({ action: 'respond', response: '好的，已经切到下一首。', toolCall: null }), { scene: 'DAILY_CHAT', meaning: '普通回复' }).execute({ ...base, userMessage: '嗯', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
-  assert.equal(result.finalResponse, '我还没有完成切歌。')
+  assert.equal(result.finalResponse, '音乐还没有切换。你想换一首的话，告诉我你现在想听什么。')
 })
 
 test('playback control delegates next-track switching to the Extension', async () => {
@@ -352,6 +397,14 @@ test('Decision prompt forbids unsupported promises and language-only actions', (
   assert.match(prompt, /不得用语言描述代替实际操作/)
   assert.match(prompt, /用户询问能力时，应直接、准确地说明能否执行/)
   assert.match(prompt, /不得再次提出同样无法执行的操作/)
+})
+
+test('Decision prompt preserves Memory evidence levels', () => {
+  const prompt = decisionSystemPrompt([{ name: 'search_memory', description: '检索记忆' }])
+  assert.match(prompt, /confirmed/)
+  assert.match(prompt, /candidate.*待确认/u)
+  assert.match(prompt, /tasteProfile.*品味假设/u)
+  assert.match(prompt, /associations.*不能单独证明/u)
 })
 
 test('uses deterministic music fallback when one Decision repair still chooses the wrong Tool', async () => {

@@ -5,11 +5,11 @@
  */
 import { createAgentState } from '../perception/state.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
-import { enforcePlaybackFact, responseQualityIssue } from '../expression/response-quality.mjs'
+import { playbackFactIssue, responseQualityIssue, safePlaybackFallback } from '../expression/response-quality.mjs'
 import { DECISION_REPAIR_PROMPT, decisionSystemPrompt, FINAL_RESPONSE_PROMPT, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
-import { clientAction, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, safeToolResponse } from './runtime-support.mjs'
+import { clientAction, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, prepareTargetRelevantMemory, relevantMemoryLogData, safeToolResponse } from './runtime-support.mjs'
 
 export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) {
   // Trace 与文件日志从同一个 record 入口产生，避免 Graph 可观测但 capability 日志缺阶段。
@@ -34,13 +34,26 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
     },
 
     async understanding(state) {
+      capabilityStage(logRun, 'agent_context_preparation_started', {
+        historyCount: state.agentState.conversationHistory.length, currentTrack: state.agentState.currentTrack,
+        memoryBackend: options.memoryRepository?.available ? options.memoryRepository.backend : 'local_or_unavailable',
+      })
       const [result, relevantMemory] = await Promise.all([
         understandConversation(options.understandingLlm ?? llm, state.agentState, {
           onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
         }),
         prepareRelevantMemory(state.agentState, options),
       ])
-      const context = assembleConversationContext(state.agentState, result.understanding, relevantMemory)
+      capabilityStage(logRun, 'agent_relevant_memory_prepared', relevantMemoryLogData(relevantMemory, state.agentState.currentTrack, 'INITIAL'))
+      let context = assembleConversationContext(state.agentState, result.understanding, relevantMemory)
+      const targetMemory = await prepareTargetRelevantMemory(state.agentState, options, relevantMemory, context.targetTrack)
+      if (targetMemory !== relevantMemory) {
+        capabilityStage(logRun, 'agent_target_memory_retrieval', {
+          reason: 'resolved targetTrack differs from currentTrack', currentTrack: state.agentState.currentTrack, targetTrack: context.targetTrack,
+        })
+        capabilityStage(logRun, 'agent_relevant_memory_prepared', relevantMemoryLogData(targetMemory, context.targetTrack, 'RESOLVED_TARGET'))
+        context = assembleConversationContext(state.agentState, result.understanding, targetMemory)
+      }
       const resolutionLog = {
         referenceType: result.understanding.reference?.type ?? null,
         currentTrack: state.agentState.currentTrack ?? null,
@@ -53,6 +66,11 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
 
     async decision(state) {
       const tools = toolsFor(state)
+      capabilityStage(logRun, 'agent_tools_available', { tools: Object.values(tools).map(({ name, description }) => ({ name, description })) })
+      capabilityStage(logRun, 'agent_decision_model_call', {
+        scene: state.conversationUnderstanding.scene, listeningRequest: state.conversationUnderstanding.listeningRequest,
+        reference: state.conversationUnderstanding.reference, targetTrack: state.context.targetTrack,
+      })
       const first = await llm({
         prompt: decisionSystemPrompt(Object.values(tools)),
         input: {
@@ -91,12 +109,15 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
         logRun.model = repaired.model
         tokenUsage = { initialCall: first.tokenUsage ?? null, repairCall: repaired.tokenUsage ?? null }
       }
+      capabilityStage(logRun, 'agent_decision_validated', { action: decision.action, intent: decision.intent, conversationMove: decision.conversationMove, toolCall: decision.toolCall })
       trace.push(record(state, 'MODEL_DECISION', decision))
       return { decision, model, firstTokenUsage: tokenUsage, trace }
     },
 
     async directResponse(state) {
       const qualityIssue = responseQualityIssue(state.decision, state.agentState)
+      capabilityStage(logRun, 'agent_direct_response_selected', { response: state.decision.response })
+      capabilityStage(logRun, 'agent_response_quality_checked', { passed: !qualityIssue, issue: qualityIssue })
       let finalResponse = state.decision.response
       let model = state.model
       let tokenUsage = state.firstTokenUsage
@@ -112,12 +133,20 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
         })
         logRun.model = repaired.model
         model = repaired.model
+        capabilityStage(logRun, 'agent_response_repair_raw', { output: repaired.data, model: repaired.model, tokenUsage: repaired.tokenUsage })
         finalResponse = validateFinalResponse(repaired.data).response
+        capabilityStage(logRun, 'agent_response_repair_validated', { response: finalResponse })
         tokenUsage = mergeRunTokenUsage(state.understandingTokenUsage, state.firstTokenUsage, repaired.tokenUsage)
       } else {
         tokenUsage = mergeRunTokenUsage(state.understandingTokenUsage, state.firstTokenUsage)
       }
-      finalResponse = enforcePlaybackFact(finalResponse, state.agentState)
+      const remainingPlaybackIssue = playbackFactIssue(finalResponse, state.agentState)
+      capabilityStage(logRun, 'agent_playback_fact_checked', { passed: !remainingPlaybackIssue, issue: remainingPlaybackIssue, playbackStatus: state.agentState.playbackState.status })
+      if (remainingPlaybackIssue) {
+        const fallback = safePlaybackFallback(remainingPlaybackIssue)
+        trace.push(record(state, 'RESPONSE_FACT_FALLBACK', { issue: remainingPlaybackIssue, rejectedResponse: finalResponse, response: fallback }))
+        finalResponse = fallback
+      }
       trace.push(record(state, 'STATE_AFTER', { playbackState: state.agentState.playbackState, plannedAction: null }))
       trace.push(record(state, 'FINAL_RESPONSE', { response: finalResponse }))
       return { finalResponse, model, tokenUsage, action: null, trace }
@@ -162,7 +191,11 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
         schemaName: 'mori_agent_final_response_v0_2',
       })
       logRun.model = final.model
-      const finalResponse = safeToolResponse(state.toolResult, validateFinalResponse(final.data).response)
+      capabilityStage(logRun, 'agent_final_response_raw', { output: final.data, model: final.model, tokenUsage: final.tokenUsage })
+      const validated = validateFinalResponse(final.data)
+      capabilityStage(logRun, 'agent_final_response_validated', { response: validated.response })
+      const finalResponse = safeToolResponse(state.toolResult, validated.response)
+      if (finalResponse !== validated.response) capabilityStage(logRun, 'agent_tool_response_safety_applied', { originalResponse: validated.response, response: finalResponse, tool: state.toolName, toolStatus: state.toolResult?.status })
       return {
         finalResponse,
         model: final.model,

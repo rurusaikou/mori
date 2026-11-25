@@ -4,10 +4,10 @@ import test from 'node:test'
 import { formatCapabilityLogLine } from '../../../src/mori-agent/shared/logger.mjs'
 
 test('formats a completed capability run as readable Chinese text', () => {
-  const line = formatCapabilityLogLine({ source: 'test', timestamp: '2026-11-08T12:00:00.000Z', runId: 'run-1', capability: 'memory', promptVersion: 'memory-v0.1', stage: 'completed', latency: 238, output: { shouldCreate: false } })
+  const line = formatCapabilityLogLine({ source: 'test', timestamp: '2026-11-08T12:00:00.000Z', runId: 'run-1', capability: 'memory', promptVersion: 'memory-v0.2', stage: 'completed', latency: 238, output: { facts: [], moments: [] } })
   assert.match(line, /\[测试\] \[信息\] \[mori_agent\/memory\/completed\]/)
   assert.match(line, /执行成功，耗时 238ms/)
-  assert.match(line, /输出：{"shouldCreate":false}/)
+  assert.match(line, /输出：{"facts":\[\],"moments":\[\]}/)
 })
 
 test('formats a failed capability stage as readable Chinese error', () => {
@@ -20,6 +20,13 @@ test('formats agent tool stages as readable Chinese text', () => {
   const line = formatCapabilityLogLine({ timestamp: '2026-11-09T12:00:00.000Z', runId: 'agent-1', capability: 'conversation_agent', promptVersion: 'mori-agent-v0.2', model: 'test', stage: 'agent_tool_call', name: 'search_memory' })
   assert.match(line, /Agent 选择调用 Tool/)
   assert.match(line, /search_memory/)
+})
+
+test('makes deterministic response fact fallbacks observable', () => {
+  const line = formatCapabilityLogLine({ timestamp: '2026-11-25T11:13:16.000Z', runId: 'agent-repair-1', capability: 'conversation_agent', promptVersion: 'mori-agent-v1.0', stage: 'agent_response_fact_fallback', issue: '未确认播放状态变化', rejectedResponse: '音乐已经暂停了。', response: '音乐还在继续。' })
+  assert.match(line, /自然语言安全兜底/)
+  assert.match(line, /音乐已经暂停了/)
+  assert.match(line, /音乐还在继续/)
 })
 
 test('marks pending playback control as a client action plan instead of completed execution', () => {

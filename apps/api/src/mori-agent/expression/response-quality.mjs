@@ -4,6 +4,8 @@
  */
 export function responseQualityIssue(decision, state) {
   if (decision.action !== 'respond') return null
+  const playbackIssue = playbackFactIssue(decision.response, state)
+  if (playbackIssue) return playbackIssue
   if (isUnsupportedRandomRecommendationExplanation(state, decision.response)) {
     return '回复为随机推荐编造了输入和 Tool Result 中不存在的因果关系'
   }
@@ -15,17 +17,40 @@ export function responseQualityIssue(decision, state) {
   return repetitive ? '回复与最近三条 assistant 消息表达了高度相似的核心意思，没有推进对话' : null
 }
 
-export function enforcePlaybackFact(response, state) {
+export function playbackFactIssue(response, state) {
   const value = String(response ?? '')
   const status = state.playbackState?.status
-  if (status === 'playing' && /(已经|已|现在)?暂停(?:了|播放)?/u.test(value)) {
-    return '我还没有暂停播放。'
+  if (status === 'playing' && claimsPlaybackPaused(value)) {
+    return '当前播放器仍在播放，回复不能声称正在暂停或已经暂停；保留原本的情绪承接，只修正播放状态表述'
   }
   // direct-response 分支没有客户端动作，任何“已经切歌”都不可能由本轮确认。
-  if (/(已经|已|现在)?(?:切到|换到).{0,12}(下一首|上一首)/u.test(value)) {
-    return '我还没有完成切歌。'
+  if (claimsTrackChanged(value)) {
+    return '本轮没有客户端切歌动作，回复不能声称正在切歌或已经切歌；保留原本的对话内容，只修正动作表述'
   }
-  return value
+  return null
+}
+
+export function safePlaybackFallback(issue) {
+  return issue.includes('暂停')
+    ? '音乐还在继续。你想安静一下的话，告诉我一声，我可以替你暂停。'
+    : '音乐还没有切换。你想换一首的话，告诉我你现在想听什么。'
+}
+
+function claimsPlaybackPaused(value) {
+  if (/(?:没有|没|尚未|还未|还没|不能|无法|不会|并未).{0,10}暂停/u.test(value)) return false
+  return /(?:已经|刚刚|刚才)(?:为你|帮你)?暂停(?:了|播放|音乐)?/u.test(value)
+    || /已暂停(?:了|播放|音乐)?/u.test(value)
+    || /正在(?:为你|帮你)?暂停/u.test(value)
+    || /(?:音乐|歌曲|播放|它).{0,4}(?:已经|已)?暂停(?:了|成功|下来)/u.test(value)
+    || /暂停(?:好了|完成了?|成功了?|下来了)/u.test(value)
+}
+
+function claimsTrackChanged(value) {
+  if (/(?:没有|没|尚未|还未|还没|不能|无法|不会|并未).{0,10}(?:切到|换到)/u.test(value)) return false
+  return /(?:已经|刚刚|刚才)(?:为你|帮你)?(?:切到|换到).{0,12}(?:下一首|上一首)/u.test(value)
+    || /已(?:切到|换到).{0,12}(?:下一首|上一首)/u.test(value)
+    || /正在(?:为你|帮你)?(?:切歌|切换|切到|换到)/u.test(value)
+    || /(?:下一首|上一首).{0,6}(?:已经|已)开始播放/u.test(value)
 }
 
 function isUnsupportedRandomRecommendationExplanation(state, response) {

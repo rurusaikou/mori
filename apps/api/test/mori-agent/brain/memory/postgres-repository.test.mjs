@@ -49,7 +49,7 @@ test('deduplicates an identical Music Fact and appends its evidence', async () =
   const pool = { query: async () => ({ rows: [] }), connect: async () => client }
   const repository = await createPostgresMemoryRepository({ pool })
   const result = await repository.upsertMusicFact({
-    userId: 'u1', category: 'preference', dimension: 'vocal', content: '用户喜欢清澈女声',
+    userId: 'u1', category: 'preference', dimension: 'vocal', attribute: 'clear_female_vocal', content: '用户喜欢清澈女声',
     sourceMessageId: 'message-2', evidence: '这种女声我很喜欢', confidence: 0.9,
     confirmed: true, createdAt: '2026-11-24T10:00:00.000Z',
   })
@@ -57,6 +57,7 @@ test('deduplicates an identical Music Fact and appends its evidence', async () =
   assert.equal(result.id, 'fact-1')
   assert.equal(result.deduplicated, true)
   assert.equal(result.status, 'confirmed')
+  assert.equal(queries.find(({ sql }) => /SELECT id,status,confidence FROM agent_memories/su.test(sql)).values[3], 'fact_key:preference:vocal:clear_female_vocal')
   assert.equal(queries.filter(({ sql }) => /INSERT INTO memory_evidence/su.test(sql)).length, 1)
   assert.equal(queries.some(({ sql }) => /INSERT INTO agent_memories/su.test(sql)), false)
 })
@@ -110,4 +111,29 @@ test('rejects a Music Moment without traceable source messages', async () => {
   await assert.rejects(repository.createMusicMoment({
     userId: 'u1', summary: '深夜一起听歌', sourceMessageIds: [], occurredAt: '2026-11-24T10:00:00.000Z',
   }), /sourceMessageIds/)
+})
+
+test('supersedes a stale Taste Profile after its last supporting Fact is removed', async () => {
+  const queries = []
+  const client = {
+    async query(sql, values) {
+      queries.push({ sql, values })
+      if (/source='derived_profile' AND status='confirmed'/su.test(sql)) return { rows: [{ id: 'profile-old', content: 'likes:旧偏好', confidence: 0.8, tags: ['taste_profile', 'dimension:vocal'] }] }
+      return { rows: [], rowCount: 1 }
+    },
+    release() {},
+  }
+  const pool = {
+    async query(sql) {
+      if (/source='user_statement'/su.test(sql)) return { rows: [] }
+      return { rows: [] }
+    },
+    connect: async () => client,
+  }
+  const repository = await createPostgresMemoryRepository({ pool })
+  const profile = await repository.refreshTasteProfile({ userId: 'u1', updatedAt: '2026-11-25T00:00:00.000Z' })
+
+  assert.deepEqual(profile, [])
+  const staleUpdate = queries.find(({ sql }) => /SET status='superseded'/su.test(sql))
+  assert.equal(staleUpdate.values[1], 'profile-old')
 })

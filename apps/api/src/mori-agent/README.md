@@ -80,6 +80,7 @@ State validation
 | 四层模块完成度、证据与验收标准 | [模块成熟度](../../../../docs/MORI_MODULE_MATURITY_2026-11-19.md) |
 | Memory 契约、存储与评判标准 | [Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md) |
 | P0–P3 实施与缺陷复盘 | [Memory 演进记录](../../../../docs/MORI_MEMORY_EVOLUTION_2026-11-24.md) |
+| Post-turn 与 Recall 闭环复盘 | [Memory 闭环补全](../../../../docs/MORI_MEMORY_CLOSURE_2026-11-25.md) |
 | 歌曲四层证据与协作边界 | [Song Understanding V0.1](../../../../docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md) |
 | 日志来源与排查方式 | [日志说明](../../../../docs/LOGGING.md) |
 | LangGraph 迁移范围与回退策略 | [迁移记录](../../../../docs/MORI_LANGGRAPH_MIGRATION_2026-11-19.md) |

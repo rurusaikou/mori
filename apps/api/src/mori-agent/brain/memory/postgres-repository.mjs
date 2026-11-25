@@ -93,23 +93,6 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
         throw error
       } finally { client.release() }
     },
-    async createCandidate(input) {
-      const value = candidateInput(input)
-      const vector = await optionalEmbedding(embeddingProvider, value.content, logError)
-      const id = randomUUID()
-      await pool.query(`
-        INSERT INTO agent_memories
-          (id,user_id,kind,content,status,confidence,source,track_uri,track_title,track_artist,embedding,embedding_model,created_at,updated_at)
-        VALUES ($1,$2,'conversation',$3,'candidate',$4,'user_statement',$5,$6,$7,$8::vector,$9,$10,$10)
-      `, [id, value.userId, value.content, value.confidence, value.track?.uri ?? null, value.track?.title ?? null,
-        value.track?.artist ?? null, vector ? vectorLiteral(vector) : null, vector ? embeddingProvider.model : null, value.createdAt])
-      await pool.query(`
-        INSERT INTO memory_evidence (id,user_id,memory_id,evidence_type,source_id,content,occurred_at)
-        VALUES ($1,$2,$3,'message',$4,$5,$6)
-      `, [randomUUID(), value.userId, id, value.sourceMessageId, value.evidence, value.createdAt])
-      logInfo('memory', 'candidate_created', { userId: value.userId, memoryId: id, confidence: value.confidence, sourceMessageId: value.sourceMessageId })
-      return { id, ...value }
-    },
     async upsertMusicFact(input) {
       const value = musicFactInput(input)
       const vector = await optionalEmbedding(embeddingProvider, value.content, logError)
@@ -120,12 +103,14 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
           const superseded = await client.query(`UPDATE agent_memories SET status='superseded',updated_at=now() WHERE user_id=$1 AND id=$2 AND status IN ('candidate','confirmed') RETURNING id`, [value.userId, value.supersedesId])
           if (!superseded.rowCount) throw new Error('需要修正的 Music Fact 不存在')
         } else {
+          const factKey = musicFactKey(value)
           const duplicate = await client.query(`
             SELECT id,status,confidence FROM agent_memories
             WHERE user_id=$1 AND kind='preference' AND status IN ('candidate','confirmed')
-              AND lower(content)=lower($2) AND track_uri IS NOT DISTINCT FROM $3
+              AND track_uri IS NOT DISTINCT FROM $3
+              AND (lower(content)=lower($2) OR ($4::text IS NOT NULL AND $4=ANY(tags)))
             ORDER BY updated_at DESC LIMIT 1
-          `, [value.userId, value.content, value.track?.uri ?? null])
+          `, [value.userId, value.content, value.track?.uri ?? null, factKey])
           if (duplicate.rows[0]) {
             const existing = duplicate.rows[0]
             await client.query(`UPDATE agent_memories SET confidence=GREATEST(confidence,$3),status=CASE WHEN $4 THEN 'confirmed' ELSE status END,updated_at=now() WHERE user_id=$1 AND id=$2`, [value.userId, existing.id, value.confidence, value.confirmed])
@@ -141,7 +126,7 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
           VALUES ($1,$2,'preference',$3,$4,$5,'user_statement',$6,$7,$8,$9,$10::vector,$11,$12,$13,$13)
         `, [id, value.userId, value.content, value.confirmed ? 'confirmed' : 'candidate', value.confidence,
           value.track?.uri ?? null, value.track?.title ?? null, value.track?.artist ?? null,
-          [value.category, ...(value.dimension ? [`dimension:${value.dimension}`] : [])], vector ? vectorLiteral(vector) : null,
+          [value.category, ...(value.dimension ? [`dimension:${value.dimension}`] : []), ...(value.attribute ? [`attribute:${value.attribute}`] : []), ...(musicFactKey(value) ? [musicFactKey(value)] : [])], vector ? vectorLiteral(vector) : null,
           vector ? embeddingProvider.model : null, value.supersedesId, value.createdAt])
         const evidenceId = await insertEvidence(client, { userId: value.userId, memoryId: id, type: 'message', sourceId: value.sourceMessageId, content: value.evidence, occurredAt: value.createdAt })
         await indexMemoryAssociations(client, {
@@ -183,12 +168,17 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
         await client.query('ROLLBACK'); throw error
       } finally { client.release() }
     },
-    async retrieveRelevant({ userId, query, trackUri = null, limit = 5 }) {
+    async retrieveRelevant({ userId, query, trackUri = null, trackTitle = null, trackArtist = null, limit = 20 }) {
       required(userId, 'userId'); required(query, 'query')
-      const boundedLimit = Math.max(1, Math.min(Number(limit) || 5, 10))
+      const boundedLimit = Math.max(1, Math.min(Number(limit) || 20, 50))
       const result = await pool.query(`
         SELECT m.id,m.kind,m.content,m.status,m.confidence,m.source,m.track_uri,m.track_title,m.track_artist,m.mood,m.tags,m.created_at,
-          CASE WHEN m.track_uri=$2 THEN 1 ELSE similarity(m.content,$3) END AS keyword_score,
+          CASE WHEN m.track_uri=$2 THEN 1
+            WHEN ($3::text IS NOT NULL AND lower(m.track_title)=lower($3)) OR ($4::text IS NOT NULL AND lower(m.track_artist)=lower($4)) THEN 0.9
+            ELSE similarity(m.content,$5) END AS keyword_score,
+          CASE WHEN m.track_uri=$2 THEN 'TRACK_URI'
+            WHEN ($3::text IS NOT NULL AND lower(m.track_title)=lower($3)) OR ($4::text IS NOT NULL AND lower(m.track_artist)=lower($4)) THEN 'TRACK_IDENTITY'
+            ELSE 'KEYWORD' END AS match_reason,
           0::double precision AS semantic_score, evidence.items AS evidence
         FROM agent_memories m
         LEFT JOIN LATERAL (
@@ -196,10 +186,15 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
           FROM memory_evidence e WHERE e.user_id=m.user_id AND e.memory_id=m.id
         ) evidence ON true
         WHERE m.user_id=$1 AND m.status IN ('candidate','confirmed')
-          AND (($2::text IS NOT NULL AND m.track_uri=$2) OR m.content ILIKE '%' || $3 || '%')
-        ORDER BY CASE WHEN m.track_uri=$2 THEN 0 ELSE 1 END, keyword_score DESC, m.updated_at DESC
-        LIMIT $4
-      `, [userId, trackUri, query, boundedLimit])
+          AND (($2::text IS NOT NULL AND m.track_uri=$2)
+            OR ($3::text IS NOT NULL AND lower(m.track_title)=lower($3))
+            OR ($4::text IS NOT NULL AND lower(m.track_artist)=lower($4))
+            OR m.content % $5 OR m.content ILIKE '%' || $5 || '%')
+        ORDER BY CASE WHEN m.track_uri=$2 THEN 0
+          WHEN ($3::text IS NOT NULL AND lower(m.track_title)=lower($3)) OR ($4::text IS NOT NULL AND lower(m.track_artist)=lower($4)) THEN 1
+          ELSE 2 END, keyword_score DESC, m.updated_at DESC
+        LIMIT $6
+      `, [userId, trackUri, trackTitle, trackArtist, query, boundedLimit])
       return result.rows.map(memoryRow)
     },
     async listActiveMusicFacts({ userId, trackUri = null, limit = 20 }) {
@@ -226,30 +221,35 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
       const client = await pool.connect()
       try {
         await client.query('BEGIN')
+        const activeProfiles = await client.query(`
+          SELECT id,content,confidence,tags FROM agent_memories
+          WHERE user_id=$1 AND kind='preference' AND source='derived_profile' AND status='confirmed'
+        `, [userId])
+        const profilesByDimension = new Map(activeProfiles.rows.map((row) => [profileIdentity(row.tags), row]))
         for (const dimension of profile) {
-          const existing = await client.query(`
-            SELECT id,content,confidence FROM agent_memories
-            WHERE user_id=$1 AND kind='preference' AND source='derived_profile'
-              AND status='confirmed' AND tags @> ARRAY[$2]::text[]
-            ORDER BY updated_at DESC LIMIT 1
-          `, [userId, `dimension:${dimension.dimension}`])
+          const identity = profileIdentity([`dimension:${dimension.dimension}`, ...(dimension.attribute ? [`attribute:${dimension.attribute}`] : [])])
+          const existing = profilesByDimension.get(identity)
           const content = `${dimension.stance}:${dimension.summary}`
-          if (existing.rows[0]?.content === content && Number(existing.rows[0]?.confidence) === dimension.confidence) {
-            dimension.id = existing.rows[0].id
+          if (existing?.content === content && Number(existing?.confidence) === dimension.confidence) {
+            dimension.id = existing.id
+            profilesByDimension.delete(identity)
             continue
           }
-          if (existing.rows[0]) await client.query(`UPDATE agent_memories SET status='superseded',updated_at=$3 WHERE user_id=$1 AND id=$2`, [userId, existing.rows[0].id, dimension.updatedAt])
+          if (existing) await client.query(`UPDATE agent_memories SET status='superseded',updated_at=$3 WHERE user_id=$1 AND id=$2`, [userId, existing.id, dimension.updatedAt])
           const id = randomUUID()
           await client.query(`
             INSERT INTO agent_memories (id,user_id,kind,content,status,confidence,source,tags,created_at,updated_at)
             VALUES ($1,$2,'preference',$3,'confirmed',$4,'derived_profile',$5,$6,$6)
-          `, [id, userId, content, dimension.confidence, ['taste_profile', `dimension:${dimension.dimension}`, `stance:${dimension.stance}`], dimension.updatedAt])
+          `, [id, userId, content, dimension.confidence, ['taste_profile', `dimension:${dimension.dimension}`, ...(dimension.attribute ? [`attribute:${dimension.attribute}`] : []), `stance:${dimension.stance}`], dimension.updatedAt])
           for (const factId of dimension.evidenceIds) await insertEvidence(client, {
             userId, memoryId: id, type: 'profile', sourceId: factId,
             content: `Taste Profile 由 Music Fact ${factId} 支持`, occurredAt: dimension.updatedAt,
           })
           dimension.id = id
+          profilesByDimension.delete(identity)
         }
+        // 删除或修正最后一条支撑 Fact 后，旧画像不能继续留在正式 Context。
+        for (const stale of profilesByDimension.values()) await client.query(`UPDATE agent_memories SET status='superseded',updated_at=$3 WHERE user_id=$1 AND id=$2`, [userId, stale.id, iso(updatedAt, 'updatedAt')])
         await client.query('COMMIT')
         logInfo('memory', 'taste_profile_refreshed', { userId, dimensionCount: profile.length })
         return profile
@@ -258,7 +258,7 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
         throw error
       } finally { client.release() }
     },
-    async listTasteProfile({ userId }) {
+    async listTasteProfile({ userId, limit = 3 }) {
       required(userId, 'userId')
       const result = await pool.query(`
         SELECT id,content,confidence,tags,updated_at,
@@ -266,8 +266,8 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
             WHERE e.user_id=m.user_id AND e.memory_id=m.id AND e.evidence_type='profile'),'[]'::jsonb) AS evidence_ids
         FROM agent_memories m
         WHERE user_id=$1 AND kind='preference' AND source='derived_profile' AND status='confirmed'
-        ORDER BY confidence DESC,updated_at DESC
-      `, [userId])
+        ORDER BY confidence DESC,updated_at DESC LIMIT $2
+      `, [userId, Math.max(1, Math.min(Number(limit) || 3, 10))])
       return result.rows.map(profileRow)
     },
     async retrieveAssociations({ userId, trackUri = null, memoryId = null, limit = 10 }) {
@@ -369,6 +369,17 @@ export async function createPostgresMemoryRepository({ connectionString, embeddi
       logInfo('memory', 'memory_deleted', { userId, memoryId: id, deleted: result.rowCount > 0 })
       return result.rowCount > 0
     },
+    async confirmMemory({ userId, id }) {
+      required(userId, 'userId'); required(id, 'id')
+      const result = await pool.query(`
+        UPDATE agent_memories SET status='confirmed',updated_at=now()
+        WHERE user_id=$1 AND id=$2 AND status='candidate'
+        RETURNING id,kind,source
+      `, [userId, id])
+      const confirmed = result.rows[0] ?? null
+      logInfo('memory', 'memory_confirmed', { userId, memoryId: id, confirmed: Boolean(confirmed) })
+      return confirmed
+    },
     async health() {
       const result = await pool.query('SELECT current_database() AS database, extversion FROM pg_extension WHERE extname = $1', ['vector'])
       return { available: true, backend: 'postgres_pgvector', database: result.rows[0]?.database ?? null, pgvectorVersion: result.rows[0]?.extversion ?? null, embeddingModel: embeddingProvider?.model ?? null }
@@ -393,10 +404,10 @@ export function createUnavailableMemoryRepository(reason) {
     listTasteProfile: async () => [],
     retrieveAssociations: async () => [],
     rebuildAssociations: async () => ({ indexed: 0 }),
-    createCandidate: async () => ({ stored: false, reason }),
     search: async () => [],
     list: async () => [],
     softDelete: async () => false,
+    confirmMemory: async () => null,
     health: async () => ({ available: false, backend: 'unavailable', reason }),
     close: async () => {},
   }
@@ -517,13 +528,6 @@ function momentInput(input) {
   return { id: required(input.id, 'id'), userId: required(input.userId, 'userId'), content: required(input.content, 'content'), mood: required(input.mood, 'mood'),
     tags: Array.isArray(input.tags) ? input.tags.map(String).slice(0, 20) : [], track: optionalTrack(input.track), createdAt: iso(input.createdAt, 'createdAt'), evidenceId: input.evidenceId }
 }
-function candidateInput(input) {
-  const confidence = Number(input.confidence)
-  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw new Error('confidence 无效')
-  return { userId: required(input.userId, 'userId'), content: required(input.content, 'content'), confidence,
-    sourceMessageId: required(input.sourceMessageId, 'sourceMessageId'), evidence: required(input.evidence, 'evidence'),
-    track: optionalTrack(input.track), createdAt: iso(input.createdAt, 'createdAt') }
-}
 function musicFactInput(input) {
   const confidence = Number(input.confidence ?? 1)
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw new Error('confidence 无效')
@@ -532,6 +536,7 @@ function musicFactInput(input) {
     category: oneOf(input.category, ['preference', 'dislike', 'music_fact'], 'category'),
     content: required(input.content, 'content'),
     dimension: input.dimension ? required(input.dimension, 'dimension') : null,
+    attribute: input.attribute ? required(input.attribute, 'attribute') : null,
     sourceMessageId: required(input.sourceMessageId, 'sourceMessageId'),
     evidence: required(input.evidence, 'evidence'),
     track: optionalTrack(input.track),
@@ -540,6 +545,10 @@ function musicFactInput(input) {
     supersedesId: input.supersedesId ? required(input.supersedesId, 'supersedesId') : null,
     createdAt: iso(input.createdAt, 'createdAt'),
   }
+}
+function musicFactKey(value) {
+  if (!value.dimension || !value.attribute) return null
+  return `fact_key:${value.category}:${value.dimension}:${value.attribute}`.toLowerCase()
 }
 function musicMomentInput(input) {
   if (!Array.isArray(input.sourceMessageIds) || input.sourceMessageIds.length === 0) throw new Error('sourceMessageIds 不能为空')
@@ -556,6 +565,7 @@ function musicMomentInput(input) {
 }
 function memoryRow(row) { return { id: row.id, kind: row.kind, content: row.content, status: row.status, confidence: Number(row.confidence), source: row.source,
   score: Math.max(Number(row.semantic_score) || 0, Number(row.keyword_score) || 0), mood: row.mood ?? undefined, tags: row.tags ?? [], createdAt: row.created_at,
+  ...(row.match_reason ? { matchReason: row.match_reason } : {}),
   evidence: row.evidence ?? [],
   ...(row.track_uri ? { track: { uri: row.track_uri, title: row.track_title, artist: row.track_artist } } : {}) } }
 function profileRow(row) {
@@ -563,12 +573,18 @@ function profileRow(row) {
   return {
     id: row.id,
     dimension: tags.find((tag) => tag.startsWith('dimension:'))?.slice('dimension:'.length) ?? 'unknown',
+    attribute: tags.find((tag) => tag.startsWith('attribute:'))?.slice('attribute:'.length) ?? null,
     stance: tags.find((tag) => tag.startsWith('stance:'))?.slice('stance:'.length) ?? 'mixed',
     summary: String(row.content).replace(/^[^:]+:/u, ''),
     confidence: Number(row.confidence),
     evidenceIds: row.evidence_ids ?? [],
     updatedAt: row.updated_at,
   }
+}
+function profileIdentity(tags = []) {
+  const dimension = tags.find((tag) => tag.startsWith('dimension:'))?.slice('dimension:'.length) ?? 'unknown'
+  const attribute = tags.find((tag) => tag.startsWith('attribute:'))?.slice('attribute:'.length) ?? ''
+  return `${dimension}\u0000${attribute}`
 }
 function associationRow(row) {
   return {

@@ -114,7 +114,6 @@ function describe(entry) {
     'memory/conversation_stored': () => `已归档 ${entry.localDate} 的${entry.role === 'user' ? '用户消息' : 'Mori 回复'}（状态：${safe(entry.status)}）。`,
     'memory/listening_event_stored': () => `已记录听歌事件 ${safe(entry.type)}，歌曲 ${safe(entry.trackUri)}。`,
     'memory/moment_persisted': () => `音乐瞬间已写入长期 Memory（心情：${moodName(entry.mood)}${entry.trackUri ? `，歌曲：${safe(entry.trackUri)}` : ''}）。`,
-    'memory/candidate_created': () => `已从明确对话生成候选记忆（置信度 ${Math.round(Number(entry.confidence) * 100)}%），等待后续证据确认。`,
     'memory/search_completed': () => `Memory 检索完成，模式 ${entry.mode === 'hybrid' ? '语义+关键词' : '关键词'}，返回 ${entry.matchCount} 条相关记忆。`,
     'memory/embedding_failed': () => `Memory 向量生成失败，本次降级为关键词能力：${safe(entry.error)}。`,
     'memory/moment_persist_failed': () => `音乐瞬间写入服务端失败：${safe(entry.error)}。`,

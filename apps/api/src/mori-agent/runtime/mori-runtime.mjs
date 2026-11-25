@@ -8,11 +8,11 @@
 import { randomUUID } from 'node:crypto'
 import { createAgentState } from '../perception/state.mjs'
 import { DECISION_REPAIR_PROMPT, decisionSystemPrompt, FINAL_RESPONSE_PROMPT, MORI_AGENT_PROMPT_VERSION, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
-import { enforcePlaybackFact, responseQualityIssue } from '../expression/response-quality.mjs'
+import { playbackFactIssue, responseQualityIssue, safePlaybackFallback } from '../expression/response-quality.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
-import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
+import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, prepareTargetRelevantMemory, relevantMemoryLogData, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
 
 export function createLegacyMoriAgent(llm, options = {}) {
   const { musicSearchMode } = validateRuntimeOptions(options)
@@ -33,15 +33,28 @@ export function createLegacyMoriAgent(llm, options = {}) {
         push('INPUT', input)
         const state = createAgentState(input)
         push('STATE_BEFORE', { worldState: state.worldState, playbackState: state.playbackState })
+        capabilityStage(logRun, 'agent_context_preparation_started', {
+          historyCount: state.conversationHistory.length, currentTrack: state.currentTrack,
+          memoryBackend: options.memoryRepository?.available ? options.memoryRepository.backend : 'local_or_unavailable',
+        })
         const [understood, relevantMemory] = await Promise.all([
           understandConversation(options.understandingLlm ?? llm, state, {
             onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
           }),
           prepareRelevantMemory(state, options),
         ])
+        capabilityStage(logRun, 'agent_relevant_memory_prepared', relevantMemoryLogData(relevantMemory, state.currentTrack, 'INITIAL'))
         const conversationUnderstanding = understood.understanding
         push('CONVERSATION_UNDERSTANDING', conversationUnderstanding)
-        const context = assembleConversationContext(state, conversationUnderstanding, relevantMemory)
+        let context = assembleConversationContext(state, conversationUnderstanding, relevantMemory)
+        const targetMemory = await prepareTargetRelevantMemory(state, options, relevantMemory, context.targetTrack)
+        if (targetMemory !== relevantMemory) {
+          capabilityStage(logRun, 'agent_target_memory_retrieval', {
+            reason: 'resolved targetTrack differs from currentTrack', currentTrack: state.currentTrack, targetTrack: context.targetTrack,
+          })
+          capabilityStage(logRun, 'agent_relevant_memory_prepared', relevantMemoryLogData(targetMemory, context.targetTrack, 'RESOLVED_TARGET'))
+          context = assembleConversationContext(state, conversationUnderstanding, targetMemory)
+        }
         push('TRACK_REFERENCE_RESOLUTION', {
           referenceType: conversationUnderstanding.reference?.type ?? null,
           currentTrack: state.currentTrack,
@@ -51,8 +64,13 @@ export function createLegacyMoriAgent(llm, options = {}) {
         })
         push('CONTEXT_ASSEMBLY', context)
         const tools = createRuntimeTools(state, options, musicSearchMode, context)
+        capabilityStage(logRun, 'agent_tools_available', { tools: Object.values(tools).map(({ name, description }) => ({ name, description })) })
 
         // 模型负责在已确定的 Intent 边界内选择“回复或 Tool”；代码随后再次执行副作用边界校验。
+        capabilityStage(logRun, 'agent_decision_model_call', {
+          scene: conversationUnderstanding.scene, listeningRequest: conversationUnderstanding.listeningRequest,
+          reference: conversationUnderstanding.reference, targetTrack: context.targetTrack,
+        })
         const first = await llm({
           prompt: decisionSystemPrompt(Object.values(tools)),
           input: {
@@ -88,10 +106,13 @@ export function createLegacyMoriAgent(llm, options = {}) {
           logRun.model = repaired.model
           decisionTokenUsage = { initialCall: first.tokenUsage ?? null, repairCall: repaired.tokenUsage ?? null }
         }
+        capabilityStage(logRun, 'agent_decision_validated', { action: decision.action, intent: decision.intent, conversationMove: decision.conversationMove, toolCall: decision.toolCall })
         push('MODEL_DECISION', decision)
 
         if (decision.action === 'respond') {
           const qualityIssue = responseQualityIssue(decision, state)
+          capabilityStage(logRun, 'agent_direct_response_selected', { response: decision.response })
+          capabilityStage(logRun, 'agent_response_quality_checked', { passed: !qualityIssue, issue: qualityIssue })
           let response = decision.response
           let tokenUsage = mergeRunTokenUsage(understood.tokenUsage, decisionTokenUsage)
           if (qualityIssue) {
@@ -104,10 +125,18 @@ export function createLegacyMoriAgent(llm, options = {}) {
               schemaName: 'mori_agent_response_repair_v0_1',
             })
             logRun.model = repaired.model
+            capabilityStage(logRun, 'agent_response_repair_raw', { output: repaired.data, model: repaired.model, tokenUsage: repaired.tokenUsage })
             response = validateFinalResponse(repaired.data).response
+            capabilityStage(logRun, 'agent_response_repair_validated', { response })
             tokenUsage = mergeRunTokenUsage(understood.tokenUsage, decisionTokenUsage, repaired.tokenUsage)
           }
-          response = enforcePlaybackFact(response, state)
+          const remainingPlaybackIssue = playbackFactIssue(response, state)
+          capabilityStage(logRun, 'agent_playback_fact_checked', { passed: !remainingPlaybackIssue, issue: remainingPlaybackIssue, playbackStatus: state.playbackState.status })
+          if (remainingPlaybackIssue) {
+            const fallback = safePlaybackFallback(remainingPlaybackIssue)
+            push('RESPONSE_FACT_FALLBACK', { issue: remainingPlaybackIssue, rejectedResponse: response, response: fallback })
+            response = fallback
+          }
           push('STATE_AFTER', { playbackState: state.playbackState, plannedAction: null })
           push('FINAL_RESPONSE', { response })
           return completeRun(logRun, runId, started, logRun.model, tokenUsage, response, trace, null, context)
@@ -141,8 +170,11 @@ export function createLegacyMoriAgent(llm, options = {}) {
           schemaName: 'mori_agent_final_response_v0_2',
         })
         logRun.model = final.model
+        capabilityStage(logRun, 'agent_final_response_raw', { output: final.data, model: final.model, tokenUsage: final.tokenUsage })
         const validated = validateFinalResponse(final.data)
+        capabilityStage(logRun, 'agent_final_response_validated', { response: validated.response })
         const response = safeToolResponse(toolResult, validated.response)
+        if (response !== validated.response) capabilityStage(logRun, 'agent_tool_response_safety_applied', { originalResponse: validated.response, response, tool: tool.name, toolStatus: toolResult?.status })
         push('FINAL_RESPONSE', { response })
         return completeRun(logRun, runId, started, final.model, mergeRunTokenUsage(understood.tokenUsage, decisionTokenUsage, final.tokenUsage), response, trace, plannedAction, context)
       } catch (cause) {

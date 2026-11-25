@@ -25,6 +25,20 @@ const style = document.createElement('style')
 style.textContent = styles
 const mount = document.createElement('div')
 shadow.append(style, mount)
+// Shadow DOM 隔离样式和节点，但键盘、输入法与剪贴板事件默认是 composed，仍会越过
+// Shadow Host 冒泡到宿主页面并触发 GitHub 等站点的全局快捷键。React 在 mount 上先完成
+// 自己的事件处理，随后由 ShadowRoot 的冒泡边界截断传播；不 preventDefault，保留输入法、
+// 文本编辑、复制粘贴和浏览器原生行为。
+const isolatedEvents = [
+  'keydown', 'keyup', 'keypress',
+  'beforeinput', 'input',
+  'compositionstart', 'compositionupdate', 'compositionend',
+  'paste', 'copy', 'cut',
+  'focusin', 'focusout', 'submit',
+] as const
+for (const type of isolatedEvents) shadow.addEventListener(type, stopAtMoriBoundary)
 document.documentElement.append(host)
 globalThis.__moriPresenceRoot = createRoot(mount)
 globalThis.__moriPresenceRoot.render(<MoriPresence />)
+
+function stopAtMoriBoundary(event: Event) { event.stopPropagation() }

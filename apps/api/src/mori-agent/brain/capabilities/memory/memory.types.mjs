@@ -6,10 +6,11 @@ export const MEMORY_SCHEMA = {
   properties: {
     facts: { type: 'array', maxItems: 2, items: { type: 'object', properties: {
       category: { type: 'string', enum: ['preference', 'dislike', 'music_fact'] },
-      dimension: { anyOf: [{ type: 'string' }, { type: 'null' }] }, content: { type: 'string' },
+      dimension: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      attribute: { anyOf: [{ type: 'string' }, { type: 'null' }] }, content: { type: 'string' },
       confidence: { type: 'number' }, evidence: { type: 'string' },
       supersedesId: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    }, required: ['category', 'dimension', 'content', 'confidence', 'evidence', 'supersedesId'], additionalProperties: false } },
+    }, required: ['category', 'dimension', 'attribute', 'content', 'confidence', 'evidence', 'supersedesId'], additionalProperties: false } },
     moments: { type: 'array', maxItems: 1, items: { type: 'object', properties: {
       summary: { type: 'string' }, userReflection: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       confidence: { type: 'number' }, evidence: { type: 'string' },
@@ -31,9 +32,10 @@ export function validateMemoryOutput(value, input) {
   if (!Array.isArray(value.facts) || value.facts.length > 2) throw new Error('facts 无效')
   if (!Array.isArray(value.moments) || value.moments.length > 1) throw new Error('moments 无效')
   const facts = value.facts.map((fact) => {
-    object(fact, 'fact'); noExtra(fact, ['category', 'dimension', 'content', 'confidence', 'evidence', 'supersedesId'], 'fact')
+    object(fact, 'fact'); noExtra(fact, ['category', 'dimension', 'attribute', 'content', 'confidence', 'evidence', 'supersedesId'], 'fact')
     if (!['preference', 'dislike', 'music_fact'].includes(fact.category)) throw new Error('fact.category 无效')
     if (fact.dimension != null) text(fact.dimension, 'fact.dimension')
+    if (fact.attribute != null) text(fact.attribute, 'fact.attribute')
     text(fact.content, 'fact.content'); confidence(fact.confidence); explicitEvidence(fact.evidence, input.userMessage)
     if (fact.supersedesId != null && !(input.existingFacts ?? []).some((item) => item.id === fact.supersedesId)) throw new Error('supersedesId 必须来自 existingFacts')
     return fact

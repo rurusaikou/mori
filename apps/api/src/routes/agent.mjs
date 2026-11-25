@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { json, readRequestJson } from '../http.mjs'
+import { capabilityStage } from '../mori-agent/shared/logger.mjs'
 
 const directory = fileURLToPath(new URL('../mori-agent/playground/', import.meta.url))
 const contentTypes = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8' }
@@ -61,11 +62,20 @@ async function runAgent(request, response, agent, memory = {}) {
       const assistantMessage = result.success
         ? await memory.memoryRepository.appendConversationMessage(conversationRecord({ ...input, userMessage: result.finalResponse }, memory.memoryUserId, exchangeId, 'assistant', result.action ? 'pending' : 'completed', new Date().toISOString()))
         : null
+      const routeLogRun = result.meta?.runId ? {
+        runId: result.meta.runId, capability: 'conversation_agent', promptVersion: result.meta.version ?? 'unknown', model: result.meta.model ?? 'unknown',
+      } : null
+      if (routeLogRun) capabilityStage(routeLogRun, 'agent_conversation_archived', {
+        exchangeId, userMessageStatus: result.success ? 'completed' : 'failed',
+        assistantMessageStatus: assistantMessage?.status ?? null, awaitsClientActionResult: Boolean(result.success && result.action),
+      })
       if (result.success && result.action && actionResultToken) {
         Object.assign(memory.pendingActionResults.get(actionResultToken), { input, userMessage: completedUserMessage })
+        if (routeLogRun) capabilityStage(routeLogRun, 'agent_post_turn_memory_deferred', { exchangeId, reason: 'awaiting confirmed client action result' })
       } else if (result.success && memory.postTurnMemoryProcessor && assistantMessage) {
         // 只有用户实际收到的最终回复已归档后才处理 Memory。它是派生任务，失败不撤销原始对话。
-        void memory.postTurnMemoryProcessor.process({ input, userMessage: completedUserMessage, assistantMessage }).catch(() => undefined)
+        if (routeLogRun) capabilityStage(routeLogRun, 'agent_post_turn_memory_scheduled', { exchangeId, trigger: 'direct_response_archived' })
+        void memory.postTurnMemoryProcessor.process({ input, userMessage: completedUserMessage, assistantMessage, agentRunId: result.meta?.runId }).catch(() => undefined)
       }
     }
     json(request, response, result.success ? 200 : 400, { ...result, exchangeId, ...(actionResultToken ? { actionResultToken } : {}) })
@@ -86,14 +96,18 @@ async function storeActionResult(request, response, memory) {
       json(request, response, 400, { success: false, error: 'Invalid action result' }); return
     }
     if (memory.memoryRepository?.available && memory.memoryUserId) {
+      const routeLogRun = pending.runId ? { runId: pending.runId, capability: 'conversation_agent', promptVersion: 'mori-agent-v1.0', model: 'client' } : null
+      if (routeLogRun) capabilityStage(routeLogRun, 'agent_action_result_received', { exchangeId: input.exchangeId, status: input.status, currentTrack: input.currentTrack ?? null })
       const assistantMessage = await memory.memoryRepository.appendConversationMessage(conversationRecord({
         userMessage: input.finalResponse.trim(),
         currentTrack: input.currentTrack ?? null,
         timeZone: input.timeZone,
       }, memory.memoryUserId, input.exchangeId, 'assistant', 'completed', new Date().toISOString()))
+      if (routeLogRun) capabilityStage(routeLogRun, 'agent_action_result_archived', { exchangeId: input.exchangeId, status: input.status, assistantMessageStatus: 'completed' })
       if (input.status === 'COMPLETED' && memory.postTurnMemoryProcessor && pending.input && pending.userMessage) {
         const completedInput = { ...pending.input, currentTrack: input.currentTrack ?? pending.input.currentTrack ?? null }
-        void memory.postTurnMemoryProcessor.process({ input: completedInput, userMessage: pending.userMessage, assistantMessage }).catch(() => undefined)
+        if (routeLogRun) capabilityStage(routeLogRun, 'agent_post_turn_memory_scheduled', { exchangeId: input.exchangeId, trigger: 'client_action_result_archived' })
+        void memory.postTurnMemoryProcessor.process({ input: completedInput, userMessage: pending.userMessage, assistantMessage, agentRunId: pending.runId }).catch(() => undefined)
       }
     }
     memory.pendingActionResults.delete(input.actionResultToken)

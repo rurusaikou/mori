@@ -12,6 +12,7 @@ import { createGetTrackInsightTool } from '../action/tools/get-track-insight.mjs
 import { createPlaybackControlTool } from '../action/tools/playback-control.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { MORI_AGENT_PROMPT_VERSION } from '../expression/prompts.mjs'
+import { composeRelevantMemory } from '../brain/memory/recall-composer.mjs'
 
 export function validateRuntimeOptions(options) {
   const musicSearchMode = options.musicSearchMode ?? 'mock'
@@ -37,26 +38,57 @@ export function createRuntimeTools(state, options, musicSearchMode, context = nu
   return Object.fromEntries(tools.map((tool) => [tool.name, tool]))
 }
 
-export async function prepareRelevantMemory(state, options) {
+export async function prepareRelevantMemory(state, options, focusTrack = state.currentTrack) {
   const usesServerMemory = Boolean(options.memoryRepository?.available && options.memoryUserId)
   const repository = usesServerMemory ? options.memoryRepository : createMockMemoryRepository(state.fakeMemory)
-  const query = [state.userMessage, state.currentTrack?.title, state.currentTrack?.artist].filter(Boolean).join(' ').trim()
+  const query = [state.userMessage, focusTrack?.title, focusTrack?.artist].filter(Boolean).join(' ').trim()
   if (!query) return { query: '', matches: [], source: usesServerMemory ? 'SERVER_MEMORY' : 'LOCAL_MEMORY' }
   try {
-    const [matches, tasteProfile, associations] = usesServerMemory
+    const [candidateMatches, tasteProfile, associations] = usesServerMemory
       ? await Promise.all([(typeof repository.retrieveRelevant === 'function'
-          ? repository.retrieveRelevant({ userId: options.memoryUserId, query, trackUri: state.currentTrack?.uri ?? null, limit: 5 })
+          ? repository.retrieveRelevant({ userId: options.memoryUserId, query, trackUri: focusTrack?.uri ?? null,
+              trackTitle: focusTrack?.title ?? null, trackArtist: focusTrack?.artist ?? null, limit: 20 })
           : repository.search({ userId: options.memoryUserId, query, limit: 5 })),
-        typeof repository.listTasteProfile === 'function' ? repository.listTasteProfile({ userId: options.memoryUserId }) : Promise.resolve([]),
+        typeof repository.listTasteProfile === 'function' ? repository.listTasteProfile({ userId: options.memoryUserId, limit: 3 }) : Promise.resolve([]),
         typeof repository.retrieveAssociations === 'function'
-          ? repository.retrieveAssociations({ userId: options.memoryUserId, trackUri: state.currentTrack?.uri ?? null, limit: 10 })
+          ? repository.retrieveAssociations({ userId: options.memoryUserId, trackUri: focusTrack?.uri ?? null, limit: 5 })
           : Promise.resolve([])])
       : [await repository.search(query), [], []]
+    const matches = usesServerMemory ? composeRelevantMemory(candidateMatches, { limit: 5, factLimit: 2, momentLimit: 2 }) : candidateMatches
     return { query, matches, tasteProfile, associations, source: usesServerMemory ? 'SERVER_MEMORY' : 'LOCAL_MEMORY' }
   } catch {
     // 相关记忆是增强上下文，不是回复成功条件。检索失败保持空结果，由显式 Tool 在确有
     // 需要时仍可独立尝试，不能让 Memory 可用性阻断当前对话。
     return { query, matches: [], tasteProfile: [], associations: [], source: usesServerMemory ? 'SERVER_MEMORY_UNAVAILABLE' : 'LOCAL_MEMORY_UNAVAILABLE' }
+  }
+}
+
+export async function prepareTargetRelevantMemory(state, options, initialMemory, targetTrack) {
+  if (!targetTrack?.uri || targetTrack.uri === state.currentTrack?.uri) return initialMemory
+  return prepareRelevantMemory(state, options, targetTrack)
+}
+
+export function relevantMemoryLogData(memory, focusTrack, phase) {
+  return {
+    phase,
+    focusTrack: focusTrack ? { uri: focusTrack.uri, title: focusTrack.title, artist: focusTrack.artist } : null,
+    query: memory.query,
+    source: memory.source,
+    matchCount: memory.matches.length,
+    matches: memory.matches.map((item) => ({
+      id: item.id, kind: item.kind ?? 'unknown', status: item.status ?? 'unknown', source: item.source ?? 'unknown',
+      score: item.score ?? 0, matchReason: item.matchReason ?? null, trackUri: item.track?.uri ?? null,
+    })),
+    tasteProfileCount: memory.tasteProfile?.length ?? 0,
+    tasteProfile: (memory.tasteProfile ?? []).map((item) => ({
+      id: item.id, dimension: item.dimension, attribute: item.attribute ?? null, stance: item.stance, confidence: item.confidence,
+      evidenceCount: item.evidenceIds?.length ?? 0,
+    })),
+    associationCount: memory.associations?.length ?? 0,
+    associations: (memory.associations ?? []).map((item) => ({
+      relation: item.relation, sourceType: item.source?.type, sourceKey: item.source?.key,
+      targetType: item.target?.type, targetKey: item.target?.key, weight: item.weight,
+    })),
   }
 }
 

@@ -37,6 +37,22 @@ test('writes a traceable Music Moment through the minimal-memory route', async (
   assert.equal(result.body.id, 'moment-1')
 })
 
+test('confirms a candidate and refreshes the derived taste profile', async () => {
+  const calls = []
+  const repository = {
+    available: true,
+    confirmMemory: async (input) => { calls.push(['confirm', input]); return { id: input.id, kind: 'preference', source: 'user_statement' } },
+    refreshTasteProfile: async (input) => { calls.push(['profile', input]); return [] },
+  }
+  const route = createMemoryRoutes({ repository, userId: 'trusted-user' })
+  const result = await call(route, '/memory/memories/123e4567-e89b-42d3-a456-426614174000/confirm', {})
+
+  assert.equal(result.status, 200)
+  assert.equal(calls[0][1].userId, 'trusted-user')
+  assert.equal(calls[1][0], 'profile')
+  assert.equal(result.body.confirmed, true)
+})
+
 async function call(route, url, body) {
   const request = Readable.from([Buffer.from(JSON.stringify(body))])
   request.method = 'POST'; request.url = url; request.headers = {}

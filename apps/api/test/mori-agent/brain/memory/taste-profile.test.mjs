@@ -34,3 +34,15 @@ test('ignores superseded facts when consolidating taste', () => {
   ])
   assert.deepEqual(profile[0].evidenceIds, ['new'])
 })
+
+test('keeps compatible positive and negative preferences for different attributes', () => {
+  const profile = consolidateTasteProfile([
+    { id: 'f1', content: '喜欢含蓄表达', status: 'confirmed', confidence: 1, tags: ['preference', 'dimension:lyrical_expression', 'attribute:subtle_expression'] },
+    { id: 'f2', content: '不喜欢过度直白', status: 'confirmed', confidence: 1, tags: ['dislike', 'dimension:lyrical_expression', 'attribute:overly_direct_expression'] },
+  ])
+  assert.equal(profile.length, 2)
+  assert.deepEqual(profile.map(({ attribute, stance }) => [attribute, stance]).sort(), [
+    ['overly_direct_expression', 'dislikes'],
+    ['subtle_expression', 'likes'],
+  ])
+})

@@ -52,6 +52,7 @@ const postTurnMemoryProcessor = createPostTurnMemoryProcessor({
   extractor: (input) => memoryCandidateCapability.execute(input),
   repository: memoryRepository,
   userId: memoryUserId,
+  logInfo,
   logError,
 })
 const songUnderstandingAgent = createSongUnderstandingAgent({

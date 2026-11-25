@@ -4,7 +4,7 @@ import test from 'node:test'
 import { createMemoryCapability } from '../../../../../src/mori-agent/brain/capabilities/memory/memory.service.mjs'
 
 const run = (output, input) => createMemoryCapability(async () => ({ data: output, model: 'test', tokenUsage: null })).execute(input)
-const fact = (overrides = {}) => ({ category: 'preference', dimension: 'arrangement', content: '用户长期喜欢克制的编曲', confidence: 0.95, evidence: '我一直喜欢克制的编曲', supersedesId: null, ...overrides })
+const fact = (overrides = {}) => ({ category: 'preference', dimension: 'arrangement', attribute: 'restrained_arrangement', content: '用户长期喜欢克制的编曲', confidence: 0.95, evidence: '我一直喜欢克制的编曲', supersedesId: null, ...overrides })
 
 test('extracts an explicit stable Music Fact', async () => {
   const result = await run({ facts: [fact()], moments: [] }, { userMessage: '我一直喜欢克制的编曲' })

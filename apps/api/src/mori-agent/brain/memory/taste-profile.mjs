@@ -8,12 +8,14 @@ export function consolidateTasteProfile(facts, updatedAt = new Date().toISOStrin
     if (!fact?.id || !fact?.content || fact.status === 'superseded' || fact.status === 'deleted') continue
     const category = fact.tags?.find((tag) => ['preference', 'dislike', 'music_fact'].includes(tag)) ?? 'music_fact'
     const dimension = fact.tags?.find((tag) => tag.startsWith('dimension:'))?.slice('dimension:'.length) || category
+    const attribute = fact.tags?.find((tag) => tag.startsWith('attribute:'))?.slice('attribute:'.length) || null
     const weight = clamp(Number(fact.confidence) || 0)
-    if (!groups.has(dimension)) groups.set(dimension, [])
-    groups.get(dimension).push({ ...fact, category, weight })
+    const identity = `${dimension}\u0000${attribute ?? ''}`
+    if (!groups.has(identity)) groups.set(identity, { dimension, attribute, evidence: [] })
+    groups.get(identity).evidence.push({ ...fact, category, weight })
   }
 
-  return [...groups.entries()].map(([dimension, evidence]) => {
+  return [...groups.values()].map(({ dimension, attribute, evidence }) => {
     const positive = evidence.filter((item) => item.category !== 'dislike').reduce((sum, item) => sum + item.weight, 0)
     const negative = evidence.filter((item) => item.category === 'dislike').reduce((sum, item) => sum + item.weight, 0)
     const total = positive + negative
@@ -23,13 +25,14 @@ export function consolidateTasteProfile(facts, updatedAt = new Date().toISOStrin
     const strongest = [...evidence].sort((a, b) => b.weight - a.weight)[0]
     return {
       dimension,
+      attribute,
       stance,
       summary: strongest.content,
       confidence,
       evidenceIds: evidence.map((item) => item.id),
       updatedAt,
     }
-  }).sort((a, b) => b.confidence - a.confidence || a.dimension.localeCompare(b.dimension))
+  }).sort((a, b) => b.confidence - a.confidence || a.dimension.localeCompare(b.dimension) || String(a.attribute).localeCompare(String(b.attribute)))
 }
 
 function clamp(value) { return Math.max(0, Math.min(1, value)) }

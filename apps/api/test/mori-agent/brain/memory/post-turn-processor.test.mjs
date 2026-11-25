@@ -17,7 +17,7 @@ test('runs retrieval, Fact/Moment storage and taste refresh after a completed ex
     extractor: async (input) => {
       extractorInput = input
       return { success: true, data: {
-        facts: [{ category: 'dislike', dimension: 'arrangement', content: '不喜欢强电子音', confidence: 1, evidence: '不喜欢强电子音', supersedesId: 'old' }],
+        facts: [{ category: 'dislike', dimension: 'arrangement', attribute: 'heavy_electronic', content: '不喜欢强电子音', confidence: 1, evidence: '不喜欢强电子音', supersedesId: 'old' }],
         moments: [{ summary: '讨论当前歌曲的编曲', userReflection: '不喜欢强电子音', confidence: 0.9, evidence: '不喜欢强电子音' }],
       } }
     },
