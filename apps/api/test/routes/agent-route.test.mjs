@@ -71,6 +71,37 @@ test('starts post-turn memory only after a direct final response is archived', a
   assert.equal(writes.at(-1).content, '我记住你说的重点了。')
 })
 
+test('streams Agent progress and then sends the ordinary final result event', async () => {
+  const productAgent = {
+    execute: async (_input, correlation) => {
+      correlation.onStreamEvent({ type: 'delta', text: '你好，' })
+      return { success: true, finalResponse: '你好，我在。', meta: { runId: 'stream-run', version: 'mori-agent-v1.1' } }
+    },
+  }
+  const route = createAgentRoutes({ productAgent, playgroundAgent: productAgent }, { NODE_ENV: 'test' })
+  const request = Readable.from([Buffer.from(JSON.stringify({ userMessage: '你好' }))])
+  request.method = 'POST'; request.url = '/agent/stream'; request.headers = { 'x-mori-request-id': 'stream-request' }
+  const chunks = []
+  const response = {
+    status: null, headers: null, headersSent: false, destroyed: false, writableEnded: false,
+    writeHead(status, headers) { this.status = status; this.headers = headers; this.headersSent = true; return this },
+    flushHeaders() {},
+    write(value) { chunks.push(value); return true },
+    end(value) { if (value) chunks.push(value); this.writableEnded = true; return this },
+    on() {},
+  }
+
+  assert.equal(await route(request, response), true)
+  assert.equal(response.status, 200)
+  assert.match(response.headers['Content-Type'], /text\/event-stream/u)
+  const payload = chunks.join('')
+  assert.match(payload, /"type":"started"/u)
+  assert.match(payload, /"type":"progress"/u)
+  assert.match(payload, /"text":"你好，"/u)
+  assert.match(payload, /"type":"result"/u)
+  assert.match(payload, /"finalResponse":"你好，我在。"/u)
+})
+
 async function call(route, url, body) {
   const request = Readable.from([Buffer.from(JSON.stringify(body))])
   request.method = 'POST'; request.url = url; request.headers = {}

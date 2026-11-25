@@ -19,6 +19,7 @@ type Props = {
   spotifyConnected: boolean
   messages: ConversationMessage[]
   memories: MusicMemory[]
+  chatStream?: { active: boolean; text: string; toolName?: string } | null
   settingsOpen: boolean
   onOpenSettings: () => void
   onCloseSettings: () => void
@@ -38,7 +39,7 @@ type Props = {
   onAnalyzeMusicPreference: () => Promise<MusicPreferenceProfile>
 }
 
-export function PlayerCard({ playback, spotifyConnected, messages, memories, settingsOpen, onOpenSettings, onCloseSettings, onCollapse, onToggle, onCommand, onSeek, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onHasLibraryCache, onRefreshLibrary, onGetPlaylistTracks, onPlayUri, onGetMusicPreference, onAnalyzeMusicPreference }: Props) {
+export function PlayerCard({ playback, spotifyConnected, messages, memories, chatStream, settingsOpen, onOpenSettings, onCloseSettings, onCollapse, onToggle, onCommand, onSeek, onSetPlaybackMode, onSend, onSaveMemory, onGetPlaylists, onHasLibraryCache, onRefreshLibrary, onGetPlaylistTracks, onPlayUri, onGetMusicPreference, onAnalyzeMusicPreference }: Props) {
   const [view, setView] = useState<View>('playlists')
   const [settingsView, setSettingsView] = useState<'settings' | 'preference'>('settings')
   const [preferenceView, setPreferenceView] = useState<MusicPreferenceView>('overview')
@@ -48,6 +49,7 @@ export function PlayerCard({ playback, spotifyConnected, messages, memories, set
   const [chatError, setChatError] = useState('')
   const [momentOpen, setMomentOpen] = useState(false)
   const playbackMode: PlaybackMode = playback.shuffle ? 'shuffle' : playback.repeatMode
+  const chatBusy = chatSending || Boolean(chatStream?.active)
   const visibleFeedback = feedback.startsWith('播放模式：') ? modeLabel(playbackMode) : feedback
 
   useEffect(() => {
@@ -85,7 +87,7 @@ export function PlayerCard({ playback, spotifyConnected, messages, memories, set
   }
 
   async function sendChatMessage(text: string) {
-    if (chatSending) return
+    if (chatBusy) return
     setChatSending(true); setChatError('')
     try { await onSend(text) }
     catch (error) {
@@ -142,7 +144,7 @@ export function PlayerCard({ playback, spotifyConnected, messages, memories, set
 
     <main className="card-content">
       {view === 'playlists' && <PlaylistPanel playback={playback} getPlaylists={onGetPlaylists} hasLibraryCache={onHasLibraryCache} refreshLibrary={onRefreshLibrary} getPlaylistTracks={onGetPlaylistTracks} playUri={onPlayUri} />}
-      {view === 'chat' && <ChatPanel messages={messages} onSend={sendChatMessage} sending={chatSending} sendError={chatError} />}
+      {view === 'chat' && <ChatPanel messages={messages} onSend={sendChatMessage} sending={chatBusy} sendError={chatError} streamingText={chatStream?.text ?? ''} streamToolName={chatStream?.toolName} />}
       {view === 'moments' && <MomentPanel memories={memories} />}
     </main>
     </>}

@@ -20,6 +20,10 @@ export function createAgentRoutes({ productAgent, playgroundAgent, memoryReposit
       await runAgent(request, response, productAgent, { memoryRepository, memoryUserId, postTurnMemoryProcessor, pendingActionResults })
       return true
     }
+    if (request.method === 'POST' && request.url === '/agent/stream') {
+      await runAgent(request, response, productAgent, { memoryRepository, memoryUserId, postTurnMemoryProcessor, pendingActionResults }, { stream: true })
+      return true
+    }
     if (request.method === 'POST' && request.url === '/agent/action-result') {
       await storeActionResult(request, response, { memoryRepository, memoryUserId, postTurnMemoryProcessor, pendingActionResults })
       return true
@@ -40,7 +44,7 @@ export function createAgentRoutes({ productAgent, playgroundAgent, memoryReposit
   }
 }
 
-async function runAgent(request, response, agent, memory = {}) {
+async function runAgent(request, response, agent, memory = {}, { stream = false } = {}) {
   let input
   const exchangeId = randomUUID()
   const requestId = typeof request.headers['x-mori-request-id'] === 'string' && request.headers['x-mori-request-id'].trim()
@@ -53,7 +57,25 @@ async function runAgent(request, response, agent, memory = {}) {
     const requestLogRun = { runId: 'pending', capability: 'conversation_agent', promptVersion: 'unknown', model: 'unknown', requestId, exchangeId }
     capabilityStage(requestLogRun, 'agent_route_received', { requestId, exchangeId, userMessage: input?.userMessage, currentTrack: input?.currentTrack ?? null })
     if (archive) await memory.memoryRepository.appendConversationMessage(conversationRecord(input, memory.memoryUserId, exchangeId, 'user', 'pending', createdAt))
-    const result = await agent.execute(input, { requestId, exchangeId })
+    const abortController = stream ? new AbortController() : null
+    if (stream) {
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      })
+      response.flushHeaders?.()
+      response.write(`data: ${JSON.stringify({ type: 'started', requestId, exchangeId })}\n\n`)
+      response.on('close', () => { if (!response.writableEnded) abortController.abort() })
+    }
+    const emit = (event) => {
+      if (stream && !response.destroyed && !response.writableEnded) response.write(`data: ${JSON.stringify({ type: 'progress', event })}\n\n`)
+    }
+    const result = await agent.execute(input, {
+      requestId, exchangeId,
+      ...(stream ? { signal: abortController.signal, onStreamEvent: emit } : {}),
+    })
     const correlatedLogRun = result.meta?.runId ? {
       runId: result.meta.runId, capability: 'conversation_agent', promptVersion: result.meta.version ?? 'unknown', model: result.meta.model ?? 'unknown', requestId, exchangeId,
     } : requestLogRun
@@ -89,11 +111,23 @@ async function runAgent(request, response, agent, memory = {}) {
       actionType: result.action?.type ?? 'direct_response', httpStatus: result.success ? 200 : 400,
       ...(result.error ? { error: result.error } : {}),
     })
-    json(request, response, result.success ? 200 : 400, { ...result, exchangeId, ...(actionResultToken ? { actionResultToken } : {}) })
+    const payload = { ...result, exchangeId, ...(actionResultToken ? { actionResultToken } : {}) }
+    if (stream) {
+      if (!response.destroyed && !response.writableEnded) {
+        response.write(`data: ${JSON.stringify({ type: 'result', result: payload })}\n\n`)
+        response.end()
+      }
+    } else json(request, response, result.success ? 200 : 400, payload)
   } catch (error) {
     if (archive && input) await memory.memoryRepository.appendConversationMessage(conversationRecord(input, memory.memoryUserId, exchangeId, 'user', 'failed', createdAt)).catch(() => undefined)
     capabilityStage({ runId: 'pending', capability: 'conversation_agent', promptVersion: 'unknown', model: 'unknown', requestId, exchangeId }, 'agent_route_failed', { requestId, exchangeId, success: false, httpStatus: error?.statusCode ?? 400, error: error instanceof Error ? error.message : String(error) })
-    json(request, response, error?.statusCode ?? 400, { success: false, error: error instanceof Error ? error.message : 'Invalid request' })
+    const payload = { success: false, error: error instanceof Error ? error.message : 'Invalid request' }
+    if (stream && response.headersSent) {
+      if (!response.destroyed && !response.writableEnded) {
+        response.write(`data: ${JSON.stringify({ type: 'error', ...payload })}\n\n`)
+        response.end()
+      }
+    } else json(request, response, error?.statusCode ?? 400, payload)
   }
 }
 

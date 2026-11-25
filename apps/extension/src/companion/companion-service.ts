@@ -33,6 +33,7 @@ export async function sendCompanionMessage(
   executeAction?: (request: AgentClientAction) => Promise<MusicTrack | null>,
   onUserStored?: (messages: ConversationMessage[]) => Promise<void>,
   requestId?: string,
+  onStreamEvent?: (event: AgentStreamEvent) => void,
 ) {
   const value = text.trim()
   if (!value) throw new Error('请输入想和 Mori 说的话')
@@ -45,7 +46,7 @@ export async function sendCompanionMessage(
   await onUserStored?.(messagesWithUser)
   logInfo('conversation', 'conversation_user_message_stored', { requestId: requestId ?? null, userMessageId: userMessage.id, text: value })
 
-  const agentResult = await requestAgentReply(value, playback, messages, memories, conversationState, requestId)
+  const agentResult = await requestAgentReply(value, playback, messages, memories, conversationState, requestId, onStreamEvent)
   let reply = agentResult.reply
   let replyTrack = playback.track
   let actionStatus: 'COMPLETED' | 'FAILED' | null = null
@@ -150,6 +151,7 @@ async function requestAgentReply(
   memories: MusicMemory[],
   conversationState: ConversationState,
   requestId?: string,
+  onStreamEvent?: (event: AgentStreamEvent) => void,
 ) {
   const apiBaseUrl = (await extensionStorage.getApiBaseUrl()).replace(/\/$/, '')
   try {
@@ -158,10 +160,7 @@ async function requestAgentReply(
       entityCount: conversationState.entities.length, factCount: conversationState.facts.length,
       unresolvedContext: conversationState.unresolvedContext,
     })
-    const response = await fetch(`${apiBaseUrl}/agent/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Mori-Request-ID': requestId ?? '' },
-      body: JSON.stringify({
+    const requestBody = JSON.stringify({
         userMessage,
         // Only the fields needed for conversation are sent. Spotify identifiers and artwork stay
         // inside the extension because the Agent has no reason to receive them.
@@ -192,18 +191,23 @@ async function requestAgentReply(
           context: memory.track ? `${memory.track.title} · ${memory.track.artist}` : memory.createdAt,
         })),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-      }),
+      })
+    const requestHeaders = { 'Content-Type': 'application/json', 'X-Mori-Request-ID': requestId ?? '' }
+    let response = await fetch(`${apiBaseUrl}/agent/stream`, {
+      method: 'POST',
+      headers: { ...requestHeaders, 'Accept': 'text/event-stream' },
+      body: requestBody,
     })
-    const result = await response.json() as {
-      success?: boolean
-      finalResponse?: string
-      error?: string
-      action?: AgentClientAction
-      conversationContext?: { targetTrack: MusicTrack | null; resolution: { source: string; resolved: boolean; confidence: number; referenceType: string | null }; conversationState?: ConversationState | null }
-      exchangeId?: string
-      actionResultToken?: string
-      meta?: { runId?: string; version?: string }
+    if (response.status === 404) {
+      response = await fetch(`${apiBaseUrl}/agent/run`, {
+        method: 'POST', headers: requestHeaders, body: requestBody,
+      })
     }
+    let result: AgentRunResponse
+    if (response.headers.get('content-type')?.includes('text/event-stream')) {
+      onStreamEvent?.({ phase: 'started' })
+      result = await readAgentEventStream(response, onStreamEvent)
+    } else result = await response.json() as AgentRunResponse
     if (!response.ok || !result.success || !result.finalResponse?.trim()) throw new Error(result.error || `Agent HTTP ${response.status}`)
     logInfo('conversation', 'agent_http_request_completed', { requestId: requestId ?? null, exchangeId: result.exchangeId ?? null, agentRunId: result.meta?.runId ?? null, httpStatus: response.status, actionType: result.action?.type ?? 'direct_response' })
     return {
@@ -223,6 +227,43 @@ async function requestAgentReply(
       ? `我暂时连不上理解服务，但还在陪你听《${playback.track.title}》。连接恢复后，我再认真回答你。`
       : '我暂时连不上理解服务，但我还在。连接恢复后，我们再继续聊。' }
   }
+}
+
+async function readAgentEventStream(response: Response, onStreamEvent?: (event: AgentStreamEvent) => void): Promise<AgentRunResponse> {
+  if (!response.body) throw new Error('Agent 流响应没有 Body')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: AgentRunResponse | null = null
+  const consume = (block: string) => {
+    const data = block.split(/\r?\n/u).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n')
+    if (!data) return
+    const event = JSON.parse(data) as { type: string; event?: AgentStreamProgress; result?: AgentRunResponse; error?: string }
+    if (event.type === 'started') onStreamEvent?.({ phase: 'started' })
+    if (event.type === 'progress' && event.event) {
+      const progress = event.event as { type: 'delta' | 'reset' | 'tool_start'; text?: string; name?: string }
+      onStreamEvent?.({ phase: progress.type, text: progress.text, toolName: progress.name })
+    }
+    if (event.type === 'result' && event.result) result = event.result
+    if (event.type === 'error') throw new Error(event.error || 'Agent 流请求失败')
+  }
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+      let boundary
+      while ((boundary = buffer.search(/\r?\n\r?\n/u)) !== -1) {
+        consume(buffer.slice(0, boundary))
+        buffer = buffer.slice(boundary).replace(/^\r?\n\r?\n/u, '')
+      }
+      if (done) break
+    }
+    if (buffer.trim()) consume(buffer)
+  } finally {
+    reader.releaseLock()
+  }
+  if (!result) throw new Error('Agent 流结束时没有最终结果')
+  return result
 }
 
 async function reportAgentActionResult(input: PendingAgentActionResult) {
@@ -274,6 +315,18 @@ type MusicRequestAction = {
 }
 type PlaybackControlAction = { type: 'playback_control'; command: 'PAUSE' | 'RESUME' | 'NEXT' | 'PREVIOUS'; agentRunId?: string; promptVersion?: string }
 type AgentClientAction = MusicRequestAction | PlaybackControlAction
+type AgentRunResponse = {
+  success?: boolean
+  finalResponse?: string
+  error?: string
+  action?: AgentClientAction
+  conversationContext?: { targetTrack: MusicTrack | null; resolution: { source: string; resolved: boolean; confidence: number; referenceType: string | null }; conversationState?: ConversationState | null }
+  exchangeId?: string
+  actionResultToken?: string
+  meta?: { runId?: string; version?: string }
+}
+export type AgentStreamEvent = { phase: 'started' | 'delta' | 'reset' | 'tool_start' | 'complete'; text?: string; toolName?: string }
+type AgentStreamProgress = { type: 'delta' | 'reset' | 'tool_start'; text?: string; name?: string }
 
 function greeting(now: Date): ConversationMessage {
   // 每个本地自然日都从同一个开放式问题开始，既建立稳定的陪伴仪式，也避免在用户

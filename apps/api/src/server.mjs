@@ -13,6 +13,7 @@ import { createCapabilityRegistry } from './mori-agent/brain/capability-registry
 import { createCapabilityRoutes } from './routes/capabilities.mjs'
 import { createAgentRoutes } from './routes/agent.mjs'
 import { createCapabilityLlm } from './mori-agent/shared/llm.mjs'
+import { createAgentLlm } from './mori-agent/shared/agent-llm.mjs'
 import { createMoriAgent } from './mori-agent/runtime/index.mjs'
 import { createFeatureStore } from './services/feature-store.mjs'
 import { createMusicProfileService } from './services/music-profile.mjs'
@@ -37,7 +38,8 @@ const analyzeMusicProfile = createMusicProfileService({
 })
 const handleMusicProfileRoute = createMusicProfileRoute(analyzeMusicProfile)
 const handleCapabilityRequest = createCapabilityRoutes(createCapabilityRegistry())
-const agentLlm = createCapabilityLlm()
+const structuredLlm = createCapabilityLlm()
+const conversationLlm = createAgentLlm()
 const memoryEmbedding = createEmbeddingProvider({ env: process.env })
 const memoryRepository = await createPostgresMemoryRepository({
   connectionString: process.env.MORI_MEMORY_DATABASE_URL?.trim(),
@@ -47,7 +49,7 @@ const memoryRepository = await createPostgresMemoryRepository({
 })
 // V0.1 暂无账号系统；开发身份必须由服务端环境变量固定，不能相信 Extension 请求体。
 const memoryUserId = process.env.MORI_MEMORY_USER_ID?.trim() || null
-const memoryCandidateCapability = createMemoryCapability(agentLlm)
+const memoryCandidateCapability = createMemoryCapability(structuredLlm)
 const postTurnMemoryProcessor = createPostTurnMemoryProcessor({
   extractor: (input) => memoryCandidateCapability.execute(input),
   repository: memoryRepository,
@@ -56,15 +58,15 @@ const postTurnMemoryProcessor = createPostTurnMemoryProcessor({
   logError,
 })
 const songUnderstandingAgent = createSongUnderstandingAgent({
-  llm: agentLlm,
+  llm: structuredLlm,
   resolveFeatures: (isrc) => featureStore.get(isrc),
   providers: createSongEvidenceProviders(),
   logInfo,
   logError,
 })
 const handleAgentRequest = createAgentRoutes({
-  productAgent: createMoriAgent(agentLlm, { musicSearchMode: 'library', memoryRepository, memoryUserId, songUnderstandingAgent }),
-  playgroundAgent: createMoriAgent(agentLlm, { logSource: 'debug' }),
+  productAgent: createMoriAgent(structuredLlm, { agentLlm: conversationLlm, actionAuthorizationLlm: structuredLlm, musicSearchMode: 'library', memoryRepository, memoryUserId, songUnderstandingAgent }),
+  playgroundAgent: createMoriAgent(structuredLlm, { agentLlm: conversationLlm, actionAuthorizationLlm: structuredLlm, logSource: 'debug' }),
   memoryRepository,
   memoryUserId,
   postTurnMemoryProcessor,

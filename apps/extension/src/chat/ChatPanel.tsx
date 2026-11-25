@@ -11,21 +11,29 @@ type Props = {
   onSend: (text: string) => Promise<void>
   sending: boolean
   sendError: string
+  streamingText?: string
+  streamToolName?: string
 }
 
-export function ChatPanel({ messages, onSend, sending, sendError }: Props) {
+export function ChatPanel({ messages, onSend, sending, sendError, streamingText = '', streamToolName }: Props) {
   const [draft, setDraft] = useState('')
   const conversationRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const wasSending = useRef(sending)
+  const streamedThisTurn = useRef(false)
   const [revealingId, setRevealingId] = useState<string | null>(null)
   const visibleMessages = useMemo(() => messages.filter((message) => message.text?.trim()), [messages])
+
+  useEffect(() => {
+    if (streamingText) streamedThisTurn.current = true
+  }, [streamingText])
 
   useEffect(() => {
     // 只在本次请求由“等待”变为“完成”时播放新回复；重新打开面板不会重播历史消息。
     if (wasSending.current && !sending) {
       const latest = [...visibleMessages].reverse().find((message) => message.role === 'mori')
-      if (latest) setRevealingId(latest.id)
+      if (latest && !streamedThisTurn.current) setRevealingId(latest.id)
+      streamedThisTurn.current = false
     }
     wasSending.current = sending
   }, [sending, visibleMessages])
@@ -36,7 +44,7 @@ export function ChatPanel({ messages, onSend, sending, sendError }: Props) {
     // Set the final position in the same layout pass. Smooth scrolling was repeatedly interrupted
     // by panel renders and could leave an old, partially clipped bubble looking like an empty block.
     conversation.scrollTop = conversation.scrollHeight
-  }, [visibleMessages.length, sending, sendError])
+  }, [visibleMessages.length, sending, sendError, streamingText])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -64,7 +72,11 @@ export function ChatPanel({ messages, onSend, sending, sendError }: Props) {
           }} onComplete={() => setRevealingId(null)} /> : message.text}
         </p>)
         : <p className="mori">今天心情怎么样？</p>}
-      {sending && <p className="mori thinking" aria-label="Mori 正在思考"><span>正在想</span><i /><i /><i /></p>}
+      {sending && <p className="mori thinking" aria-label={streamingText ? 'Mori 正在回复' : 'Mori 正在思考'}>
+        {streamingText
+          ? <>{streamingText}<span className="typing-caret" aria-hidden="true">▍</span></>
+          : <><span>{streamToolName ? toolStatus(streamToolName) : '正在想'}</span><i /><i /><i /></>}
+      </p>}
       {sendError && <p className="chat-error" role="alert">{sendError}</p>}
     </div>
     <form className="chat-form" onSubmit={submit}>
@@ -72,6 +84,10 @@ export function ChatPanel({ messages, onSend, sending, sendError }: Props) {
       <button type="submit" className={sending ? 'busy' : ''} disabled={!draft.trim() || sending}>{sending ? '思考中' : '发送'}</button>
     </form>
   </section>
+}
+
+function toolStatus(name: string) {
+  return ({ search_memory: '正在回想相关记忆', get_music_context: '正在确认音乐上下文', get_track_insight: '正在整理歌曲信息', search_music: '正在找歌', recommend_music: '正在挑选歌曲', playback_control: '正在确认播放操作' })[name] ?? '正在处理'
 }
 
 function TypewriterText({ text, onProgress, onComplete }: { text: string; onProgress: () => void; onComplete: () => void }) {

@@ -13,7 +13,7 @@ MELODATA_BASE_URL=https://melodata.voltenworks.com/api/v1
 MELODATA_API_KEY=your-server-side-key
 ```
 
-音乐画像、Agent 与 Capability 共用同一个 Structured LLM transport。默认使用 Responses API；也可以连接仅支持 Chat Completions 的本地服务。
+音乐画像、Capability 与现有 `graph/legacy` Runtime 使用 Structured LLM transport；新增 `unified` Runtime 使用独立 Agent LLM transport。两者共用 `MORI_LLM_ENDPOINT`、`MORI_LLM_MODEL`、API Key、超时和 `MORI_LLM_API_STYLE` 配置，但 Agent transport 发送真实 role messages 和原生 function tools，不要求 JSON Schema 回复。默认使用 Responses API；也可以连接仅支持 Chat Completions 的本地服务。启用统一对话 Runtime 前，需确认所配置模型/兼容服务支持对应 API 风格的 tool calling。
 
 Responses API：
 
@@ -76,6 +76,24 @@ MORI_AGENT_RUNTIME=legacy
 ```
 
 不要在一次失败请求中自动改用 Legacy 重跑，否则可能重复调用 Tool 或计划同一个播放动作。恢复 Graph 时删除该配置或设为 `graph`。
+
+Unified Runtime 通过以下配置显式启用：
+
+```dotenv
+MORI_AGENT_RUNTIME=unified
+```
+
+它使用 `mori-persona.md`、分层且有字符预算的 Context Builder 和真实 role 消息；Memory 注入会保留确认状态、来源、匹配理由和证据摘要。每轮最多执行一个 Tool，playback/search/recommend 会在执行前做条件式 Structured Understanding 授权，成功后复用现有 Extension 执行、Spotify 确认和 Action Result 回写。`graph` 仍是默认正式流程。
+
+Unified 支持从 `/agent/stream` 获取 SSE 增量文本；旧 Runtime 也兼容该端点，但只发送最终结果。流式回复若随后转入 Tool，会先发 reset 事件，再在 Observation 后流式输出最终回复。流式播放状态仍受现有事实保护。
+
+固定多轮回归样例可用 Mock 随 `pnpm test:api` 离线运行；要用当前配置的真实模型逐条评估，可运行：
+
+```bash
+pnpm eval:unified
+```
+
+评估器会检查固定 Bad Case 的话题线索和明确禁止的臆造内容；它是筛查器，不是完整语义正确性证明。结果会打印在终端，不会写入正式 Capability 日志。
 
 正式 Memory 为可选配置：
 

@@ -12,6 +12,7 @@ import { sendRuntimeRequest } from '../shared/runtime-client'
 
 type DragState = { id: number; startX: number; startY: number; left: number; top: number; moved: boolean }
 type PanelMode = 'closed' | 'mini' | 'full'
+type ChatStreamState = { requestId: string; active: boolean; text: string; toolName?: string }
 
 const PANEL_GAP = 6
 const VIEWPORT_MARGIN = 16
@@ -22,6 +23,7 @@ export function MoriPresence() {
   const [playback, setPlayback] = useState<PlaybackState>(INITIAL_PLAYBACK_STATE)
   const [spotifyConnected, setSpotifyConnected] = useState(false)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
+  const [chatStream, setChatStream] = useState<ChatStreamState | null>(null)
   const [memories, setMemories] = useState<MusicMemory[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
@@ -56,6 +58,17 @@ export function MoriPresence() {
         else setSpotifyConnected(true)
       }
       if (message.type === 'MORI_COMPANION_DATA') { setMessages(message.messages); setMemories(message.memories) }
+      if (message.type === 'MORI_CHAT_STREAM') {
+        setChatStream((current) => {
+          if (message.phase === 'complete') return current?.requestId === message.requestId ? null : current
+          const base = current?.requestId === message.requestId ? current : { requestId: message.requestId, active: true, text: '' }
+          if (message.phase === 'reset' || message.phase === 'tool_start' || message.phase === 'started') {
+            return { ...base, active: true, text: '', toolName: message.phase === 'tool_start' ? message.toolName : undefined }
+          }
+          if (message.phase === 'delta') return { ...base, active: true, text: `${base.text}${message.text ?? ''}`, toolName: undefined }
+          return base
+        })
+      }
     }
     chrome.runtime.onMessage.addListener(listener)
     return () => chrome.runtime.onMessage.removeListener(listener)
@@ -171,15 +184,18 @@ export function MoriPresence() {
     const requestId = crypto.randomUUID()
     const optimisticId = `pending-${requestId}`
     const optimisticMessage: ConversationMessage = { id: optimisticId, role: 'user', text, createdAt: new Date().toISOString() }
+    setChatStream({ requestId, active: true, text: '' })
     // Runtime/LLM 可能需要数十秒；发送页必须先显示用户原话，不能只留下“正在想”。
     // 后台广播或最终响应随后用已持久化的正式消息列表替换这条临时记录。
     setMessages((current) => [...current.filter((message) => message.id !== optimisticId), optimisticMessage])
     try {
       const result = await sendRuntimeRequest<{ messages: ConversationMessage[] }>({ type: 'MORI_SEND_MESSAGE', text, requestId })
       setMessages(result.messages)
+      setChatStream((current) => current?.requestId === requestId ? null : current)
     } catch (error) {
       // 若后台已完成“用户消息先落库”并发出广播，正式 ID 会保留；只移除本页临时 ID。
       setMessages((current) => current.filter((message) => message.id !== optimisticId))
+      setChatStream((current) => current?.requestId === requestId ? null : current)
       throw error
     }
   }
@@ -234,7 +250,7 @@ export function MoriPresence() {
     {panelMode !== 'closed' && <div ref={panelRef} className="panel-positioner" style={panelStyle ?? { visibility: 'hidden' }}>
       {panelMode === 'mini'
         ? <MiniPlayer playback={playback} onToggle={togglePlayback} onCommand={command} onSeek={seekPlayback} onSaveMemory={saveMemory} onOpenSettings={() => { setSettingsOpen(true); setPanelMode('full') }} onExpand={() => { setSettingsOpen(false); setPanelMode('full') }} />
-        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onCollapse={collapsePanel} onToggle={togglePlayback} onCommand={command} onSeek={seekPlayback} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
+        : <PlayerCard playback={playback} spotifyConnected={spotifyConnected} messages={messages} memories={memories} chatStream={chatStream} settingsOpen={settingsOpen} onOpenSettings={() => setSettingsOpen(true)} onCloseSettings={() => setSettingsOpen(false)} onCollapse={collapsePanel} onToggle={togglePlayback} onCommand={command} onSeek={seekPlayback} onSetPlaybackMode={setPlaybackMode} onSend={send} onSaveMemory={saveMemory} onGetPlaylists={getPlaylists} onHasLibraryCache={hasLibraryCache} onRefreshLibrary={refreshLibrary} onGetPlaylistTracks={getPlaylistTracks} onPlayUri={playUri} onGetMusicPreference={getMusicPreference} onAnalyzeMusicPreference={analyzeMusicPreference} />}
     </div>}
   </div>
 }

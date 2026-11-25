@@ -1,5 +1,6 @@
 import { createMoriGraphAgent } from './mori-graph-runtime.mjs'
 import { createLegacyMoriAgent } from './mori-runtime.mjs'
+import { createUnifiedMoriAgent } from './unified-runtime.mjs'
 
 /**
  * Graph 是默认正式 Runtime；设置 MORI_AGENT_RUNTIME=legacy 可无代码回退。
@@ -9,7 +10,8 @@ export function createMoriAgent(llm, options = {}) {
   const runtime = options.runtime ?? process.env.MORI_AGENT_RUNTIME ?? 'graph'
   if (runtime === 'graph') return createMoriGraphAgent(llm, options)
   if (runtime === 'legacy') return createLegacyMoriAgent(llm, options)
+  if (runtime === 'unified') return createUnifiedMoriAgent(options.agentLlm ?? llm, options)
   throw new Error(`不支持的 MORI_AGENT_RUNTIME：${runtime}`)
 }
 
-export { createLegacyMoriAgent, createMoriGraphAgent }
+export { createLegacyMoriAgent, createMoriGraphAgent, createUnifiedMoriAgent }

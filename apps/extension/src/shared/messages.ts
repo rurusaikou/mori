@@ -35,6 +35,7 @@ export type TabMessage =
   | { type: 'MORI_SET_VISIBILITY'; visible: boolean }
   | { type: 'MORI_PLAYBACK_STATE'; state: PlaybackState }
   | { type: 'MORI_COMPANION_DATA'; messages: ConversationMessage[]; memories: MusicMemory[] }
+  | { type: 'MORI_CHAT_STREAM'; requestId: string; phase: 'started' | 'delta' | 'reset' | 'tool_start' | 'complete'; text?: string; toolName?: string }
 
 export type PlaybackHostRequest = {
   target: 'offscreen'

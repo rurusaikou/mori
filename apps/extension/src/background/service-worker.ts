@@ -158,7 +158,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
           if (!await music.confirmPlayback(track.uri)) throw new Error('Spotify 未确认目标歌曲开始播放')
           logInfo('conversation', 'agent_track_played', { agentRunId: request.agentRunId ?? null, status: 'PLAYING', uri: track.uri, title: track.title, artist: track.artist })
           return track
-        }, broadcastCompanionData, requestId)
+        }, broadcastCompanionData, requestId, (event) => {
+          void broadcastTabMessage({ type: 'MORI_CHAT_STREAM', requestId, ...event })
+        })
         chatQueue = chatQueue.catch(() => undefined).then(execute)
         const messages = await chatQueue
         const exchange = messages.slice(-2)
@@ -169,6 +171,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
           trackUri: music.state.track?.uri ?? null,
         })
         await broadcastCompanionData()
+        await broadcastTabMessage({ type: 'MORI_CHAT_STREAM', requestId, phase: 'complete' })
         return { messages }
       }
       case 'MORI_SAVE_MEMORY': {
@@ -214,6 +217,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
     .then((result) => sendResponse({ ok: true, result }))
     .catch((error) => {
       logError('runtime', 'request_failed', error, { type: message?.type ?? 'unknown' })
+      if (message?.type === 'MORI_SEND_MESSAGE' && message.requestId) {
+        void broadcastTabMessage({ type: 'MORI_CHAT_STREAM', requestId: message.requestId, phase: 'complete' })
+      }
       sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Mori 后台操作失败' })
     })
   return true
