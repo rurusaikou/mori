@@ -97,7 +97,11 @@ export function completeRun(logRun, runId, started, model, tokenUsage, finalResp
   // client action 只代表服务端规划结果。把它写进 completed 日志，使日志不会把
   // Agent Run 完成误读为 Spotify 已经完成播放副作用。
   capabilityStage(logRun, 'completed', { output: { finalResponse, ...(action ? { plannedAction: action } : {}) }, latency: meta.latency, tokenUsage })
-  const conversationContext = context ? { targetTrack: context.targetTrack ?? null, resolution: context.trackResolution ?? null } : undefined
+  const conversationContext = context ? {
+    targetTrack: context.targetTrack ?? null,
+    resolution: context.trackResolution ?? null,
+    conversationState: context.conversationState ?? null,
+  } : undefined
   return { success: true, finalResponse, ...(action ? { action } : {}), ...(conversationContext ? { conversationContext } : {}), trace, meta }
 }
 

@@ -94,7 +94,10 @@ test('reports the actual Understanding prompt version and raw output before vali
   const result = await understandConversation(async () => response(raw), { ...base, worldState: { timeZone: 'UTC' } }, { onRawOutput: (value) => { observed = value } })
   assert.equal(observed.promptVersion, CONVERSATION_UNDERSTANDING_PROMPT_VERSION)
   assert.deepEqual(observed.output, raw)
-  assert.deepEqual(result.understanding, raw)
+  assert.equal(result.understanding.scene, raw.scene)
+  assert.equal(result.understanding.meaning, raw.meaning)
+  assert.equal(result.understanding.communicativeAct, 'OTHER')
+  assert.deepEqual(result.understanding.eventFrame, null)
 })
 
 test('structured understanding is the only scene input to decision', async () => {
@@ -102,6 +105,92 @@ test('structured understanding is the only scene input to decision', async () =>
   await agent(async ({ input }) => { decisionInput = input; return response({ action: 'respond', intent: 'CHAT', conversationMove: 'ANSWER', reason: '回应', response: '刚上完课啊。', toolCall: null }) }, { scene: 'DAILY_CHAT', meaning: '用户分享刚上完日语课' }).execute({ ...base, userMessage: '刚上完日语课' })
   assert.equal(decisionInput.understanding.scene, 'DAILY_CHAT')
   assert.equal(decisionInput.understanding.meaning, '用户分享刚上完日语课')
+})
+
+test('carries grounded entities and an uncertain omitted subject into Decision', async () => {
+  const previousState = {
+    activeTopic: '日语老师赴美与丈夫团聚',
+    entities: [{ id: 'teacher', label: '日语老师', kind: 'PERSON' }, { id: 'teacher-husband', label: '老师的丈夫', kind: 'PERSON' }],
+    facts: [{ subject: '日语老师', relation: '前往', object: '美国与丈夫团聚', evidence: '老师要去美国了，跟老公团聚', confidence: 0.9 }],
+    lastUserMessage: '对啊，老师要去美国了～～～跟老公团聚咯～～',
+    lastAssistantMessage: '老师要去美国和丈夫团聚，真替她开心。',
+    unresolvedContext: null,
+  }
+  let understandingInput
+  let decisionInput
+  const runtime = createRuntimeAgent(async ({ input }) => {
+    decisionInput = input
+    return response({ action: 'respond', response: '看来老师已经开始准备出发了。', toolCall: null })
+  }, {
+    understandingLlm: async ({ input }) => {
+      understandingInput = input
+      return response({
+        scene: 'DAILY_CHAT', meaning: '用户补充日语老师正在收拾行李。', turnRelation: 'CONTINUATION',
+        reference: null, listeningRequest: null, emotion: null, confidence: 0.8, ambiguity: '当前消息省略主语，结合当前话题推测为日语老师。',
+        topic: '日语老师赴美与丈夫团聚', communicativeAct: 'SHARE_UPDATE',
+        eventFrame: { subject: '日语老师', subjectResolution: 'CONTEXTUAL', predicate: '收拾行李', object: null, relation: null, evidence: '紧急收拾行李中', confidence: 0.72 },
+        conversationState: previousState,
+      })
+    },
+  })
+  const result = await runtime.execute({
+    ...base,
+    userMessage: '紧急收拾行李中哈哈哈',
+    conversationState: previousState,
+    conversationHistory: [
+      { role: 'user', content: previousState.lastUserMessage },
+      { role: 'assistant', content: previousState.lastAssistantMessage },
+    ],
+  })
+
+  assert.equal(understandingInput.conversationState.activeTopic, previousState.activeTopic)
+  assert.equal(understandingInput.conversationState.facts[0].relation, previousState.facts[0].relation)
+  assert.equal(decisionInput.understanding.eventFrame.subject, '日语老师')
+  assert.equal(decisionInput.understanding.eventFrame.subjectResolution, 'CONTEXTUAL')
+  assert.match(decisionInput.understanding.ambiguity, /省略主语/)
+  assert.equal(decisionInput.context.conversationState.activeTopic, previousState.activeTopic)
+  assert.equal(result.conversationContext.conversationState.activeTopic, previousState.activeTopic)
+  assert.equal(result.conversationContext.conversationState.lastUserMessage, '紧急收拾行李中哈哈哈')
+})
+
+test('grounds a hesitation as feedback to Mori latest reply', async () => {
+  let understandingInput
+  let decisionInput
+  const runtime = createRuntimeAgent(async ({ input }) => {
+    decisionInput = input
+    return response({ action: 'respond', response: '我刚才可能误会了，你是在说老师收拾行李吗？', toolCall: null })
+  }, {
+    understandingLlm: async ({ input }) => {
+      understandingInput = input
+      return response({
+        scene: 'DAILY_CHAT', meaning: '用户对 Mori 上一条回复表示迟疑或不认同。', turnRelation: 'RESULT_FOLLOWUP',
+        reference: null, listeningRequest: null, emotion: null, confidence: 0.7, ambiguity: '无法确定迟疑的具体原因。',
+        topic: '日语老师赴美与丈夫团聚', communicativeAct: 'FEEDBACK',
+        eventFrame: { subject: '用户', subjectResolution: 'EXPLICIT', predicate: '对上一条回复表示迟疑', object: null, relation: 'RESPONDS_TO', evidence: 'emmmmmm', confidence: 0.7 },
+        conversationState: {
+          activeTopic: '日语老师赴美与丈夫团聚', entities: [], facts: [],
+          lastUserMessage: 'emmmmmm', lastAssistantMessage: '看来是要去见老师啦，这趟旅程一定很特别吧？',
+          unresolvedContext: '用户可能在纠正 Mori 对行李收拾者的理解。',
+        },
+      })
+    },
+  })
+  await runtime.execute({
+    ...base,
+    userMessage: 'emmmmmm',
+    conversationHistory: [
+      { role: 'user', content: '紧急收拾行李中哈哈哈' },
+      { role: 'assistant', content: '看来是要去见老师啦，这趟旅程一定很特别吧？' },
+    ],
+    conversationState: {
+      activeTopic: '日语老师赴美与丈夫团聚', entities: [], facts: [],
+      lastUserMessage: '紧急收拾行李中哈哈哈', lastAssistantMessage: '看来是要去见老师啦，这趟旅程一定很特别吧？', unresolvedContext: null,
+    },
+  })
+
+  assert.equal(understandingInput.conversationState.lastAssistantMessage, '看来是要去见老师啦，这趟旅程一定很特别吧？')
+  assert.equal(decisionInput.understanding.communicativeAct, 'FEEDBACK')
+  assert.equal(decisionInput.understanding.eventFrame.relation, 'RESPONDS_TO')
 })
 
 test('listen request delegates exact search to Extension', async () => {
@@ -172,11 +261,53 @@ test('accepted action proposal without a listening request is rejected', () => {
   }), /必须包含 listeningRequest/)
 })
 
-test('emotion evidence cannot be inherited from conversation history', () => {
-  assert.throws(() => validateConversationUnderstanding({
+test('drops emotion when evidence is not an exact excerpt from the latest message', () => {
+  const result = validateConversationUnderstanding({
     scene: 'DAILY_CHAT', meaning: '用户表示同意', turnRelation: 'CONTINUATION', reference: null,
     listeningRequest: null, emotion: { description: '疲惫、低落', evidence: '明天要上班', confidence: 0.95 }, confidence: 0.9, ambiguity: null,
-  }, '行'), /必须来自 latestMessage/)
+  }, '行')
+  assert.equal(result.emotion, null)
+})
+
+test('invalid multi-span emotion evidence does not fail the conversation understanding stage', async () => {
+  const raw = {
+    scene: 'DAILY_CHAT', meaning: '用户分享工作和日语课经历', turnRelation: 'INDEPENDENT', reference: null,
+    listeningRequest: null,
+    emotion: { description: '疲惫后转为积极', evidence: '今天工作累累的...感觉心情好了很多', confidence: 0.95 },
+    confidence: 0.98, ambiguity: null,
+  }
+  const warnings = []
+  const result = await understandConversation(async () => response(raw), {
+    ...base,
+    userMessage: '今天工作累累的，但是刚刚上日语课，跟老师聊了一下天，感觉心情好了很多。',
+    worldState: { timeZone: 'Asia/Tokyo' },
+  }, { onInvalidEmotionEvidence: (warning) => warnings.push(warning) })
+
+  assert.equal(result.understanding.meaning, raw.meaning)
+  assert.equal(result.understanding.emotion, null)
+  assert.deepEqual(warnings, [{ description: '疲惫后转为积极', evidence: '今天工作累累的...感觉心情好了很多' }])
+})
+
+test('preserves same-topic facts when an update omits them and caps inferred-subject confidence', () => {
+  const previous = {
+    activeTopic: '日语老师赴美与丈夫团聚',
+    entities: [{ id: 'teacher', label: '日语老师', kind: 'PERSON' }],
+    facts: [{ subject: '日语老师', relation: '前往', object: '美国', evidence: '老师要去美国', confidence: 0.9 }],
+    lastUserMessage: '老师要去美国', lastAssistantMessage: '听起来很期待。', unresolvedContext: null,
+  }
+  const result = validateConversationUnderstanding({
+    scene: 'DAILY_CHAT', meaning: '用户更新了行程准备情况', turnRelation: 'CONTINUATION',
+    reference: null, listeningRequest: null, emotion: null, confidence: 0.99, ambiguity: null,
+    topic: previous.activeTopic, communicativeAct: 'SHARE_UPDATE',
+    eventFrame: { subject: '日语老师', subjectResolution: 'CONTEXTUAL', predicate: '收拾行李', object: null, relation: null, evidence: '收拾行李中', confidence: 0.99 },
+    conversationState: { activeTopic: previous.activeTopic, entities: [], facts: [], unresolvedContext: null },
+  }, '紧急收拾行李中哈哈哈', previous)
+
+  assert.deepEqual(result.conversationState.entities, previous.entities)
+  assert.deepEqual(result.conversationState.facts, previous.facts)
+  assert.equal(result.eventFrame.subjectResolution, 'CONTEXTUAL')
+  assert.equal(result.eventFrame.confidence, 0.75)
+  assert.match(result.ambiguity, /语境推断/)
 })
 
 test('playback control delegates pause to the Extension', async () => {
@@ -227,6 +358,24 @@ test('playback fact conflict is repaired in Mori voice before deterministic fall
   assert.equal(result.finalResponse, '听起来今天确实很满。音乐还在继续，你想安静一下时，我可以替你暂停。')
   assert.equal(result.trace.some((step) => step.type === 'RESPONSE_REPAIR'), true)
   assert.equal(result.trace.some((step) => step.type === 'RESPONSE_FACT_FALLBACK'), false)
+})
+
+test('response repair is quality-checked again and cannot repeat the same answer', async () => {
+  let calls = 0
+  const duplicate = '真好呀，老师和丈夫团聚一定很幸福。'
+  const result = await agent(async () => ++calls === 1
+    ? response({ action: 'respond', response: duplicate, toolCall: null })
+    : response({ response: duplicate }),
+  { scene: 'DAILY_CHAT', meaning: '用户继续分享老师的消息' }).execute({
+    ...base,
+    userMessage: '对呀对呀',
+    conversationHistory: [
+      { role: 'assistant', content: '真好呀，老师和丈夫团聚一定很幸福！' },
+      { role: 'assistant', content: '老师能和丈夫团聚，听起来很幸福。' },
+    ],
+  })
+  assert.match(result.finalResponse, /重复回应了/)
+  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_QUALITY_FALLBACK'), true)
 })
 
 test('direct response cannot claim a track switch without a client action', async () => {

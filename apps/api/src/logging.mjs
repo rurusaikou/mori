@@ -50,7 +50,8 @@ export function formatLogLine(entry) {
   const time = formatLocalTime(timestamp)
   const level = entry.level === 'error' ? '错误' : '信息'
   const identity = `${entry.category ?? 'unknown'}/${entry.event ?? 'unknown'}`
-  return `${time} [${level}] [${identity}] ${describe(entry)}`
+  const correlation = [entry.requestId ? `Request ${entry.requestId}` : null, entry.exchangeId ? `Exchange ${entry.exchangeId}` : null, entry.agentRunId ? `Run ${entry.agentRunId}` : null].filter(Boolean).join('，')
+  return `${time} [${level}] [${identity}]${correlation ? ` [${correlation}]` : ''} ${describe(entry)}`
 }
 
 function enqueue(queue, prefix, entry, timestamp) {
@@ -121,6 +122,12 @@ function describe(entry) {
     'memory/listening_graph_refresh_failed': () => `听歌事实已保存，但频繁收听关系刷新失败：${safe(entry.error)}。`,
     'memory/memory_deleted': () => entry.deleted ? '用户记忆已软删除，不再参与检索。' : '未找到需要删除的用户记忆。',
     'conversation/message_exchange': () => `对话完成：用户“${safe(entry.userText)}”，Mori“${safe(entry.moriText)}”。`,
+    'conversation/chat_request_received': () => `扩展收到用户发送请求：“${safe(entry.text)}”。`,
+    'conversation/conversation_user_message_stored': () => `用户消息已先落入本地会话存储（消息 ID：${safe(entry.userMessageId)}）。`,
+    'conversation/agent_http_request_started': () => `开始请求 Mori Agent API：“${safe(entry.text)}”。`,
+    'conversation/agent_http_request_completed': () => `Mori Agent API 已返回（HTTP ${safe(entry.httpStatus)}；动作：${safe(entry.actionType)}；Exchange：${safe(entry.exchangeId)}；Run：${safe(entry.agentRunId)}）。`,
+    'conversation/agent_http_request_failed': () => `Mori Agent API 请求失败：${safe(entry.error)}。`,
+    'conversation/agent_music_action_failed': () => `Agent 音乐动作执行失败（意图：${safe(entry.intent)}；查询：${safe(entry.query)}）：${safe(entry.error)}。`,
     'conversation/agent_playback_control_started': () => `Run ${safe(entry.agentRunId)} 的播放控制已交给客户端执行（${safe(entry.command)}）。`,
     'conversation/agent_playback_control_completed': () => `Run ${safe(entry.agentRunId)} 的播放控制已由客户端确认完成（${safe(entry.command)}；播放状态：${entry.isPlaying ? '播放中' : '已暂停'}；歌曲 URI：${safe(entry.trackUri)}）。`,
     'conversation/agent_playback_control_failed': () => `Run ${safe(entry.agentRunId)} 的播放控制执行失败（${safe(entry.command)}）：${safe(entry.error)}。`,

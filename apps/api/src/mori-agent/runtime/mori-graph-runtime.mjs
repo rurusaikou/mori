@@ -15,10 +15,10 @@ import { completeRun, validateRuntimeOptions } from './runtime-support.mjs'
 export function createMoriGraphAgent(llm, options = {}) {
   const { musicSearchMode } = validateRuntimeOptions(options)
   return {
-    async execute(input) {
+    async execute(input, correlation = {}) {
       const runId = randomUUID()
       const started = Date.now()
-      const logRun = { runId, capability: 'conversation_agent', promptVersion: MORI_AGENT_PROMPT_VERSION, model: 'unresolved', logSource: options.logSource }
+      const logRun = { runId, capability: 'conversation_agent', promptVersion: MORI_AGENT_PROMPT_VERSION, model: 'unresolved', logSource: options.logSource, requestId: correlation.requestId ?? null, exchangeId: correlation.exchangeId ?? null }
       let latest = { input, runId, started, trace: [] }
       try {
         // 每次 Run 独立编译，使节点闭包只持有本轮 logger metadata；业务 State 仍全部显式

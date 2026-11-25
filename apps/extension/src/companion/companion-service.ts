@@ -3,10 +3,11 @@
  * 输入：用户文本、当前 PlaybackState，以及 ExtensionStorage 中的历史数据。
  * 输出：更新后的 ConversationMessage 或 MusicMemory 列表，并写入本地存储。
  */
-import type { ConversationMessage, MusicMemory, MusicMomentInput, MusicTrack, PlaybackState } from '@mori/domain'
+import { EMPTY_CONVERSATION_STATE, type ConversationMessage, type ConversationState, type MusicMemory, type MusicMomentInput, type MusicTrack, type PlaybackState } from '@mori/domain'
 import { extensionStorage } from '../storage/extension-storage'
 import type { PendingAgentActionResult } from '../storage/extension-storage'
 import { syncMoment } from './memory-client'
+import { logError, logInfo } from '../background/logger'
 
 const musicMoods = new Set(['calm', 'happy', 'healing', 'moved', 'nostalgic', 'low'])
 
@@ -14,13 +15,16 @@ const GREETING_ID = 'mori-welcome'
 
 export async function getCompanionData() {
   await flushPendingAgentActionResults()
-  const [storedMessages, memories] = await Promise.all([extensionStorage.getConversation(), extensionStorage.getMemories()])
   const now = new Date()
+  const [storedMessages, memories, storedState] = await Promise.all([extensionStorage.getConversation(), extensionStorage.getMemories(), extensionStorage.getConversationState()])
   const messages = storedMessages.filter((message) => message.text?.trim() && isSameLocalDay(message.createdAt, now))
   // 浏览器只缓存当天会话。历史事实已经由服务端按自然日归档，不再回填聊天窗口。
   // 没有 createdAt 的旧版消息无法可靠判断日期，因此升级后也按历史消息清理。
   if (messages.length !== storedMessages.length) await extensionStorage.setConversation(messages)
-  return { messages: messages.length ? messages : [greeting(now)], memories }
+  const localDate = localDateKey(now)
+  const conversationState = storedState?.localDate === localDate ? storedState.state : EMPTY_CONVERSATION_STATE
+  if (storedState && storedState.localDate !== localDate) await extensionStorage.setConversationState({ localDate, state: EMPTY_CONVERSATION_STATE })
+  return { messages: messages.length ? messages : [greeting(now)], memories, conversationState, localDate }
 }
 
 export async function sendCompanionMessage(
@@ -28,18 +32,20 @@ export async function sendCompanionMessage(
   playback: PlaybackState,
   executeAction?: (request: AgentClientAction) => Promise<MusicTrack | null>,
   onUserStored?: (messages: ConversationMessage[]) => Promise<void>,
+  requestId?: string,
 ) {
   const value = text.trim()
   if (!value) throw new Error('请输入想和 Mori 说的话')
-  const { messages, memories } = await getCompanionData()
+  const { messages, memories, conversationState, localDate } = await getCompanionData()
   const userMessage: ConversationMessage = { id: crypto.randomUUID(), role: 'user', text: value, createdAt: new Date().toISOString(), playbackTrack: playback.track }
   // Persist the user's turn before waiting for a potentially slow local model. This makes the
   // message survive chat-tab unmounts, page navigation and service-worker suspension.
   const messagesWithUser = [...messages, userMessage].slice(-100)
   await extensionStorage.setConversation(messagesWithUser)
   await onUserStored?.(messagesWithUser)
+  logInfo('conversation', 'conversation_user_message_stored', { requestId: requestId ?? null, userMessageId: userMessage.id, text: value })
 
-  const agentResult = await requestAgentReply(value, playback, messages, memories)
+  const agentResult = await requestAgentReply(value, playback, messages, memories, conversationState, requestId)
   let reply = agentResult.reply
   let replyTrack = playback.track
   let actionStatus: 'COMPLETED' | 'FAILED' | null = null
@@ -65,7 +71,7 @@ export async function sendCompanionMessage(
       }
       catch (error) {
         actionStatus = 'FAILED'
-        console.error('Agent playback action failed:', error)
+        logError('conversation', 'agent_music_action_failed', error, { requestId: requestId ?? null, exchangeId: agentResult.exchangeId ?? null, agentRunId: agentResult.action.agentRunId ?? null, intent: agentResult.action.intent, query: agentResult.action.query })
         reply = '我找到了候选歌曲，但这次没能启动播放。请检查 Spotify 设备后再试一次。'
       }
     }
@@ -80,7 +86,7 @@ export async function sendCompanionMessage(
         reply = ({ PAUSE: '已经暂停。', RESUME: '继续播放。', NEXT: '切到下一首。', PREVIOUS: '回到上一首。' })[agentResult.action.command]
       } catch (error) {
         actionStatus = 'FAILED'
-        console.error('Agent playback control failed:', error)
+        logError('conversation', 'agent_playback_control_failed', error, { requestId: requestId ?? null, exchangeId: agentResult.exchangeId ?? null, agentRunId: agentResult.action.agentRunId ?? null, command: agentResult.action.command })
         reply = '这次没能完成播放控制，请检查 Spotify 设备后再试一次。'
       }
     }
@@ -95,6 +101,12 @@ export async function sendCompanionMessage(
   // server-side conversation store exists.
   const next = [...messagesWithUser, moriMessage].slice(-100)
   await extensionStorage.setConversation(next)
+  const nextConversationState: ConversationState = {
+    ...(agentResult.conversationContext?.conversationState ?? conversationState),
+    lastUserMessage: value,
+    lastAssistantMessage: reply,
+  }
+  await extensionStorage.setConversationState({ localDate, state: nextConversationState })
   if (agentResult.action && agentResult.exchangeId && actionStatus) {
     await reportAgentActionResult({
       exchangeId: agentResult.exchangeId,
@@ -127,7 +139,7 @@ export async function saveMusicMemory(playback: PlaybackState, input: MusicMomen
   const next = [memory, ...memories].slice(0, 200)
   await extensionStorage.setMemories(next)
   // 本地写入保证即时 UI；服务端是长期 Memory 事实库。网络失败不应让“记录瞬间”看起来失败。
-  void syncMoment(memory).catch((error) => console.error('Mori Memory moment sync failed:', error))
+  void syncMoment(memory).catch((error) => logError('memory', 'moment_sync_failed', error, { id: memory.id }))
   return next
 }
 
@@ -136,12 +148,19 @@ async function requestAgentReply(
   playback: PlaybackState,
   messages: ConversationMessage[],
   memories: MusicMemory[],
+  conversationState: ConversationState,
+  requestId?: string,
 ) {
   const apiBaseUrl = (await extensionStorage.getApiBaseUrl()).replace(/\/$/, '')
   try {
+    logInfo('conversation', 'agent_http_request_started', {
+      requestId: requestId ?? null, text: userMessage, topic: conversationState.activeTopic,
+      entityCount: conversationState.entities.length, factCount: conversationState.facts.length,
+      unresolvedContext: conversationState.unresolvedContext,
+    })
     const response = await fetch(`${apiBaseUrl}/agent/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Mori-Request-ID': requestId ?? '' },
       body: JSON.stringify({
         userMessage,
         // Only the fields needed for conversation are sent. Spotify identifiers and artwork stay
@@ -164,6 +183,7 @@ async function requestAgentReply(
             discussionTrack: compactTrack(message.discussionTrack),
           })),
         conversationFocus: compactTrack([...messages].reverse().find((message) => message.role === 'mori')?.discussionTrack),
+        conversationState,
         // Moment remains user-created product data, never an Agent action. The Agent receives only
         // short searchable summaries, not the complete stored track object.
         fakeMemory: memories.slice(0, 50).map((memory) => ({
@@ -179,12 +199,13 @@ async function requestAgentReply(
       finalResponse?: string
       error?: string
       action?: AgentClientAction
-      conversationContext?: { targetTrack: MusicTrack | null; resolution: { source: string; resolved: boolean; confidence: number; referenceType: string | null } }
+      conversationContext?: { targetTrack: MusicTrack | null; resolution: { source: string; resolved: boolean; confidence: number; referenceType: string | null }; conversationState?: ConversationState | null }
       exchangeId?: string
       actionResultToken?: string
       meta?: { runId?: string; version?: string }
     }
     if (!response.ok || !result.success || !result.finalResponse?.trim()) throw new Error(result.error || `Agent HTTP ${response.status}`)
+    logInfo('conversation', 'agent_http_request_completed', { requestId: requestId ?? null, exchangeId: result.exchangeId ?? null, agentRunId: result.meta?.runId ?? null, httpStatus: response.status, actionType: result.action?.type ?? 'direct_response' })
     return {
       reply: result.finalResponse.trim(),
       action: result.action ? { ...result.action, agentRunId: result.meta?.runId, promptVersion: result.meta?.version } : undefined,
@@ -193,7 +214,7 @@ async function requestAgentReply(
       actionResultToken: result.actionResultToken,
     }
   } catch (error) {
-    console.error('Mori Agent request failed:', error)
+    logError('conversation', 'agent_http_request_failed', error, { requestId: requestId ?? null })
     // Do not imitate an intelligent answer after an outage: a transparent, track-aware fallback
     // avoids the repetitive canned question that previously confused users.
     const modelDidNotFinish = error instanceof Error && /Structured Output|输出额度|响应未完成/.test(error.message)
@@ -234,7 +255,7 @@ async function sendAgentActionResult(input: PendingAgentActionResult) {
     throw new Error(`Agent action result HTTP ${response.status}`)
   } catch (error) {
     // 本地对话已经保存成功；调用方把回写放入持久待同步队列，连接恢复后重试。
-    console.error('Mori Agent action result sync failed:', error)
+    logError('conversation', 'agent_action_result_sync_failed', error, { requestId: input.exchangeId, exchangeId: input.exchangeId, agentRunId: input.runId })
     return 'retry' as const
   }
 }
@@ -265,4 +286,8 @@ function isSameLocalDay(value: string | undefined, now: Date) {
   const date = new Date(value)
   if (Number.isNaN(date.valueOf())) return false
   return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
+}
+
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }

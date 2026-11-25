@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto'
 import { createAgentState } from '../perception/state.mjs'
 import { DECISION_REPAIR_PROMPT, decisionSystemPrompt, FINAL_RESPONSE_PROMPT, MORI_AGENT_PROMPT_VERSION, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
-import { playbackFactIssue, responseQualityIssue, safePlaybackFallback } from '../expression/response-quality.mjs'
+import { playbackFactIssue, responseQualityIssue, safePlaybackFallback, safeResponseFallback } from '../expression/response-quality.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
@@ -17,11 +17,11 @@ import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, prep
 export function createLegacyMoriAgent(llm, options = {}) {
   const { musicSearchMode } = validateRuntimeOptions(options)
   return {
-    async execute(input) {
+    async execute(input, correlation = {}) {
       const runId = randomUUID()
       const started = Date.now()
       const trace = []
-      const logRun = { runId, capability: 'conversation_agent', promptVersion: MORI_AGENT_PROMPT_VERSION, model: 'unresolved', logSource: options.logSource }
+      const logRun = { runId, capability: 'conversation_agent', promptVersion: MORI_AGENT_PROMPT_VERSION, model: 'unresolved', logSource: options.logSource, requestId: correlation.requestId ?? null, exchangeId: correlation.exchangeId ?? null }
       const push = (type, data) => {
         const step = agentStep(runId, type, data)
         trace.push(step)
@@ -40,6 +40,8 @@ export function createLegacyMoriAgent(llm, options = {}) {
         const [understood, relevantMemory] = await Promise.all([
           understandConversation(options.understandingLlm ?? llm, state, {
             onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
+            onInvalidEmotionEvidence: (data) => capabilityStage(logRun, 'agent_emotion_evidence_dropped', data),
+            onInvalidGrounding: (data) => capabilityStage(logRun, 'agent_grounding_evidence_dropped', data),
           }),
           prepareRelevantMemory(state, options),
         ])
@@ -69,6 +71,8 @@ export function createLegacyMoriAgent(llm, options = {}) {
         // 模型负责在已确定的 Intent 边界内选择“回复或 Tool”；代码随后再次执行副作用边界校验。
         capabilityStage(logRun, 'agent_decision_model_call', {
           scene: conversationUnderstanding.scene, listeningRequest: conversationUnderstanding.listeningRequest,
+          topic: conversationUnderstanding.topic, communicativeAct: conversationUnderstanding.communicativeAct,
+          eventFrame: conversationUnderstanding.eventFrame, conversationState: conversationUnderstanding.conversationState,
           reference: conversationUnderstanding.reference, targetTrack: context.targetTrack,
         })
         const first = await llm({
@@ -129,6 +133,13 @@ export function createLegacyMoriAgent(llm, options = {}) {
             response = validateFinalResponse(repaired.data).response
             capabilityStage(logRun, 'agent_response_repair_validated', { response })
             tokenUsage = mergeRunTokenUsage(understood.tokenUsage, decisionTokenUsage, repaired.tokenUsage)
+            const remainingQualityIssue = responseQualityIssue({ ...decision, response }, state)
+            capabilityStage(logRun, 'agent_response_repair_rechecked', { passed: !remainingQualityIssue, issue: remainingQualityIssue })
+            if (remainingQualityIssue && !playbackFactIssue(response, state)) {
+              const fallback = safeResponseFallback(remainingQualityIssue)
+              push('RESPONSE_QUALITY_FALLBACK', { issue: remainingQualityIssue, rejectedResponse: response, response: fallback })
+              response = fallback
+            }
           }
           const remainingPlaybackIssue = playbackFactIssue(response, state)
           capabilityStage(logRun, 'agent_playback_fact_checked', { passed: !remainingPlaybackIssue, issue: remainingPlaybackIssue, playbackStatus: state.playbackState.status })

@@ -1,10 +1,13 @@
 /** Conversation Understanding 使用结构化 LLM，不包含关键词、正则或 Tool 路由规则。 */
 import { object, text } from '../shared/executor.mjs'
+import { EMPTY_CONVERSATION_STATE, normalizeConversationState } from './conversation-state.mjs'
 
-export const CONVERSATION_UNDERSTANDING_PROMPT_VERSION = 'conversation-understanding-v1.3'
+export const CONVERSATION_UNDERSTANDING_PROMPT_VERSION = 'conversation-understanding-v1.4'
 export const CONVERSATION_SCENES = ['LISTEN_REQUEST', 'DAILY_CHAT', 'SONG_CHAT']
 export const TRACK_REFERENCE_TYPES = ['CURRENT_TRACK', 'PREVIOUS_TRACK', 'CONVERSATION_TRACK', 'NAMED_TRACK', 'RECOMMENDED_TRACK', 'UNKNOWN']
 export const TURN_RELATIONS = ['INDEPENDENT', 'CONTINUATION', 'ACCEPTS_ACTION_PROPOSAL', 'REJECTS_ACTION_PROPOSAL', 'RESULT_FOLLOWUP', 'CORRECTION']
+export const COMMUNICATIVE_ACTS = ['SHARE_UPDATE', 'ASK', 'ANSWER', 'FEEDBACK', 'CORRECTION', 'REQUEST', 'OTHER']
+const SUBJECT_RESOLUTIONS = ['EXPLICIT', 'CONTEXTUAL', 'AMBIGUOUS', 'UNKNOWN']
 export const CONVERSATION_UNDERSTANDING_SCHEMA = {
   type: 'object',
   properties: {
@@ -13,9 +16,22 @@ export const CONVERSATION_UNDERSTANDING_SCHEMA = {
     reference: { anyOf: [{ type: 'null' }, { type: 'object', properties: { type: { type: 'string', enum: TRACK_REFERENCE_TYPES }, value: { anyOf: [{ type: 'null' }, { type: 'string' }] } }, required: ['type', 'value'], additionalProperties: false }] },
     listeningRequest: { anyOf: [{ type: 'null' }, { type: 'object', properties: { type: { type: 'string', enum: ['SEARCH', 'RECOMMEND', 'CONTROL'] }, control: { anyOf: [{ type: 'null' }, { type: 'string', enum: ['PAUSE', 'RESUME', 'NEXT', 'PREVIOUS'] }] }, song: { anyOf: [{ type: 'null' }, { type: 'string' }] }, artist: { anyOf: [{ type: 'null' }, { type: 'string' }] }, preferences: { type: 'array', items: { type: 'string' } }, excludeCurrentTrack: { type: 'boolean' } }, required: ['type', 'control', 'song', 'artist', 'preferences', 'excludeCurrentTrack'], additionalProperties: false }] },
     emotion: { anyOf: [{ type: 'null' }, { type: 'object', properties: { description: { type: 'string' }, evidence: { type: 'string' }, confidence: { type: 'number' } }, required: ['description', 'evidence', 'confidence'], additionalProperties: false }] },
+    topic: { anyOf: [{ type: 'null' }, { type: 'string' }] },
+    communicativeAct: { type: 'string', enum: COMMUNICATIVE_ACTS },
+    eventFrame: { anyOf: [{ type: 'null' }, { type: 'object', properties: {
+      subject: { anyOf: [{ type: 'null' }, { type: 'string' }] }, subjectResolution: { type: 'string', enum: SUBJECT_RESOLUTIONS },
+      predicate: { anyOf: [{ type: 'null' }, { type: 'string' }] }, object: { anyOf: [{ type: 'null' }, { type: 'string' }] },
+      relation: { anyOf: [{ type: 'null' }, { type: 'string' }] }, evidence: { type: 'string' }, confidence: { type: 'number' },
+    }, required: ['subject', 'subjectResolution', 'predicate', 'object', 'relation', 'evidence', 'confidence'], additionalProperties: false }] },
+    conversationState: { type: 'object', properties: {
+      activeTopic: { anyOf: [{ type: 'null' }, { type: 'string' }] },
+      entities: { type: 'array', maxItems: 12, items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, kind: { type: 'string', enum: ['PERSON', 'PLACE', 'OBJECT', 'OTHER'] } }, required: ['id', 'label', 'kind'], additionalProperties: false } },
+      facts: { type: 'array', maxItems: 16, items: { type: 'object', properties: { subject: { type: 'string' }, relation: { type: 'string' }, object: { type: 'string' }, evidence: { type: 'string' }, confidence: { type: 'number' } }, required: ['subject', 'relation', 'object', 'evidence', 'confidence'], additionalProperties: false } },
+      unresolvedContext: { anyOf: [{ type: 'null' }, { type: 'string' }] },
+    }, required: ['activeTopic', 'entities', 'facts', 'unresolvedContext'], additionalProperties: false },
     confidence: { type: 'number' }, ambiguity: { anyOf: [{ type: 'null' }, { type: 'string' }] },
   },
-  required: ['scene', 'meaning', 'turnRelation', 'reference', 'listeningRequest', 'emotion', 'confidence', 'ambiguity'], additionalProperties: false,
+  required: ['scene', 'meaning', 'turnRelation', 'reference', 'listeningRequest', 'emotion', 'topic', 'communicativeAct', 'eventFrame', 'conversationState', 'confidence', 'ambiguity'], additionalProperties: false,
 }
 
 export const CONVERSATION_UNDERSTANDING_PROMPT = `
@@ -25,12 +41,12 @@ export const CONVERSATION_UNDERSTANDING_PROMPT = `
 
 【信息使用原则】
 1. latestMessage 是当前轮用户真正说的话，也是判断本轮意图的唯一主体。
-2. conversationHistory 只用于理解 latestMessage 的指代、省略、承接和背景。
+2. conversationState 是当前会话内已确认的短期话题、人物/事物和事实；conversationHistory 用于解析最新指代、事件承接和反馈对象。
 3. currentState 只用于理解当前客观状态，例如当前正在播放什么歌曲。
-4. 不要把 conversationHistory 中过去的请求、意图或情绪自动继承到当前轮。
+4. 不要把过去的请求或情绪自动继承到当前轮；只在 latestMessage 有承接线索时延续 activeTopic。
 5. 如果过去的请求已经得到响应或执行，除非 latestMessage 明确继续该请求，否则不要把它判断为当前请求。
 6. meaning 必须描述 latestMessage 当前表达的意思，不要总结历史对话。
-7. 先判断 latestMessage 与上一轮操作的关系：新的操作请求、结果追问、确认、质疑、纠正或重新执行。只有“新的操作请求”“明确要求重新执行”或“接受紧邻的尚未执行动作提议”才能生成新的 listeningRequest。
+7. 先判断 latestMessage 与最近一次交流的关系，并识别它回应的是哪一条最近发言；迟疑、否定或含糊反馈优先检查是否针对上一条 Mori 回复。只有明确提出的新操作、重新执行或接受未执行提议才能生成 listeningRequest。
 8. “我想听别的歌”“换一首”“来点别的”是当前消息明确提出的新音乐动作，必须生成 listeningRequest，不能解释成对当前歌曲的评价、追问或喜爱。
 9. “hi / hello / 你好 / 嗯？”等独立短招呼或简短确认仍以 latestMessage 为主体；除非其中有明确指代，不得用历史请求替换它的含义。
 
@@ -75,6 +91,13 @@ scene 描述当前表达的主要对话行为，listeningRequest 描述是否存
 你只识别引用的语义类型，不猜 URI，也不因为解析困难而改成 CURRENT_TRACK。
 只出现歌手名、且用户是在请求该歌手的任意歌曲时，reference 必须为 null，歌手应写入 listeningRequest.artist；歌手名本身不是 NAMED_TRACK。
 
+【通用语境与事件理解】
+- topic 描述当前仍在进行的话题；communicativeAct 标识分享、提问、回答、反馈、纠正、请求或其他交流行为。
+- eventFrame 用 subject、predicate、object 和 relation 显式表达本轮重要事件，不要只把参与者关系埋进 meaning。
+- subjectResolution=EXPLICIT 仅用于本轮明确说出的主体；使用历史或 conversationState 补全省略主体时标记 CONTEXTUAL；存在多个合理主体时标记 AMBIGUOUS 并写入 ambiguity，不得高置信度断言。
+- eventFrame.evidence 必须是 latestMessage 中直接支持本轮事件的连续原文片段；主体来自上下文时，evidence 仍只引用当前消息，主体来源由 subjectResolution 标识。
+- 更新 conversationState：只保留当前话题相关的实体与有依据事实，延续未解决语境；新话题可替换 activeTopic。不得把推断伪装成已确认事实。
+
 【emotion】
 只提取 latestMessage 当前明确表达的用户情绪。
 不要从 conversationHistory 继承过去的情绪。
@@ -83,42 +106,86 @@ emotion 非空时，evidence 必须逐字引用 latestMessage 中直接支持该
 你不回复用户、不选择 Tool、不执行动作，只返回给定 Schema。
 `
 
-export async function understandConversation(llm, state, { onRawOutput } = {}) {
+export async function understandConversation(llm, state, { onRawOutput, onInvalidEmotionEvidence, onInvalidGrounding } = {}) {
   // History 只提供指代和承接证据，截断可防止久远意图压过本轮消息；完整长期事实应通过
   // Memory Tool 按需检索，而不是无限塞入 Conversation Understanding。
   const result = await llm({
     prompt: CONVERSATION_UNDERSTANDING_PROMPT,
-    input: { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), currentState: { worldState: state.worldState, playbackState: state.playbackState, conversationFocus: state.conversationFocus } },
+    input: { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), conversationState: state.conversationState, currentState: { worldState: state.worldState, playbackState: state.playbackState, conversationFocus: state.conversationFocus } },
     schema: CONVERSATION_UNDERSTANDING_SCHEMA,
-    schemaName: 'mori_conversation_understanding_v1_3',
+    schemaName: 'mori_conversation_understanding_v1_4',
   })
   onRawOutput?.({ promptVersion: CONVERSATION_UNDERSTANDING_PROMPT_VERSION, output: result.data, model: result.model, tokenUsage: result.tokenUsage })
-  return { understanding: validateConversationUnderstanding(result.data, state.userMessage), model: result.model, tokenUsage: result.tokenUsage }
+  const understanding = validateConversationUnderstanding(result.data, state.userMessage, state.conversationState)
+  if (result.data.emotion && !understanding.emotion) {
+    onInvalidEmotionEvidence?.({ description: result.data.emotion.description, evidence: result.data.emotion.evidence })
+  }
+  if (result.data.eventFrame && !understanding.eventFrame) onInvalidGrounding?.({ eventFrame: result.data.eventFrame })
+  return { understanding, model: result.model, tokenUsage: result.tokenUsage }
 }
 
-export function validateConversationUnderstanding(value, latestMessage = null) {
+export function validateConversationUnderstanding(value, latestMessage = null, previousConversationState = EMPTY_CONVERSATION_STATE) {
   object(value, 'conversation understanding')
   if (!CONVERSATION_SCENES.includes(value.scene)) throw new Error('conversation understanding scene 无效')
   text(value.meaning, 'conversation understanding meaning')
   if (!TURN_RELATIONS.includes(value.turnRelation)) throw new Error('conversation understanding turnRelation 无效')
   if (!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1) throw new Error('conversation understanding confidence 无效')
   if (value.reference && !TRACK_REFERENCE_TYPES.includes(value.reference.type)) throw new Error('conversation understanding reference.type 无效')
+  const conversationState = normalizeConversationState(value.conversationState, previousConversationState)
+  const eventFrame = normalizeEventFrame(value.eventFrame, latestMessage)
+  const topic = typeof value.topic === 'string' && value.topic.trim() ? value.topic.trim().slice(0, 160) : conversationState.activeTopic
+  const communicativeAct = COMMUNICATIVE_ACTS.includes(value.communicativeAct) ? value.communicativeAct : 'OTHER'
+  let emotion = value.emotion
   if (value.emotion) {
-    const evidence = text(value.emotion.evidence, 'conversation understanding emotion.evidence')
-    if (typeof latestMessage === 'string' && !latestMessage.includes(evidence)) throw new Error('emotion.evidence 必须来自 latestMessage 原文')
+    const evidence = typeof value.emotion.evidence === 'string' ? value.emotion.evidence.trim() : ''
+    if (!evidence || typeof latestMessage === 'string' && !latestMessage.includes(evidence)) emotion = null
   }
   // scene 描述对话行为，listeningRequest 独立描述副作用请求。纠正表达可能以 DAILY_CHAT
   // 为主但仍要求重新选歌；不能让合法的组合语义因为字段互斥而导致整轮失败。
   if (value.scene === 'LISTEN_REQUEST' && !value.listeningRequest) throw new Error('LISTEN_REQUEST 必须包含 listeningRequest')
   if (value.turnRelation === 'ACCEPTS_ACTION_PROPOSAL' && !value.listeningRequest) throw new Error('接受动作提议时必须包含 listeningRequest')
-  return value
+  const ambiguity = value.ambiguity ?? (eventFrame && ['CONTEXTUAL', 'AMBIGUOUS', 'UNKNOWN'].includes(eventFrame.subjectResolution)
+    ? '事件主体依赖语境推断，尚未由用户明确确认。'
+    : null)
+  return {
+    ...value,
+    topic,
+    communicativeAct,
+    eventFrame,
+    conversationState: {
+      ...conversationState,
+      activeTopic: value.conversationState?.activeTopic === null ? null : topic,
+      lastUserMessage: typeof latestMessage === 'string' ? latestMessage : conversationState.lastUserMessage,
+      lastAssistantMessage: previousConversationState?.lastAssistantMessage ?? conversationState.lastAssistantMessage,
+    },
+    emotion,
+    ambiguity,
+  }
 }
 
 export function assembleConversationContext(state, understanding, relevantMemory = { matches: [], query: '', source: 'NONE' }) {
   // 原始消息只帮助 Decision 组织自然回复和承接；音乐副作用仍由 Structured Understanding
   // 与运行时一致性校验约束，不能根据原文绕过 listeningRequest 新建动作。
   const resolved = resolveTrackReference({ reference: understanding.reference, currentTrack: state.currentTrack, previousTrack: state.playbackState.previousTrack, conversationHistory: state.conversationHistory, conversationFocus: state.conversationFocus })
-  return { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), understanding, worldState: state.worldState, playbackState: state.playbackState, targetTrack: resolved.track, trackResolution: resolved.resolution, relevantMemory }
+  return { latestMessage: state.userMessage, conversationHistory: state.conversationHistory.slice(-12), understanding, topic: understanding.topic, communicativeAct: understanding.communicativeAct, eventFrame: understanding.eventFrame, conversationState: understanding.conversationState, worldState: state.worldState, playbackState: state.playbackState, targetTrack: resolved.track, trackResolution: resolved.resolution, relevantMemory }
+}
+
+function normalizeEventFrame(value, latestMessage) {
+  if (!value || typeof value !== 'object') return null
+  const evidence = typeof value.evidence === 'string' ? value.evidence.trim() : ''
+  if (!evidence || typeof latestMessage === 'string' && !latestMessage.includes(evidence)) return null
+  const subjectResolution = SUBJECT_RESOLUTIONS.includes(value.subjectResolution) ? value.subjectResolution : 'UNKNOWN'
+  const rawConfidence = Number.isFinite(value.confidence) ? Math.max(0, Math.min(1, value.confidence)) : 0
+  const confidenceLimit = subjectResolution === 'EXPLICIT' ? 1 : subjectResolution === 'CONTEXTUAL' ? 0.75 : 0.5
+  return {
+    subject: typeof value.subject === 'string' && value.subject.trim() ? value.subject.trim().slice(0, 80) : null,
+    subjectResolution,
+    predicate: typeof value.predicate === 'string' && value.predicate.trim() ? value.predicate.trim().slice(0, 120) : null,
+    object: typeof value.object === 'string' && value.object.trim() ? value.object.trim().slice(0, 120) : null,
+    relation: typeof value.relation === 'string' && value.relation.trim() ? value.relation.trim().slice(0, 80) : null,
+    evidence,
+    confidence: Math.min(rawConfidence, confidenceLimit),
+  }
 }
 
 export function resolveTrackReference({ reference, currentTrack, previousTrack = null, conversationHistory = [], conversationFocus = null }) {

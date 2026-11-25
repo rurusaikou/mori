@@ -4,7 +4,7 @@
  * 输出：类型化存储读取结果，以及写入、删除操作返回的 Promise。
  */
 import { DEFAULT_API_BASE_URL, DEFAULT_PLAYBACK_HOST_URL, STORAGE_KEYS } from '../shared/constants'
-import type { ConversationMessage, MusicMemory, MusicPlaylist, MusicPreferenceProfile, MusicTrack, PlaybackState } from '@mori/domain'
+import type { ConversationMessage, ConversationState, MusicMemory, MusicPlaylist, MusicPreferenceProfile, MusicTrack, PlaybackState } from '@mori/domain'
 
 export type SpotifyToken = { accessToken: string; refreshToken?: string; expiresAt: number }
 export type PresencePosition = { x: number; y: number }
@@ -17,6 +17,7 @@ export type PendingAgentActionResult = {
   currentTrack: MusicTrack | null
   timeZone: string
 }
+export type StoredConversationState = { localDate: string; state: ConversationState }
 export type SpotifyLibraryCache = {
   version: 4
   playlists?: { fetchedAt: number; data: MusicPlaylist[] }
@@ -48,6 +49,8 @@ export const extensionStorage = {
   setPosition: (value: PresencePosition) => chrome.storage.local.set({ [STORAGE_KEYS.position]: value }),
   getConversation: () => localGet<ConversationMessage[]>(STORAGE_KEYS.conversation, []),
   setConversation: (value: ConversationMessage[]) => chrome.storage.local.set({ [STORAGE_KEYS.conversation]: value }),
+  getConversationState: () => localGet<StoredConversationState | null>(STORAGE_KEYS.conversationState, null),
+  setConversationState: (value: StoredConversationState) => chrome.storage.local.set({ [STORAGE_KEYS.conversationState]: value }),
   getPendingAgentActionResults: () => localGet<PendingAgentActionResult[]>(STORAGE_KEYS.pendingAgentActionResults, []),
   setPendingAgentActionResults: (value: PendingAgentActionResult[]) => chrome.storage.local.set({ [STORAGE_KEYS.pendingAgentActionResults]: value }),
   getMemories: () => localGet<MusicMemory[]>(STORAGE_KEYS.memories, []),

@@ -36,6 +36,12 @@ export function safePlaybackFallback(issue) {
     : '音乐还没有切换。你想换一首的话，告诉我你现在想听什么。'
 }
 
+export function safeResponseFallback(issue) {
+  if (issue.includes('高度相似')) return '我刚才重复回应了。你刚提到的内容，我先不替你下结论，继续听你说。'
+  if (issue.includes('推荐理由')) return '这首歌的推荐理由我没有足够依据，刚才不该说得那么确定。'
+  return '我刚才的回复没有贴合你刚说的内容。你愿意告诉我最想聊哪一部分吗？'
+}
+
 function claimsPlaybackPaused(value) {
   if (/(?:没有|没|尚未|还未|还没|不能|无法|不会|并未).{0,10}暂停/u.test(value)) return false
   return /(?:已经|刚刚|刚才)(?:为你|帮你)?暂停(?:了|播放|音乐)?/u.test(value)

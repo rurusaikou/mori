@@ -45,3 +45,14 @@ test('keeps one physical line when user text contains a newline', () => {
   assert.equal(line.includes('\n'), false)
   assert.match(line, /第一行 第二行/)
 })
+
+test('formats correlation ids into conversation log lines', () => {
+  const line = formatLogLine({
+    timestamp: new Date().toISOString(), level: 'info', category: 'conversation', event: 'agent_http_request_completed',
+    requestId: '11111111-1111-4111-8111-111111111111', exchangeId: '22222222-2222-4222-8222-222222222222', agentRunId: '33333333-3333-4333-8333-333333333333',
+    httpStatus: 200, actionType: 'direct_response',
+  })
+  assert.match(line, /Request 11111111-1111-4111-8111-111111111111/)
+  assert.match(line, /Exchange 22222222-2222-4222-8222-222222222222/)
+  assert.match(line, /Run 33333333-3333-4333-8333-333333333333/)
+})

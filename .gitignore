@@ -2,6 +2,7 @@ node_modules/
 .env*
 *.tsbuildinfo
 .DS_Store
+.vscode/
 apps/extension/build/
 apps/extension/dist/
 apps/player-host/dist/

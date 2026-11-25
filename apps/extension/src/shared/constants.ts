@@ -14,6 +14,7 @@ export const STORAGE_KEYS = {
   playbackHostUrl: 'mori.spotify.playback-host-url',
   apiBaseUrl: 'mori.api.base-url',
   conversation: 'mori.conversation.messages',
+  conversationState: 'mori.conversation.state',
   memories: 'mori.memories',
   libraryCache: 'mori.spotify.library-cache',
   musicPreference: 'mori.music-preference',

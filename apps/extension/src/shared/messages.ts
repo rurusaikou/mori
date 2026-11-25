@@ -25,7 +25,7 @@ export type RuntimeRequest =
   | { type: 'MORI_GET_PLAYLIST_TRACKS'; playlistId: string }
   | { type: 'MORI_PLAY_URI'; track: MusicTrack; contextUri?: string; navigationQueue?: MusicTrack[] }
   | { type: 'MORI_GET_COMPANION_DATA' }
-  | { type: 'MORI_SEND_MESSAGE'; text: string }
+  | { type: 'MORI_SEND_MESSAGE'; text: string; requestId?: string }
   | { type: 'MORI_SAVE_MEMORY'; moment: MusicMomentInput }
   | { type: 'MORI_GET_MUSIC_PREFERENCE' }
   | { type: 'MORI_ANALYZE_MUSIC_PREFERENCE' }

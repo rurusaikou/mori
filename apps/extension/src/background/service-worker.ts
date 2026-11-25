@@ -4,7 +4,7 @@
  * 输出：统一 RuntimeResponse、状态持久化操作，以及向标签页广播的业务状态。
  */
 import { getCompanionData, saveMusicMemory, sendCompanionMessage } from '../companion/companion-service'
-import type { MusicTrack } from '@mori/domain'
+import type { ConversationMessage, MusicTrack } from '@mori/domain'
 import { syncListeningTransition } from '../companion/memory-client'
 import type { RuntimeRequest, RuntimeResponse, TabMessage } from '../shared/messages'
 import { broadcastTabMessage } from '../shared/tab-messaging'
@@ -18,6 +18,7 @@ const music = new MusicController()
 const presence = new PresenceController()
 let lastToolbarClickAt = 0
 let pendingListeningSource: 'user_selected' | 'agent_selected' | 'autoplay' | 'unknown' = 'unknown'
+let chatQueue: Promise<ConversationMessage[]> = Promise.resolve([])
 // Content scripts normally share chrome.storage access with extension pages. Restricting both
 // stores makes OAuth tokens, conversations and memories inaccessible from the host-page context.
 const storageSecured = Promise.all([
@@ -48,7 +49,7 @@ chrome.action.onClicked.addListener((tab) => {
   lastToolbarClickAt = now
   void restored
     .then(() => presence.enabled ? closeMoriEverywhere('toolbar') : presence.toggleFromToolbar(tab))
-    .catch((error) => console.error('Failed to toggle Mori presence:', error))
+    .catch((error) => logError('user_event', 'presence_toggle_failed', error))
 })
 
 chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: string }, sender, sendResponse: (response: RuntimeResponse) => void) => {
@@ -79,13 +80,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         // Playback setup may create an offscreen document, initialize DRM and transfer a Spotify
         // device. A content-script message channel is too fragile for that multi-second workflow,
         // so acknowledge the user gesture immediately and publish success/error through MusicState.
-        void music.toggle().catch((error) => console.error('Failed to toggle playback:', error))
+        void music.toggle().catch((error) => logError('playback', 'toggle_failed', error))
         return { accepted: true }
       case 'MORI_PLAYBACK_COMMAND':
         // Native Spotify skips are fast, but Saved Tracks navigation may initialize/transfer the
         // Mori device and start an exact URI. Acknowledge the gesture immediately so controls do
         // not remain disabled while the canonical PlaybackState carries completion or failure.
-        void music.command(message.command).catch((error) => console.error('Failed to change track:', error))
+        void music.command(message.command).catch((error) => logError('playback', 'command_failed', error, { command: message.command }))
         return { accepted: true }
       case 'MORI_SEEK_PLAYBACK':
         if (!Number.isFinite(message.positionMs) || message.positionMs < 0) throw new Error('无效的播放位置')
@@ -106,14 +107,16 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
         // Device/DRM initialization can take several seconds. Acknowledge the click now and
         // publish the eventual playback state or specific error through MusicController.
         pendingListeningSource = 'user_selected'
-        void music.playUri(message.track.uri, message.contextUri, message.track, message.navigationQueue).catch((error) => console.error('Failed to play Spotify URI:', error))
+        void music.playUri(message.track.uri, message.contextUri, message.track, message.navigationQueue).catch((error) => logError('playback', 'uri_play_failed', error, { uri: message.track.uri, title: message.track.title, artist: message.track.artist }))
         return { accepted: true }
       case 'MORI_GET_COMPANION_DATA':
         return getCompanionData()
       case 'MORI_SEND_MESSAGE': {
+        const requestId = typeof message.requestId === 'string' ? message.requestId : crypto.randomUUID()
         // Brain 先判断三类场景；只有返回 music_request 时才在 Action 层访问曲库/Spotify。
         // 普通聊天不再由 Extension 猜测意图，也不会预加载数百首候选。
-        const messages = await sendCompanionMessage(message.text, music.state, async (request) => {
+        logInfo('conversation', 'chat_request_received', { requestId, text: message.text })
+        const execute = async () => sendCompanionMessage(message.text, music.state, async (request) => {
           if (request.type === 'playback_control') {
             logInfo('conversation', 'agent_playback_control_started', { agentRunId: request.agentRunId ?? null, promptVersion: request.promptVersion ?? null, command: request.command })
             try {
@@ -155,9 +158,12 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest & { target?: strin
           if (!await music.confirmPlayback(track.uri)) throw new Error('Spotify 未确认目标歌曲开始播放')
           logInfo('conversation', 'agent_track_played', { agentRunId: request.agentRunId ?? null, status: 'PLAYING', uri: track.uri, title: track.title, artist: track.artist })
           return track
-        }, broadcastCompanionData)
+        }, broadcastCompanionData, requestId)
+        chatQueue = chatQueue.catch(() => undefined).then(execute)
+        const messages = await chatQueue
         const exchange = messages.slice(-2)
         logInfo('conversation', 'message_exchange', {
+          requestId,
           userText: exchange.find((item) => item.role === 'user')?.text ?? message.text,
           moriText: exchange.find((item) => item.role === 'mori')?.text ?? '',
           trackUri: music.state.track?.uri ?? null,
@@ -341,7 +347,7 @@ function logUserEvent(message: RuntimeRequest & { target?: string }) {
       logInfo('user_event', 'track_selected', { uri: message.track.uri, title: message.track.title, artist: message.track.artist, contextUri: message.contextUri ?? null })
       break
     case 'MORI_SEND_MESSAGE':
-      logInfo('user_event', 'chat_submitted', { text: message.text })
+      logInfo('user_event', 'chat_submitted', { requestId: message.requestId ?? null, text: message.text })
       break
   }
 }

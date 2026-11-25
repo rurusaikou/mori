@@ -43,12 +43,20 @@ export function createAgentRoutes({ productAgent, playgroundAgent, memoryReposit
 async function runAgent(request, response, agent, memory = {}) {
   let input
   const exchangeId = randomUUID()
+  const requestId = typeof request.headers['x-mori-request-id'] === 'string' && request.headers['x-mori-request-id'].trim()
+    ? request.headers['x-mori-request-id'].trim()
+    : null
   const createdAt = new Date().toISOString()
   const archive = memory.memoryRepository?.available && memory.memoryUserId
   try {
     input = await readRequestJson(request)
+    const requestLogRun = { runId: 'pending', capability: 'conversation_agent', promptVersion: 'unknown', model: 'unknown', requestId, exchangeId }
+    capabilityStage(requestLogRun, 'agent_route_received', { requestId, exchangeId, userMessage: input?.userMessage, currentTrack: input?.currentTrack ?? null })
     if (archive) await memory.memoryRepository.appendConversationMessage(conversationRecord(input, memory.memoryUserId, exchangeId, 'user', 'pending', createdAt))
-    const result = await agent.execute(input)
+    const result = await agent.execute(input, { requestId, exchangeId })
+    const correlatedLogRun = result.meta?.runId ? {
+      runId: result.meta.runId, capability: 'conversation_agent', promptVersion: result.meta.version ?? 'unknown', model: result.meta.model ?? 'unknown', requestId, exchangeId,
+    } : requestLogRun
     const actionResultToken = result.success && result.action && memory.pendingActionResults ? randomUUID() : null
     if (actionResultToken) {
       memory.pendingActionResults.set(actionResultToken, { exchangeId, runId: result.meta?.runId ?? null, expiresAt: Date.now() + 24 * 60 * 60 * 1000 })
@@ -62,9 +70,7 @@ async function runAgent(request, response, agent, memory = {}) {
       const assistantMessage = result.success
         ? await memory.memoryRepository.appendConversationMessage(conversationRecord({ ...input, userMessage: result.finalResponse }, memory.memoryUserId, exchangeId, 'assistant', result.action ? 'pending' : 'completed', new Date().toISOString()))
         : null
-      const routeLogRun = result.meta?.runId ? {
-        runId: result.meta.runId, capability: 'conversation_agent', promptVersion: result.meta.version ?? 'unknown', model: result.meta.model ?? 'unknown',
-      } : null
+      const routeLogRun = result.meta?.runId ? correlatedLogRun : null
       if (routeLogRun) capabilityStage(routeLogRun, 'agent_conversation_archived', {
         exchangeId, userMessageStatus: result.success ? 'completed' : 'failed',
         assistantMessageStatus: assistantMessage?.status ?? null, awaitsClientActionResult: Boolean(result.success && result.action),
@@ -78,9 +84,15 @@ async function runAgent(request, response, agent, memory = {}) {
         void memory.postTurnMemoryProcessor.process({ input, userMessage: completedUserMessage, assistantMessage, agentRunId: result.meta?.runId }).catch(() => undefined)
       }
     }
+    capabilityStage(correlatedLogRun, result.success ? 'agent_route_completed' : 'agent_route_failed', {
+      requestId, exchangeId, runId: result.meta?.runId ?? null, success: result.success,
+      actionType: result.action?.type ?? 'direct_response', httpStatus: result.success ? 200 : 400,
+      ...(result.error ? { error: result.error } : {}),
+    })
     json(request, response, result.success ? 200 : 400, { ...result, exchangeId, ...(actionResultToken ? { actionResultToken } : {}) })
   } catch (error) {
     if (archive && input) await memory.memoryRepository.appendConversationMessage(conversationRecord(input, memory.memoryUserId, exchangeId, 'user', 'failed', createdAt)).catch(() => undefined)
+    capabilityStage({ runId: 'pending', capability: 'conversation_agent', promptVersion: 'unknown', model: 'unknown', requestId, exchangeId }, 'agent_route_failed', { requestId, exchangeId, success: false, httpStatus: error?.statusCode ?? 400, error: error instanceof Error ? error.message : String(error) })
     json(request, response, error?.statusCode ?? 400, { success: false, error: error instanceof Error ? error.message : 'Invalid request' })
   }
 }

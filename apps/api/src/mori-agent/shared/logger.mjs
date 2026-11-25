@@ -13,7 +13,7 @@ let writeQueue = Promise.resolve()
 
 export function capabilityStage(run, stage, data = {}) {
   const source = run.logSource ?? runtimeLogSource()
-  const entry = { timestamp: new Date().toISOString(), source, runId: run.runId, capability: run.capability, promptVersion: run.promptVersion, model: run.model, stage, ...data }
+  const entry = { timestamp: new Date().toISOString(), source, requestId: run.requestId ?? null, exchangeId: run.exchangeId ?? null, runId: run.runId, capability: run.capability, promptVersion: run.promptVersion, model: run.model, stage, ...data }
   // 内存副本只服务 Lab 当前进程；磁盘文件才用于跨刷新排查。
   debugRuns.push(entry)
   if (debugRuns.length > 500) debugRuns.splice(0, debugRuns.length - 500)
@@ -53,6 +53,8 @@ function describeStage(entry) {
     agent_context_assembly: () => `${identity}：Agent Context 组装完成。${readable(eventData(entry))}。`,
     agent_conversation_understanding: () => `${identity}：LLM Conversation Understanding 完成。${readable(eventData(entry))}。`,
     agent_conversation_understanding_raw: () => `${identity}：Conversation Understanding 原始结构化输出。${readable(eventData(entry))}。`,
+    agent_emotion_evidence_dropped: () => `${identity}：emotion.evidence 不是用户原文中的连续片段，已丢弃可选 emotion 字段并继续本轮。${readable(eventData(entry))}。`,
+    agent_grounding_evidence_dropped: () => `${identity}：eventFrame.evidence 不能在用户最新消息中找到，已丢弃未验证的事件框架；继续使用其余理解结果。${readable(eventData(entry))}。`,
     agent_decision_repair: () => `${identity}：Decision 首次输出不符合 Schema 或动作边界，执行一次受限修复。${readable(eventData(entry))}。`,
     agent_tools_available: () => `${identity}：本轮可用 Tool 注册完成。${readable(eventData(entry))}。`,
     agent_decision_model_call: () => `${identity}：开始调用 Decision Model；记录动作判断所依据的 scene、listeningRequest、reference 与 targetTrack。${readable(eventData(entry))}。`,
@@ -66,6 +68,9 @@ function describeStage(entry) {
       : `${identity}：直接回复质量门发现问题，将执行一次 Response Repair。${readable(eventData(entry))}。`,
     agent_response_repair_raw: () => `${identity}：Response Repair Model 返回原始结构化输出。${readable(eventData(entry))}。`,
     agent_response_repair_validated: () => `${identity}：Response Repair 输出校验通过。${readable(eventData(entry))}。`,
+    agent_response_repair_rechecked: () => entry.passed
+      ? `${identity}：修订回复通过质量门复检。`
+      : `${identity}：修订回复仍未通过质量门，将使用保守兜底。${readable(eventData(entry))}。`,
     agent_playback_fact_checked: () => entry.passed
       ? `${identity}：最终直接回复与真实 Playback State 一致。${readable(eventData(entry))}。`
       : `${identity}：Response Repair 后仍存在未经确认的播放状态声明。${readable(eventData(entry))}。`,
@@ -93,6 +98,9 @@ function describeStage(entry) {
     agent_action_result_received: () => `${identity}：收到 Extension 回写的客户端动作最终结果。${readable(eventData(entry))}。`,
     agent_action_result_archived: () => `${identity}：客户端动作最终文案与确认歌曲已归档。${readable(eventData(entry))}。`,
     agent_error: () => `${identity}：Agent 执行失败。原因：${safe(entry.error)}。`,
+    agent_route_received: () => `${identity}：收到正式聊天 HTTP 请求。Request ${safe(entry.requestId)}，Exchange ${safe(entry.exchangeId)}，用户输入：${safe(entry.userMessage)}。`,
+    agent_route_completed: () => `${identity}：正式聊天 HTTP 响应已生成。Request ${safe(entry.requestId)}，Exchange ${safe(entry.exchangeId)}，Run ${safe(entry.runId)}，动作：${safe(entry.actionType)}，状态码：${safe(entry.httpStatus)}。`,
+    agent_route_failed: () => `${identity}：正式聊天链路失败。Request ${safe(entry.requestId)}，Exchange ${safe(entry.exchangeId)}，状态码：${safe(entry.httpStatus)}，原因：${safe(entry.error)}。`,
   }
   return descriptions[entry.stage]?.() ?? `${identity}：进入阶段 ${entry.stage}。`
 }
@@ -112,6 +120,14 @@ function agentInputSummary(input) {
     playbackState: input.playbackState,
     worldState: input.worldState,
     conversationHistoryCount: Array.isArray(input.conversationHistory) ? input.conversationHistory.length : 0,
+    conversationState: input.conversationState ? {
+      activeTopic: input.conversationState.activeTopic ?? null,
+      entities: input.conversationState.entities ?? [],
+      factCount: Array.isArray(input.conversationState.facts) ? input.conversationState.facts.length : 0,
+      lastUserMessage: input.conversationState.lastUserMessage ?? null,
+      lastAssistantMessage: input.conversationState.lastAssistantMessage ?? null,
+      unresolvedContext: input.conversationState.unresolvedContext ?? null,
+    } : null,
     fakeMemoryCount: Array.isArray(input.fakeMemory) ? input.fakeMemory.length : 0,
   }
 }

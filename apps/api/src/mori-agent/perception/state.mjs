@@ -4,19 +4,21 @@
  * 输出：冻结的 AgentState，供模型决策和三个 Tool 显式使用。
  */
 import { noExtra, object, text } from '../shared/executor.mjs'
+import { EMPTY_CONVERSATION_STATE, normalizeConversationState } from './conversation-state.mjs'
 
 export function createAgentState(input) {
   object(input)
-  noExtra(input, ['userMessage', 'currentTrack', 'playbackState', 'worldState', 'conversationHistory', 'conversationFocus', 'fakeMemory', 'timeZone'], 'Agent input')
+  noExtra(input, ['userMessage', 'currentTrack', 'playbackState', 'worldState', 'conversationHistory', 'conversationFocus', 'conversationState', 'fakeMemory', 'timeZone'], 'Agent input')
   const userMessage = text(input.userMessage, 'userMessage')
   const currentTrack = optionalTrack(input.currentTrack)
   const conversationHistory = Array.isArray(input.conversationHistory) ? input.conversationHistory.map(conversationItem) : []
   const conversationFocus = optionalTrack(input.conversationFocus)
+  const conversationState = normalizeConversationState(input.conversationState, EMPTY_CONVERSATION_STATE)
   const fakeMemory = Array.isArray(input.fakeMemory) ? input.fakeMemory.map(memoryItem) : []
   const timeZone = typeof input.timeZone === 'string' && input.timeZone.trim() ? input.timeZone.trim() : 'UTC'
   const playbackState = normalizePlaybackState(input.playbackState, currentTrack)
   const worldState = normalizeWorldState(input.worldState, timeZone)
-  return Object.freeze({ userMessage, currentTrack: playbackState.currentTrack, playbackState, worldState, conversationHistory, conversationFocus, fakeMemory, timeZone })
+  return Object.freeze({ userMessage, currentTrack: playbackState.currentTrack, playbackState, worldState, conversationHistory, conversationFocus, conversationState, fakeMemory, timeZone })
 }
 
 function normalizePlaybackState(value, legacyTrack) {

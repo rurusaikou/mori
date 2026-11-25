@@ -14,6 +14,26 @@ export type ConversationMessage = {
   track?: MusicTrack | null
 }
 
+export type ConversationEntity = { id: string; label: string; kind: 'PERSON' | 'PLACE' | 'OBJECT' | 'OTHER' }
+export type ConversationFact = { subject: string; relation: string; object: string; evidence: string; confidence: number }
+export type ConversationState = {
+  activeTopic: string | null
+  entities: ConversationEntity[]
+  facts: ConversationFact[]
+  lastUserMessage: string | null
+  lastAssistantMessage: string | null
+  unresolvedContext: string | null
+}
+
+export const EMPTY_CONVERSATION_STATE: ConversationState = {
+  activeTopic: null,
+  entities: [],
+  facts: [],
+  lastUserMessage: null,
+  lastAssistantMessage: null,
+  unresolvedContext: null,
+}
+
 export type MusicMemory = {
   id: string
   createdAt: string
