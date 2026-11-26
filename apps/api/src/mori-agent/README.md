@@ -26,12 +26,13 @@ mori-agent/
 ├── action/                     # 行动：受控 Tool；不直接拥有产品状态
 │   └── tools/
 ├── runtime/                    # 四层编排，不承载任何一层的业务判断
-│   ├── index.mjs               # 默认 Graph / 人工 Legacy 回退
+│   ├── index.mjs               # 默认 Graph / Legacy 回退 / Unified 实验入口
 │   ├── graph-state.mjs         # MoriGraphState
 │   ├── graph-nodes.mjs         # 现有领域函数的 Node Wrapper
 │   ├── mori-graph-runtime.mjs  # LangGraph Edge 与执行
 │   ├── mori-runtime.mjs        # 迁移期 Legacy Runtime
-│   └── runtime-support.mjs     # 两种 Runtime 的共享契约
+│   ├── unified-runtime.mjs     # 原生 Tool Calling + Streaming 实验 Runtime
+│   └── runtime-support.mjs     # 三种 Runtime 的共享领域契约
 ├── shared/                     # LLM、Schema、Logger 等无主体语义基础设施
 ├── lab/                        # Capability 开发调试页，不进入正式产品
 └── playground/                 # Agent 开发调试页，不进入正式产品
@@ -69,7 +70,7 @@ State validation
 
 每轮最多执行一个 Tool。模型不能直接操作 Spotify；Action 返回客户端动作后，Extension 仍需校验 URI、执行播放并以真实 Playback State 确认结果。
 
-正式 `/agent/run` 默认使用 LangGraph Runtime。`MORI_AGENT_RUNTIME=legacy` 只用于迁移期人工回退；禁止失败后自动重跑，以免重复执行播放计划。`npm run test:api` 会把完整 API 测试分别跑在 Legacy 和 Graph 上，并额外比较 Intent、Tool、参数、回复和 Action 契约。
+正式 `/agent/run` 默认使用 LangGraph Runtime。`MORI_AGENT_RUNTIME=legacy` 只用于迁移期人工回退；`MORI_AGENT_RUNTIME=unified` 是显式启用的原生 Tool Calling/Streaming 实验入口。三者不会在单次失败后互相自动重跑，以免重复执行播放计划。`npm run test:api` 会把完整 API 测试分别跑在 Legacy 和 Graph 上，并额外覆盖 Unified 的 Tool 授权与流式契约。
 
 ## 专项文档
 

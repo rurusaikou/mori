@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { Readable } from 'node:stream'
 import test from 'node:test'
 import { createAgentRoutes } from '../../src/routes/agent.mjs'
+import { recentCapabilityLogs } from '../../src/mori-agent/shared/logger.mjs'
 
 test('archives a client action as pending and replaces it with the confirmed final response', async () => {
   const writes = []
@@ -12,7 +13,7 @@ test('archives a client action as pending and replaces it with the confirmed fin
     success: true,
     finalResponse: '正在切换。',
     action: { type: 'playback_control', command: 'NEXT' },
-    meta: { runId: 'run-1', version: 'mori-agent-v1.0' },
+    meta: { runId: 'run-1', version: 'mori-agent-v1.1', model: 'decision-model' },
   }) }
   const route = createAgentRoutes({ productAgent, playgroundAgent: productAgent, memoryRepository: repository, memoryUserId: 'user-1', postTurnMemoryProcessor: { process: async (value) => { processed.push(value) } } })
   const initial = await call(route, '/agent/run', { userMessage: '切歌', currentTrack: { uri: 'spotify:track:a', title: 'A', artist: '歌手 A' }, timeZone: 'Asia/Tokyo' })
@@ -51,6 +52,10 @@ test('archives a client action as pending and replaces it with the confirmed fin
   assert.equal(processed.length, 1)
   assert.equal(processed[0].assistantMessage.content, '切到下一首。')
   assert.equal(processed[0].input.currentTrack.uri, 'spotify:track:b')
+  const actionResultLog = recentCapabilityLogs().findLast((entry) => entry.runId === 'run-1' && entry.stage === 'agent_action_result_received')
+  assert.equal(actionResultLog.promptVersion, 'mori-agent-v1.1')
+  assert.equal(actionResultLog.model, 'decision-model')
+  assert.equal(actionResultLog.exchangeId, initial.body.exchangeId)
 })
 
 test('starts post-turn memory only after a direct final response is archived', async () => {

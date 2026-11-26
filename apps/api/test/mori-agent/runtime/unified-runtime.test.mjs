@@ -199,6 +199,7 @@ test('unified runtime gates playback action and routes the approved action to Ex
   assert.equal(authorizationCalls, 1)
   assert.deepEqual(result.action, { type: 'playback_control', command: 'PAUSE' })
   assert.equal(result.success, true)
+  assert.equal(result.finalResponse, '好，我先试着暂停，等播放器确认一下。')
 })
 
 test('unified runtime authorizes search and returns the existing Extension music action contract', async () => {

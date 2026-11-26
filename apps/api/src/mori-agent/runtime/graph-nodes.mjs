@@ -21,8 +21,8 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
 
   return {
     perception(state) {
-      // 本节点一次完成输入校验、Scene 理解和 Context Assembly；这些仍由原领域函数负责，
-      // Wrapper 只把结果写入显式 State，不在 Graph 层复制语言规则。
+      // 本节点只把不可信 HTTP 输入规范化为只读事实。语义理解和 Context Assembly 留给
+      // understanding 节点，避免事实校验、模型调用与记忆检索混成一个不可观测步骤。
       const agentState = createAgentState(state.input)
       return {
         agentState,

@@ -77,3 +77,21 @@ test('summarizes large agent input instead of logging memory contents', () => {
   assert.doesNotMatch(line, /不应写入日志/)
   assert.doesNotMatch(line, /旧消息正文/)
 })
+
+test('formats context, decision, response and archive diagnostics as explicit stages', () => {
+  const base = { source: 'runtime', timestamp: '2026-11-26T01:00:00.000Z', runId: 'run-flow', requestId: 'request-flow', exchangeId: 'exchange-flow', capability: 'conversation_agent', promptVersion: 'mori-agent-v1.1' }
+  const stages = [
+    ['agent_context_preparation_started', /开始并行准备/],
+    ['agent_relevant_memory_prepared', /Relevant Memory 准备完成/],
+    ['agent_decision_model_call', /开始调用 Decision Model/],
+    ['agent_decision_validated', /Tool 边界校验通过/],
+    ['agent_direct_response_selected', /不进入 Tool Execution/],
+    ['agent_response_quality_checked', /质量门/],
+    ['agent_conversation_archived', /Conversation Store/],
+    ['agent_post_turn_memory_scheduled', /异步调度/],
+  ]
+  for (const [stage, expected] of stages) {
+    const line = formatCapabilityLogLine({ ...base, stage, passed: true })
+    assert.match(line, expected)
+  }
+})

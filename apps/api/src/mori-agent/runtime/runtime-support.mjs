@@ -1,5 +1,5 @@
 /**
- * Legacy Runtime 与 LangGraph Runtime 共用的无状态运行支持函数。
+ * Legacy、LangGraph 与 Unified Runtime 共用的无状态运行支持函数。
  * 这些函数只负责依赖装配和结果规范化，不能包含 Graph 路由或 Conversation 语义判断，
  * 否则两个 Runtime 会因为复制业务规则而逐渐产生行为差异。
  */
@@ -69,6 +69,8 @@ export async function prepareTargetRelevantMemory(state, options, initialMemory,
 }
 
 export function relevantMemoryLogData(memory, focusTrack, phase) {
+  // 日志只保留可解释召回所需的身份、分数和证据数量；正文已经进入受控 Context，
+  // 不应为了排障再复制一份到长期日志中。
   return {
     phase,
     focusTrack: focusTrack ? { uri: focusTrack.uri, title: focusTrack.title, artist: focusTrack.artist } : null,
@@ -130,6 +132,16 @@ export function safeToolResponse(toolResult, modelResponse) {
   // 音乐请求的真实结果要等 Extension 执行后才能确定；服务端不能提前声称找到或播放。
   if (toolResult?.status === 'PENDING' && ['search_music', 'recommend_music'].includes(toolResult?.operation)) {
     return '我先把这个选歌请求交给播放器，等实际找到后再告诉你具体是哪一首。'
+  }
+  // 播放控制同样只是计划。这里使用命令对应的自然过渡语，而不是相信模型对“正在/已经”
+  // 的措辞判断；真正完成文案只允许由 Extension 在 Spotify 状态确认后生成并回写。
+  if (toolResult?.status === 'PENDING' && toolResult?.operation === 'playback_control') {
+    return {
+      PAUSE: '好，我先试着暂停，等播放器确认一下。',
+      RESUME: '好，我先试着继续播放，等播放器确认一下。',
+      NEXT: '好，我先试着切到下一首，等播放器确认一下。',
+      PREVIOUS: '好，我先试着回到上一首，等播放器确认一下。',
+    }[toolResult.command] ?? modelResponse
   }
   return modelResponse
 }

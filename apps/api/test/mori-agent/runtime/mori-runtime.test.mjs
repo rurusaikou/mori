@@ -317,6 +317,7 @@ test('playback control delegates pause to the Extension', async () => {
     ? response({ action: 'tool', intent: 'CONTROL', conversationMove: 'ACKNOWLEDGE', reason: '用户要求暂停', response: null, toolCall: { name: 'playback_control', arguments: { command: 'PAUSE' } } })
     : response({ response: '正在暂停。' }), { scene: 'LISTEN_REQUEST', meaning: '用户要求暂停当前播放', listeningRequest: { type: 'CONTROL', control: 'PAUSE', song: null, artist: null, preferences: [], excludeCurrentTrack: false } }).execute({ ...base, userMessage: '暂停一下', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
   assert.deepEqual(result.action, { type: 'playback_control', command: 'PAUSE' })
+  assert.equal(result.finalResponse, '好，我先试着暂停，等播放器确认一下。')
 })
 
 test('playback control cannot bypass an Understanding CONTROL omission', async () => {
@@ -345,7 +346,7 @@ test('direct response may offer playback control without being rewritten as comp
   const result = await agent(async () => response({ action: 'respond', response: offered, toolCall: null }), { scene: 'DAILY_CHAT', meaning: '用户说今天很忙' })
     .execute({ ...base, userMessage: '一般，忙忙的', currentTrack: current, playbackState: { status: 'playing', currentTrack: current } })
   assert.equal(result.finalResponse, offered)
-  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_FACT_REPAIR'), false)
+  assert.equal(result.trace.some((step) => step.type === 'RESPONSE_FACT_FALLBACK'), false)
 })
 
 test('playback fact conflict is repaired in Mori voice before deterministic fallback', async () => {
@@ -390,6 +391,7 @@ test('playback control delegates next-track switching to the Extension', async (
     ? response({ action: 'tool', intent: 'CONTROL', conversationMove: 'ACKNOWLEDGE', reason: '用户要求切歌', response: null, toolCall: { name: 'playback_control', arguments: { command: 'NEXT' } } })
     : response({ response: '正在切歌。' }), { scene: 'LISTEN_REQUEST', meaning: '用户要求切到下一首', listeningRequest: { type: 'CONTROL', control: 'NEXT', song: null, artist: null, preferences: [], excludeCurrentTrack: true } }).execute({ ...base, userMessage: '切歌' })
   assert.deepEqual(result.action, { type: 'playback_control', command: 'NEXT' })
+  assert.equal(result.finalResponse, '好，我先试着切到下一首，等播放器确认一下。')
 })
 
 test('song chat delegates evidence lookup to Song Understanding', async () => {
@@ -530,6 +532,37 @@ test('repairs a music Tool call when listeningRequest is null', async () => {
   assert.equal(result.action, undefined)
   assert.equal(result.finalResponse, '你是在问我刚才选了哪些歌。')
   assert.equal(result.trace.filter((step) => step.type === 'DECISION_REPAIR').length, 1)
+})
+
+test('repairs search_memory for an ordinary emotion expression instead of entering Tool Execution', async () => {
+  let calls = 0
+  const result = await agent(async () => {
+    calls += 1
+    if (calls === 1) return response({ action: 'tool', intent: 'CHAT', conversationMove: 'ANSWER', reason: '错误地搜索情绪记忆', response: null, toolCall: { name: 'search_memory', arguments: { query: '用户感到迷茫' } } })
+    return response({ action: 'respond', intent: 'CHAT', conversationMove: 'EMPATHIZE', reason: '承接当前表达', response: '不知道往哪走的时候，先不用逼自己马上想明白。我在这儿陪你慢慢理一理。', toolCall: null })
+  }, { scene: 'DAILY_CHAT', meaning: '用户表达自己很迷茫' }).execute({ ...base, userMessage: '我不知道 我很迷茫' })
+  assert.equal(result.success, true)
+  assert.equal(result.finalResponse, '不知道往哪走的时候，先不用逼自己马上想明白。我在这儿陪你慢慢理一理。')
+  assert.equal(result.trace.filter((step) => step.type === 'DECISION_REPAIR').length, 1)
+  assert.equal(result.trace.some((step) => step.type === 'TOOL_CALL'), false)
+})
+
+test('preserves search_memory query for an explicit memory question', async () => {
+  let toolArgs
+  const memoryRepository = {
+    available: true,
+    retrieveRelevant: async () => [], listTasteProfile: async () => [], retrieveAssociations: async () => [],
+    search: async (args) => { toolArgs = args; return [] },
+  }
+  let calls = 0
+  const result = await agent(async () => {
+    calls += 1
+    if (calls === 1) return response({ action: 'tool', intent: 'CHAT', conversationMove: 'ANSWER', reason: '用户明确询问共同记忆', response: null, toolCall: { name: 'search_memory', arguments: { query: '第一次听这首歌' } } })
+    return response({ response: '我暂时没有找到那次记录。' })
+  }, { scene: 'DAILY_CHAT', meaning: '用户询问过去的共同记忆' }, { memoryRepository, memoryUserId: 'u1' }).execute({ ...base, userMessage: '你还记得我第一次听这首歌是什么时候吗？' })
+  assert.equal(result.success, true)
+  assert.equal(toolArgs.query, '第一次听这首歌')
+  assert.equal(result.trace.some((step) => step.type === 'TOOL_CALL'), true)
 })
 
 test('normalizes omitted explanatory Decision fields without failing a safe response', async () => {

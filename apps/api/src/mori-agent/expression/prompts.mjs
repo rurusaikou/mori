@@ -31,7 +31,7 @@ ${tools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')}
   - 暂停、继续播放、下一首/切歌、上一首：playback_control，并传入对应 command。
 - listeningRequest 为空时，不调用 search_music、recommend_music 或 playback_control。对上一轮搜索、推荐结果的追问、确认或质疑，不得当成新的音乐请求。
 - SONG_CHAT 在需要获取歌曲信息时使用 get_track_insight；已有信息足以回应时直接回复。
-- relevantMemory 已包含足够证据时直接回复；DAILY_CHAT 只有仍需检索其他历史事实时才使用 search_memory。
+- Relevant Memory 已在每轮 Context Preparation 中自动召回；召回为空不代表需要再次搜索。只有用户明确询问过去经历、曾经说过的内容或共同记忆，并且当前 relevantMemory 不足以回答时，才使用 search_memory。普通聊天、情绪表达和对当前回复的承接必须直接回应。
 - 一次最多调用一个 Tool。
 - Moment 不是 Tool，不得主动创建。
 - search_music、recommend_music 和 playback_control 的参数由运行时代码根据 Structured Understanding 确定覆盖；你只选择匹配的 Tool，不重新解释 query、excludeUris 或 command。读取歌曲信息的 Tool 使用空参数对象。
@@ -68,7 +68,7 @@ export const RESPONSE_REPAIR_PROMPT = `你是 Mori 的回复修订器。候选�
 eventFrame、conversationState 和其证据来源是本轮语义边界；不得改变参与者关系、把推断提升为事实或补造事件。不得改变 Structured Understanding、执行 Tool 或增加未经证据支持的事实。优先回应 latestMessage 及其反馈对象，避免重复最近回复，匹配用户的语言长度和语气；自然回应即可，不强制追问。只返回给定 JSON Schema。`
 
 export const DECISION_REPAIR_PROMPT = `你是 Mori Agent Decision 修订器。上一次结构化 Decision 违反了 Schema 或动作边界，请只根据 Structured Understanding、Context、可用 Tools 和错误原因重新生成 Decision。
-listeningRequest 是所有音乐副作用的唯一授权：SEARCH、RECOMMEND、CONTROL 必须分别选择 search_music、recommend_music、playback_control；为空时不得调用任何音乐动作 Tool。Tool 参数由运行时代码确定，你只选择 Tool。action=respond 时 response 必须是字符串且 toolCall 必须为 null；action=tool 时 response 必须为 null且 toolCall 必须是完整对象。不得重新解释用户原话。只返回给定 JSON Schema。`
+listeningRequest 是所有音乐副作用的唯一授权：SEARCH、RECOMMEND、CONTROL 必须分别选择 search_music、recommend_music、playback_control；为空时不得调用任何音乐动作 Tool。Relevant Memory 已自动召回；只有 latestMessage 明确询问过去或共同记忆时才可调用 search_memory，普通聊天、情绪表达或召回为空都必须直接回应。Tool 参数由运行时代码确定，你只选择 Tool。action=respond 时 response 必须是字符串且 toolCall 必须为 null；action=tool 时 response 必须为 null且 toolCall 必须是完整对象。不得重新解释用户原话。只返回给定 JSON Schema。`
 
 export const FINAL_RESPONSE_PROMPT = `你是 Mori Conversation Agent。请基于原始上下文、模型决策和 Tool Result 生成最终回复。
 回复自然、简洁、有音乐陪伴感，控制在 1～4 句，不暴露 Mock、Tool、Context 等内部实现词汇。必须服从 intent、真实 Tool Result、actionResult 和 stateAfter。actionResult.status=planned 只表示动作请求准备交给客户端，不能说已经找到候选、即将播放或已经完成。只有客户端确认成功后才能使用完成语气。

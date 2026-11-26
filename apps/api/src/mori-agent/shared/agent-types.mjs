@@ -73,6 +73,8 @@ export function validateDecision(value) {
   object(toolCall.arguments, 'decision.toolCall.arguments')
   const argumentsValue = ['search_music', 'recommend_music'].includes(toolCall.name)
     ? { ...toolCall.arguments, excludeUris: Array.isArray(toolCall.arguments.excludeUris) ? toolCall.arguments.excludeUris : [] }
+    : toolCall.name === 'search_memory'
+      ? { query: text(toolCall.arguments.query, 'decision.toolCall.arguments.query') }
     : toolCall.name === 'playback_control' ? { command: toolCall.arguments.command } : {}
   return { action: 'tool', intent, conversationMove, reason, response: null, toolCall: { ...toolCall, arguments: argumentsValue } }
 }
@@ -89,6 +91,11 @@ export function validateDecisionForUnderstanding(value, understanding, context =
   if (!expectedMusicTool && decision.action === 'tool' && ['search_music', 'recommend_music', 'playback_control'].includes(decision.toolCall.name)) {
     throw new Error('listeningRequest 为空时不能调用音乐动作 Tool')
   }
+  // Relevant Memory 已在每轮 Context Preparation 中自动召回。search_memory 只用于用户明确
+  // 询问过去经历或共同记忆的场景，不能把普通聊天、情绪表达或召回为空升级成额外检索。
+  if (decision.action === 'tool' && decision.toolCall.name === 'search_memory' && !explicitMemoryLookup(context.latestMessage)) {
+    throw new Error('当前消息没有明确询问历史或记忆，不能调用 search_memory')
+  }
   if (expectedMusicTool) {
     // Decision 只选择动作，不拥有重新解释歌曲条件或控制命令的权限。Tool 参数始终由
     // Structured Understanding 与 Playback State 确定生成，避免“轻快”被改成“伤感”、
@@ -96,6 +103,11 @@ export function validateDecisionForUnderstanding(value, understanding, context =
     return { ...decision, toolCall: { ...decision.toolCall, arguments: musicToolArguments(understanding.listeningRequest, context) } }
   }
   return decision
+}
+
+function explicitMemoryLookup(message) {
+  if (typeof message !== 'string') return false
+  return /(还记得|记不记得|你记得|回忆|以前|之前|上次|曾经|过去|那次|第一次|我们聊过|我说过|我提过|你知道我|什么时候.*(?:听|说|聊|提)|哪一次)/u.test(message)
 }
 
 export function fallbackDecisionForUnderstanding(value, understanding, context = {}) {

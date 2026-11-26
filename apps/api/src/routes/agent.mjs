@@ -79,9 +79,19 @@ async function runAgent(request, response, agent, memory = {}, { stream = false 
     const correlatedLogRun = result.meta?.runId ? {
       runId: result.meta.runId, capability: 'conversation_agent', promptVersion: result.meta.version ?? 'unknown', model: result.meta.model ?? 'unknown', requestId, exchangeId,
     } : requestLogRun
+    // 未回写的客户端动作会自然过期。每次签发新 Token 前顺手清理，避免只有客户端主动
+    // 调用 action-result 时才回收，从而让长期运行的 API 进程积累失效记录。
+    if (result.success && result.action && memory.pendingActionResults) pruneExpiredActionResults(memory.pendingActionResults)
     const actionResultToken = result.success && result.action && memory.pendingActionResults ? randomUUID() : null
     if (actionResultToken) {
-      memory.pendingActionResults.set(actionResultToken, { exchangeId, runId: result.meta?.runId ?? null, expiresAt: Date.now() + 24 * 60 * 60 * 1000 })
+      memory.pendingActionResults.set(actionResultToken, {
+        exchangeId,
+        runId: result.meta?.runId ?? null,
+        promptVersion: result.meta?.version ?? 'unknown',
+        model: result.meta?.model ?? 'unknown',
+        requestId,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+      })
     }
     if (archive) {
       // pending 先保证用户输入可恢复；同一 exchange/role 使用 upsert 收敛为 completed/failed，
@@ -142,7 +152,16 @@ async function storeActionResult(request, response, memory) {
       json(request, response, 400, { success: false, error: 'Invalid action result' }); return
     }
     if (memory.memoryRepository?.available && memory.memoryUserId) {
-      const routeLogRun = pending.runId ? { runId: pending.runId, capability: 'conversation_agent', promptVersion: 'mori-agent-v1.0', model: 'client' } : null
+      // 回写属于原 Agent Run 的后半段，必须沿用签发动作时的版本与关联 ID；硬编码版本会
+      // 让一条链路看起来跨了 Prompt，干扰问题归因和版本效果统计。
+      const routeLogRun = pending.runId ? {
+        runId: pending.runId,
+        capability: 'conversation_agent',
+        promptVersion: pending.promptVersion,
+        model: pending.model,
+        requestId: pending.requestId,
+        exchangeId: pending.exchangeId,
+      } : null
       if (routeLogRun) capabilityStage(routeLogRun, 'agent_action_result_received', { exchangeId: input.exchangeId, status: input.status, currentTrack: input.currentTrack ?? null })
       const assistantMessage = await memory.memoryRepository.appendConversationMessage(conversationRecord({
         userMessage: input.finalResponse.trim(),

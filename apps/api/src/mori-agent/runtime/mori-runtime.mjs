@@ -198,6 +198,3 @@ export function createLegacyMoriAgent(llm, options = {}) {
     },
   }
 }
-
-// 兼容旧 import；正式 composition root 通过 runtime/index.mjs 选择 Graph 或 Legacy。
-export const createMoriAgent = createLegacyMoriAgent
