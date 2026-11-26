@@ -94,11 +94,23 @@ export function relevantMemoryLogData(memory, focusTrack, phase) {
   }
 }
 
+export function modelConversationContext(context, historyLimit = 4) {
+  // Understanding 已经读取最近 12 条历史并把稳定承接压进 conversationState。后续模型只需
+  // 最近几轮原文来保持语气和反馈对象；再次发送完整历史及 context.understanding 会重复
+  // 消耗本地模型 Prompt 计算，却不会增加新的事实来源。
+  const { understanding: _understanding, conversationHistory = [], ...facts } = context
+  return { ...facts, conversationHistory: conversationHistory.slice(-historyLimit) }
+}
+
 export function completeRun(logRun, runId, started, model, tokenUsage, finalResponse, trace, action, context = null) {
   const meta = { runId, version: MORI_AGENT_PROMPT_VERSION, model, latency: Date.now() - started, tokenUsage }
   // client action 只代表服务端规划结果。把它写进 completed 日志，使日志不会把
   // Agent Run 完成误读为 Spotify 已经完成播放副作用。
-  capabilityStage(logRun, 'completed', { output: { finalResponse, ...(action ? { plannedAction: action } : {}) }, latency: meta.latency, tokenUsage })
+  capabilityStage(logRun, 'completed', {
+    output: action ? { plannedResponse: finalResponse, plannedAction: action } : { finalResponse },
+    latency: meta.latency,
+    tokenUsage,
+  })
   const conversationContext = context ? {
     targetTrack: context.targetTrack ?? null,
     resolution: context.trackResolution ?? null,

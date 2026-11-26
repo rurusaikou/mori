@@ -13,6 +13,7 @@ import { MusicController } from './music-controller'
 import { analyzeMusicPreference, getMusicPreferenceState } from './music-preference-service'
 import { PresenceController } from './presence-controller'
 import { logError, logInfo } from './logger'
+import { exactSearchMatches, rankTextMatches } from './music-search-ranking.mjs'
 
 const music = new MusicController()
 const presence = new PresenceController()
@@ -279,7 +280,7 @@ async function findMusicCandidates(userText: string, intent: 'SEARCH' | 'RECOMME
   // 精确搜索使用完整可搜索曲库，而不是直接读取 cache.tracks。后者只是 UI 按需缓存，
   // 在用户没有逐个打开歌单时并不完整。
   const library = await music.getSearchableLibraryTracks()
-  const exactLibraryMatches = rankTextMatches(library, query).slice(0, 30)
+  const exactLibraryMatches = exactSearchMatches(library, query).slice(0, 30)
   if (exactLibraryMatches.length) {
     logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.length, libraryMatches: exactLibraryMatches.length, spotifyFallback: false, spotifyMatches: 0 })
     return exactLibraryMatches
@@ -290,8 +291,9 @@ async function findMusicCandidates(userText: string, intent: 'SEARCH' | 'RECOMME
   let spotifyMatches: MusicTrack[] = []
   try { spotifyMatches = await music.searchTracks(query, 10) }
   catch (error) { logError('conversation', 'spotify_search_failed', error, { query }) }
-  logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.length, libraryMatches: 0, spotifyFallback: true, spotifyMatches: spotifyMatches.length })
-  return spotifyMatches
+  const exactSpotifyMatches = exactSearchMatches(spotifyMatches, query).slice(0, 30)
+  logInfo('conversation', 'music_search_catalog_ready', { query, libraryTracks: library.length, libraryMatches: 0, spotifyFallback: true, spotifyMatches: spotifyMatches.length, exactMatches: exactSpotifyMatches.length })
+  return exactSpotifyMatches
 }
 
 function musicSearchQuery(text: string) {
@@ -304,27 +306,6 @@ function musicSearchQuery(text: string) {
     .replace(/\s+/gu, ' ')
     .trim()
   return stripped || text.trim()
-}
-
-function rankTextMatches(tracks: MusicTrack[], query: string) {
-  const normalized = normalizeMusicSearchText(query)
-  const terms = normalized.split(/[\s·、，,]+/u).filter((term) => term.length > 1)
-  return tracks
-    .map((track) => {
-      const title = normalizeMusicSearchText(track.title); const artist = normalizeMusicSearchText(track.artist)
-      const score = (title && normalized.includes(title) ? 12 : 0) + (artist && normalized.includes(artist) ? 10 : 0)
-        + terms.reduce((sum, term) => sum + (title.includes(term) ? 6 : 0) + (artist.includes(term) ? 5 : 0), 0)
-      return { track, score }
-    })
-    .filter((item) => item.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .map((item) => item.track)
-}
-
-function normalizeMusicSearchText(value: string) {
-  // Spotify 与用户曲库可能分别返回简体、繁体艺名。这里只折叠已知会影响精确搜索
-  // 的字形，不做大规模语言转换，避免错误改写真实歌名。
-  return value.normalize('NFKC').toLocaleLowerCase().replaceAll('瑩', '莹')
 }
 
 function logUserEvent(message: RuntimeRequest & { target?: string }) {

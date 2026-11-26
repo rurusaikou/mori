@@ -143,13 +143,13 @@ test('unified runtime clears provisional text before tool observation and stream
   assert.equal(events.at(-1).text, '记得你刚上完日语课。')
 })
 
-test('unified runtime refuses a playback call without structured action authorization', async () => {
+test('unified runtime refuses an ambiguous playback call without semantic action authorization', async () => {
   const requests = []
   const runtime = createMoriAgent(async (value) => {
     requests.push(value)
     if (requests.length === 1) return {
       content: '', model: 'unified-test', tokenUsage: null,
-      toolCalls: [{ id: 'unsafe-call', name: 'playback_control', arguments: { command: 'PAUSE', authorizationQuote: '暂停一下' } }],
+      toolCalls: [{ id: 'unsafe-call', name: 'playback_control', arguments: { command: 'PAUSE', authorizationQuote: '安静一点' } }],
     }
     return { content: '这轮我没有执行播放操作。', toolCalls: [], model: 'unified-test', tokenUsage: null }
   }, {
@@ -161,7 +161,7 @@ test('unified runtime refuses a playback call without structured action authoriz
       confidence: 0.9, ambiguity: null,
     }, model: 'auth-test', tokenUsage: null }),
   })
-  const result = await runtime.execute({ ...base, userMessage: '暂停一下', conversationHistory: [] })
+  const result = await runtime.execute({ ...base, userMessage: '安静一点', conversationHistory: [] })
 
   assert.equal(requests[0].tools.some((tool) => tool.name === 'playback_control'), true)
   assert.match(requests[1].messages.at(-1).content, /listeningRequest 为空时不能调用音乐动作 Tool/)
@@ -196,7 +196,7 @@ test('unified runtime gates playback action and routes the approved action to Ex
     playbackState: { status: 'playing', currentTrack: base.currentTrack, previousTrack: null },
   })
 
-  assert.equal(authorizationCalls, 1)
+  assert.equal(authorizationCalls, 0)
   assert.deepEqual(result.action, { type: 'playback_control', command: 'PAUSE' })
   assert.equal(result.success, true)
   assert.equal(result.finalResponse, '好，我先试着暂停，等播放器确认一下。')
@@ -224,6 +224,85 @@ test('unified runtime authorizes search and returns the existing Extension music
 
   assert.deepEqual(result.action, { type: 'music_request', intent: 'SEARCH', query: '言不由衷', excludeUris: [] })
   assert.equal(result.finalResponse, '我先把这个选歌请求交给播放器，等实际找到后再告诉你具体是哪一首。')
+})
+
+test('P0 pending client action ends after one conversation-model call without a final-response model call', async () => {
+  let agentCalls = 0
+  const runtime = createMoriAgent(async () => {
+    agentCalls += 1
+    return {
+      content: '', model: 'unified-test', tokenUsage: { total_tokens: 10 },
+      toolCalls: [{ id: 'pause-call', name: 'playback_control', arguments: { command: 'PAUSE', authorizationQuote: '暂停一下' } }],
+    }
+  }, {
+    runtime: 'unified', persona: 'Mori Persona', musicSearchMode: 'library', logSource: 'test',
+    actionAuthorizationLlm: async () => ({ data: {
+      scene: 'LISTEN_REQUEST', meaning: '用户请求暂停', turnRelation: 'INDEPENDENT', reference: null,
+      listeningRequest: { type: 'CONTROL', control: 'PAUSE', song: null, artist: null, preferences: [], excludeCurrentTrack: false },
+      emotion: null, topic: null, communicativeAct: 'REQUEST', eventFrame: null,
+      conversationState: { activeTopic: null, entities: [], facts: [], unresolvedContext: null }, confidence: 1, ambiguity: null,
+    }, model: 'auth-test', tokenUsage: { total_tokens: 5 } }),
+  })
+  const result = await runtime.execute({ ...base, userMessage: '暂停一下', conversationHistory: [] })
+
+  assert.equal(agentCalls, 1)
+  assert.deepEqual(result.action, { type: 'playback_control', command: 'PAUSE' })
+  assert.equal(result.finalResponse, '好，我先试着暂停，等播放器确认一下。')
+})
+
+test('P1 pending client action streams a deterministic plan without provisional model prose', async () => {
+  const agentLlm = async () => { throw new Error('stream path expected') }
+  agentLlm.stream = async (_request, onEvent) => ({
+    content: '', model: 'stream-model', tokenUsage: null,
+    toolCalls: [{ id: 'next-call', name: 'playback_control', arguments: { command: 'NEXT', authorizationQuote: '切下一首' } }],
+  })
+  const runtime = createMoriAgent(agentLlm, {
+    runtime: 'unified', persona: 'Mori Persona', musicSearchMode: 'library', logSource: 'test',
+    actionAuthorizationLlm: async () => ({ data: {
+      scene: 'LISTEN_REQUEST', meaning: '用户请求下一首', turnRelation: 'INDEPENDENT', reference: null,
+      listeningRequest: { type: 'CONTROL', control: 'NEXT', song: null, artist: null, preferences: [], excludeCurrentTrack: false },
+      emotion: null, topic: null, communicativeAct: 'REQUEST', eventFrame: null,
+      conversationState: { activeTopic: null, entities: [], facts: [], unresolvedContext: null }, confidence: 1, ambiguity: null,
+    }, model: 'auth-test', tokenUsage: null }),
+  })
+  const events = []
+  await runtime.execute({ ...base, userMessage: '切下一首', conversationHistory: [] }, { onStreamEvent: (event) => events.push(event) })
+
+  assert.deepEqual(events.map((event) => event.type), ['reset', 'tool_start', 'delta'])
+  assert.match(events.at(-1).text, /切到下一首/)
+})
+
+test('P1 music proposal is persisted as explicit non-executed state', async () => {
+  let calls = 0
+  const runtime = createMoriAgent(async () => {
+    calls += 1
+    return {
+      content: '', model: 'unified-test', tokenUsage: null,
+      toolCalls: [{ id: 'proposal-call', name: 'propose_music', arguments: { query: '轻快', response: '要不要听点轻快的？' } }],
+    }
+  }, { runtime: 'unified', persona: 'Mori Persona', logSource: 'test' })
+  const result = await runtime.execute({ ...base, userMessage: '明天要上班，心情一般', conversationHistory: [] })
+
+  assert.equal(calls, 1)
+  assert.equal(result.action, undefined)
+  assert.equal(result.finalResponse, '要不要听点轻快的？')
+  assert.deepEqual(result.conversationContext.conversationState.pendingProposal, {
+    type: 'RECOMMEND', query: '轻快', status: 'AWAITING_CONFIRMATION',
+  })
+})
+
+test('P1 a completed music action clears the pending proposal', async () => {
+  const runtime = createMoriAgent(async () => ({
+    content: '', model: 'unified-test', tokenUsage: null,
+    toolCalls: [{ id: 'recommend-call', name: 'recommend_music', arguments: { query: '轻快', authorizationQuote: '想听轻快的', excludeCurrentTrack: false } }],
+  }), { runtime: 'unified', persona: 'Mori Persona', musicSearchMode: 'library', logSource: 'test' })
+  const result = await runtime.execute({
+    ...base, userMessage: '想听轻快的', conversationHistory: [],
+    conversationState: { activeTopic: '放松', entities: [], facts: [], lastUserMessage: null, lastAssistantMessage: null, unresolvedContext: null, pendingProposal: { type: 'RECOMMEND', query: '轻快', status: 'AWAITING_CONFIRMATION' } },
+  })
+
+  assert.equal(result.action.intent, 'RECOMMEND')
+  assert.equal(result.conversationContext.conversationState.pendingProposal, null)
 })
 
 test('unified runtime rejects all calls when the model returns multiple tools', async () => {

@@ -29,6 +29,7 @@ function buildRuntimeContext(state) {
   lines.push(`上一首：${describeTrack(state.playbackState.previousTrack)}`)
   lines.push(`播放能力：${state.playbackState.availability ?? 'ready'}`)
   if (state.conversationFocus) lines.push(`最近讨论的歌曲：${describeTrack(state.conversationFocus)}`)
+  if (state.conversationState?.pendingProposal) lines.push(`待用户确认的音乐建议：${state.conversationState.pendingProposal.type} / ${state.conversationState.pendingProposal.query}`)
   return lines.join('\n')
 }
 

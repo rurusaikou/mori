@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createLegacyMoriAgent, createMoriGraphAgent } from '../../../src/mori-agent/runtime/index.mjs'
+import { createLegacyMoriAgent, createMoriAgent, createMoriGraphAgent } from '../../../src/mori-agent/runtime/index.mjs'
 
 const base = {
   userMessage: '你好',
@@ -46,6 +46,27 @@ test('Legacy and Graph preserve the direct-response contract', async () => {
     toolCall: null,
   }))
   assert.deepEqual(contract(graph), contract(legacy))
+})
+
+test('Unified is the default runtime while Graph remains an explicit rollback', async () => {
+  const configuredRuntime = process.env.MORI_AGENT_RUNTIME
+  delete process.env.MORI_AGENT_RUNTIME
+  let defaultRequest
+  let result
+  try {
+    const defaultAgent = createMoriAgent(async (request) => {
+      defaultRequest = request
+      return { content: '你好，我在。', toolCalls: [], model: 'default-unified', tokenUsage: null }
+    }, { persona: 'Mori Persona', logSource: 'test' })
+    result = await defaultAgent.execute(base)
+  } finally {
+    if (configuredRuntime === undefined) delete process.env.MORI_AGENT_RUNTIME
+    else process.env.MORI_AGENT_RUNTIME = configuredRuntime
+  }
+
+  assert.equal(result.finalResponse, '你好，我在。')
+  assert.ok(Array.isArray(defaultRequest.messages))
+  assert.ok(Array.isArray(defaultRequest.tools))
 })
 
 test('Legacy and Graph preserve tool arguments, response, and playback action', async () => {

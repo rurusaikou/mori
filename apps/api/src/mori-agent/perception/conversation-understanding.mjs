@@ -45,10 +45,11 @@ export const CONVERSATION_UNDERSTANDING_PROMPT = `
 3. currentState 只用于理解当前客观状态，例如当前正在播放什么歌曲。
 4. 不要把过去的请求或情绪自动继承到当前轮；只在 latestMessage 有承接线索时延续 activeTopic。
 5. 如果过去的请求已经得到响应或执行，除非 latestMessage 明确继续该请求，否则不要把它判断为当前请求。
-6. meaning 必须描述 latestMessage 当前表达的意思，不要总结历史对话。
-7. 先判断 latestMessage 与最近一次交流的关系，并识别它回应的是哪一条最近发言；迟疑、否定或含糊反馈优先检查是否针对上一条 Mori 回复。只有明确提出的新操作、重新执行或接受未执行提议才能生成 listeningRequest。
+6. meaning 必须用一句简短话描述 latestMessage 当前表达的意思，不要总结历史对话或重复输出 conversationState。
+7. 先判断 latestMessage 与最近一次交流的关系，并识别它回应的是哪一条最近发言；迟疑、否定或含糊反馈优先检查是否针对上一条 Mori 回复。只有明确提出的新操作、重新执行或接受未执行提议才能生成 listeningRequest。“啊？”“嗯？”等惊讶或质疑本身不是再次执行授权。
 8. “我想听别的歌”“换一首”“来点别的”是当前消息明确提出的新音乐动作，必须生成 listeningRequest，不能解释成对当前歌曲的评价、追问或喜爱。
 9. “hi / hello / 你好 / 嗯？”等独立短招呼或简短确认仍以 latestMessage 为主体；除非其中有明确指代，不得用历史请求替换它的含义。
+10. conversationState.pendingProposal 是 Mori 紧邻上轮正式提出且尚未执行的音乐建议。latestMessage 明确接受它时，才生成对应 listeningRequest 并标记 ACCEPTS_ACTION_PROPOSAL；质疑、惊讶或转移话题不是接受。
 
 【turnRelation】
 - INDEPENDENT：当前消息与上一轮没有直接承接关系。
@@ -96,7 +97,7 @@ scene 描述当前表达的主要对话行为，listeningRequest 描述是否存
 - eventFrame 用 subject、predicate、object 和 relation 显式表达本轮重要事件，不要只把参与者关系埋进 meaning。
 - subjectResolution=EXPLICIT 仅用于本轮明确说出的主体；使用历史或 conversationState 补全省略主体时标记 CONTEXTUAL；存在多个合理主体时标记 AMBIGUOUS 并写入 ambiguity，不得高置信度断言。
 - eventFrame.evidence 必须是 latestMessage 中直接支持本轮事件的连续原文片段；主体来自上下文时，evidence 仍只引用当前消息，主体来源由 subjectResolution 标识。
-- 更新 conversationState：只保留当前话题相关的实体与有依据事实，延续未解决语境；新话题可替换 activeTopic。不得把推断伪装成已确认事实。
+- conversationState 输出本轮增量：同一话题中，entities 和 facts 只放本轮新增或修正的内容，未变化内容返回空数组，运行时代码会与已有状态合并；新话题可替换 activeTopic。不得重复抄写历史事实，也不得把推断伪装成已确认事实。
 
 【emotion】
 只提取 latestMessage 当前明确表达的用户情绪。
@@ -106,7 +107,7 @@ emotion 非空时，evidence 必须逐字引用 latestMessage 中直接支持该
 你不回复用户、不选择 Tool、不执行动作，只返回给定 Schema。
 `
 
-export async function understandConversation(llm, state, { onRawOutput, onInvalidEmotionEvidence, onInvalidGrounding } = {}) {
+export async function understandConversation(llm, state, { onRawOutput, onInvalidEmotionEvidence, onInvalidGrounding, onInvalidActionGrounding } = {}) {
   // History 只提供指代和承接证据，截断可防止久远意图压过本轮消息；完整长期事实应通过
   // Memory Tool 按需检索，而不是无限塞入 Conversation Understanding。
   const result = await llm({
@@ -121,6 +122,7 @@ export async function understandConversation(llm, state, { onRawOutput, onInvali
     onInvalidEmotionEvidence?.({ description: result.data.emotion.description, evidence: result.data.emotion.evidence })
   }
   if (result.data.eventFrame && !understanding.eventFrame) onInvalidGrounding?.({ eventFrame: result.data.eventFrame })
+  if (result.data.listeningRequest && !understanding.listeningRequest) onInvalidActionGrounding?.({ listeningRequest: result.data.listeningRequest, latestMessage: state.userMessage })
   return { understanding, model: result.model, tokenUsage: result.tokenUsage }
 }
 
@@ -144,11 +146,20 @@ export function validateConversationUnderstanding(value, latestMessage = null, p
   // 为主但仍要求重新选歌；不能让合法的组合语义因为字段互斥而导致整轮失败。
   if (value.scene === 'LISTEN_REQUEST' && !value.listeningRequest) throw new Error('LISTEN_REQUEST 必须包含 listeningRequest')
   if (value.turnRelation === 'ACCEPTS_ACTION_PROPOSAL' && !value.listeningRequest) throw new Error('接受动作提议时必须包含 listeningRequest')
+  // 含糊反馈可能被模型用上一轮纠正内容补成新的播放动作。非 LISTEN_REQUEST 场景只有
+  // “接受紧邻提议”、明确 REQUEST，或具备本轮逐字 eventFrame 证据时才保留动作授权。
+  const listeningRequest = value.listeningRequest && (value.scene === 'LISTEN_REQUEST'
+    || value.turnRelation === 'ACCEPTS_ACTION_PROPOSAL'
+    || communicativeAct === 'REQUEST'
+    || Boolean(eventFrame))
+    ? value.listeningRequest
+    : null
   const ambiguity = value.ambiguity ?? (eventFrame && ['CONTEXTUAL', 'AMBIGUOUS', 'UNKNOWN'].includes(eventFrame.subjectResolution)
     ? '事件主体依赖语境推断，尚未由用户明确确认。'
     : null)
   return {
     ...value,
+    listeningRequest,
     topic,
     communicativeAct,
     eventFrame,

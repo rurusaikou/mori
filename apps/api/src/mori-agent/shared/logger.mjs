@@ -43,26 +43,27 @@ function describeStage(entry) {
     llm_completed: () => `${identity}：LLM 返回完成（模型：${entry.model}；Token：${tokens(entry.tokenUsage)}）。`,
     output_validated: () => `${identity}：模型输出 Schema 与业务边界校验通过。`,
     completed: () => entry.output?.plannedAction
-      ? `${identity}：服务端决策与动作规划完成，耗时 ${entry.latency}ms；动作仍待客户端执行和确认。输出：${readable(entry.output)}。`
+      ? `${identity}：服务端决策与动作规划完成，耗时 ${entry.latency}ms；plannedResponse 不是用户最终回复，仍待客户端执行和确认。输出：${readable(entry.output)}。`
       : `${identity}：Capability 执行成功，耗时 ${entry.latency}ms。输出：${readable(entry.output)}。`,
     failed: () => `${identity}：Capability 执行失败，耗时 ${entry.latency}ms。原因：${safe(entry.error)}。`,
     agent_input: () => `${identity}：收到 Agent 输入。${readable(agentInputSummary(eventData(entry)))}。`,
     agent_context_preparation_started: () => `${identity}：开始并行准备 Conversation Understanding 与初始 Relevant Memory。${readable(eventData(entry))}。`,
-    agent_relevant_memory_prepared: () => `${identity}：Relevant Memory 准备完成；记录召回阶段、目标歌曲、匹配原因、证据等级与预算结果，不写入完整记忆正文。${readable(eventData(entry))}。`,
+    agent_relevant_memory_prepared: () => `${identity}：Relevant Memory 准备完成。${readable(memorySummary(entry))}。`,
     agent_target_memory_retrieval: () => `${identity}：解析后的目标歌曲不同于当前播放歌曲，开始针对 targetTrack 重新召回 Memory。${readable(eventData(entry))}。`,
-    agent_context_assembly: () => `${identity}：Agent Context 组装完成。${readable(eventData(entry))}。`,
-    agent_conversation_understanding: () => `${identity}：LLM Conversation Understanding 完成。${readable(eventData(entry))}。`,
+    agent_context_assembly: () => `${identity}：Agent Context 组装完成。${readable(contextSummary(entry))}。`,
+    agent_conversation_understanding: () => `${identity}：LLM Conversation Understanding 完成。${readable(understandingSummary(entry))}。`,
     agent_conversation_understanding_raw: () => `${identity}：Conversation Understanding 原始结构化输出。${readable(eventData(entry))}。`,
     agent_emotion_evidence_dropped: () => `${identity}：emotion.evidence 不是用户原文中的连续片段，已丢弃可选 emotion 字段并继续本轮。${readable(eventData(entry))}。`,
     agent_grounding_evidence_dropped: () => `${identity}：eventFrame.evidence 不能在用户最新消息中找到，已丢弃未验证的事件框架；继续使用其余理解结果。${readable(eventData(entry))}。`,
+    agent_action_grounding_dropped: () => `${identity}：本轮没有足够原文证据授权新的音乐动作，已丢弃从历史补出的 listeningRequest。${readable(eventData(entry))}。`,
     agent_decision_repair: () => `${identity}：Decision 首次输出不符合 Schema 或动作边界，执行一次受限修复。${readable(eventData(entry))}。`,
-    agent_tools_available: () => `${identity}：本轮可用 Tool 注册完成。${readable(eventData(entry))}。`,
-    agent_decision_model_call: () => `${identity}：开始调用 Decision Model；记录动作判断所依据的 scene、listeningRequest、reference 与 targetTrack。${readable(eventData(entry))}。`,
+    agent_tools_available: () => `${identity}：本轮可用 Tool：${(entry.tools ?? []).map((tool) => tool.name ?? tool).join('、') || '无'}。`,
+    agent_decision_model_call: () => `${identity}：开始调用 Decision Model。${readable(decisionBasisSummary(entry))}。`,
     agent_decision_raw: () => `${identity}：Agent Decision 原始结构化输出。${readable(eventData(entry))}。`,
     agent_decision_repair_raw: () => `${identity}：Agent Decision 修复后的原始结构化输出。${readable(eventData(entry))}。`,
     agent_decision_fallback: () => `${identity}：Decision 修复仍无效，执行确定性安全降级。${readable(eventData(entry))}。`,
-    agent_decision_validated: () => `${identity}：Decision Schema、Understanding 约束与 Tool 边界校验通过。${readable(eventData(entry))}。`,
-    agent_direct_response_selected: () => `${identity}：Decision 选择直接回复，不进入 Tool Execution。${readable(eventData(entry))}。`,
+    agent_decision_validated: () => `${identity}：Decision 校验通过。${readable(decisionSummary(entry))}。`,
+    agent_direct_response_selected: () => `${identity}：Decision 选择直接回复，不进入 Tool Execution。回复：${quoted(entry.response)}。`,
     agent_response_quality_checked: () => entry.passed
       ? `${identity}：直接回复质量门检查通过，无需修订。${readable(eventData(entry))}。`
       : `${identity}：直接回复质量门发现问题，将执行一次 Response Repair。${readable(eventData(entry))}。`,
@@ -75,11 +76,11 @@ function describeStage(entry) {
       ? `${identity}：最终直接回复与真实 Playback State 一致。${readable(eventData(entry))}。`
       : `${identity}：Response Repair 后仍存在未经确认的播放状态声明。${readable(eventData(entry))}。`,
     agent_response_fact_fallback: () => `${identity}：播放事实修订仍不符合当前状态，使用自然语言安全兜底。${readable(eventData(entry))}。`,
-    agent_track_reference_resolution: () => `${identity}：歌曲引用解析完成。${readable(eventData(entry))}。`,
-    agent_state_before: () => `${identity}：记录决策前的 World State 与 Playback State。${readable(eventData(entry))}。`,
-    agent_model_decision: () => `${identity}：模型完成下一步决策。${readable(eventData(entry))}。`,
+    agent_track_reference_resolution: () => `${identity}：歌曲引用解析完成。${readable(trackResolutionSummary(entry))}。`,
+    agent_state_before: () => `${identity}：决策前播放事实。${readable(playbackSummary(entry.playbackState))}。`,
+    agent_model_decision: () => `${identity}：模型完成下一步决策。${readable(decisionSummary(entry))}。`,
     agent_tool_call: () => `${identity}：Agent 选择调用 Tool。${readable(eventData(entry))}。`,
-    agent_tool_arguments: () => `${identity}：Tool 参数已生成。${readable(eventData(entry))}。`,
+    agent_tool_arguments: () => `${identity}：Tool 实际参数：${readable(withoutCorrelation(eventData(entry)))}。`,
     agent_tool_result: () => entry.result?.status === 'PENDING'
       ? `${identity}：Tool 已生成待客户端执行的动作计划，尚未完成真实操作。${readable(eventData(entry))}。`
       : `${identity}：Tool 执行完成。${readable(eventData(entry))}。`,
@@ -87,8 +88,9 @@ function describeStage(entry) {
     agent_final_response_raw: () => `${identity}：Final Response Model 返回原始结构化输出。${readable(eventData(entry))}。`,
     agent_final_response_validated: () => `${identity}：Final Response Schema 校验通过。${readable(eventData(entry))}。`,
     agent_tool_response_safety_applied: () => `${identity}：Tool Result 仍处于待客户端确认状态，安全规则收敛了最终文案。${readable(eventData(entry))}。`,
-    agent_state_after: () => `${identity}：记录本轮事实状态与待执行动作。${readable(eventData(entry))}。`,
-    agent_final_response: () => `${identity}：Agent 最终回复生成完成。${readable(eventData(entry))}。`,
+    agent_state_after: () => `${identity}：本轮结束状态。${readable({ playback: playbackSummary(entry.playbackState), plannedAction: entry.plannedAction ?? null })}。`,
+    agent_final_response: () => `${identity}：Agent 最终回复：${quoted(entry.response)}。`,
+    agent_planned_response: () => `${identity}：服务端过渡文案（非用户最终回复）：${quoted(entry.response)}；待执行动作：${readable(entry.plannedAction)}。`,
     agent_client_action_started: () => `${identity}：客户端开始执行服务端规划的播放动作。${readable(eventData(entry))}。`,
     agent_client_action_completed: () => `${identity}：客户端已确认播放动作真实完成。${readable(eventData(entry))}。`,
     agent_client_action_failed: () => `${identity}：客户端播放动作执行失败。${readable(eventData(entry))}。`,
@@ -96,6 +98,7 @@ function describeStage(entry) {
     agent_post_turn_memory_deferred: () => `${identity}：Post-turn Memory 暂不执行，等待客户端动作真实结果。${readable(eventData(entry))}。`,
     agent_post_turn_memory_scheduled: () => `${identity}：最终对话事实已归档，Post-turn Memory Processing 已异步调度。${readable(eventData(entry))}。`,
     agent_action_result_received: () => `${identity}：收到 Extension 回写的客户端动作最终结果。${readable(eventData(entry))}。`,
+    agent_user_visible_response: () => `${identity}：用户最终看到的回复：${quoted(entry.response)}；客户端状态：${safe(entry.status)}；确认歌曲：${readable(trackSummary(entry.currentTrack))}。`,
     agent_action_result_archived: () => `${identity}：客户端动作最终文案与确认歌曲已归档。${readable(eventData(entry))}。`,
     agent_error: () => `${identity}：Agent 执行失败。原因：${safe(entry.error)}。`,
     agent_route_received: () => `${identity}：收到正式聊天 HTTP 请求。Request ${safe(entry.requestId)}，Exchange ${safe(entry.exchangeId)}，用户输入：${safe(entry.userMessage)}。`,
@@ -122,15 +125,59 @@ function agentInputSummary(input) {
     conversationHistoryCount: Array.isArray(input.conversationHistory) ? input.conversationHistory.length : 0,
     conversationState: input.conversationState ? {
       activeTopic: input.conversationState.activeTopic ?? null,
-      entities: input.conversationState.entities ?? [],
+      entityCount: Array.isArray(input.conversationState.entities) ? input.conversationState.entities.length : 0,
       factCount: Array.isArray(input.conversationState.facts) ? input.conversationState.facts.length : 0,
-      lastUserMessage: input.conversationState.lastUserMessage ?? null,
-      lastAssistantMessage: input.conversationState.lastAssistantMessage ?? null,
-      unresolvedContext: input.conversationState.unresolvedContext ?? null,
+      hasUnresolvedContext: Boolean(input.conversationState.unresolvedContext),
     } : null,
     fakeMemoryCount: Array.isArray(input.fakeMemory) ? input.fakeMemory.length : 0,
   }
 }
+function understandingSummary(value) {
+  return {
+    scene: value.scene, meaning: compactText(value.meaning), turnRelation: value.turnRelation,
+    communicativeAct: value.communicativeAct, topic: compactText(value.topic),
+    reference: value.reference ?? null, listeningRequest: value.listeningRequest ?? null,
+    emotion: value.emotion ? { description: value.emotion.description, evidence: value.emotion.evidence } : null,
+    eventSubject: value.eventFrame ? { subject: value.eventFrame.subject, resolution: value.eventFrame.subjectResolution } : null,
+    state: value.conversationState ? {
+      activeTopic: value.conversationState.activeTopic ?? null,
+      entityCount: value.conversationState.entities?.length ?? 0,
+      factCount: value.conversationState.facts?.length ?? 0,
+      hasUnresolvedContext: Boolean(value.conversationState.unresolvedContext),
+    } : null,
+    confidence: value.confidence, ambiguity: compactText(value.ambiguity),
+  }
+}
+function contextSummary(value) {
+  return {
+    latestMessage: compactText(value.latestMessage), historyCount: value.conversationHistory?.length ?? 0,
+    scene: value.understanding?.scene, topic: compactText(value.topic), communicativeAct: value.communicativeAct,
+    playback: playbackSummary(value.playbackState), targetTrack: trackSummary(value.targetTrack),
+    resolution: value.trackResolution ?? null,
+    memory: { source: value.relevantMemory?.source, matchCount: value.relevantMemory?.matches?.length ?? 0, tasteCount: value.relevantMemory?.tasteProfile?.length ?? 0, associationCount: value.relevantMemory?.associations?.length ?? 0 },
+  }
+}
+function memorySummary(value) {
+  return {
+    phase: value.phase, source: value.source, query: compactText(value.query), focusTrack: trackSummary(value.focusTrack),
+    matches: (value.matches ?? []).map((item) => ({ id: item.id, kind: item.kind, status: item.status, score: item.score, reason: item.matchReason })),
+    tasteCount: value.tasteProfileCount ?? 0, associationCount: value.associationCount ?? 0,
+  }
+}
+function decisionBasisSummary(value) {
+  return { scene: value.scene, listeningRequest: value.listeningRequest ?? null, reference: value.reference ?? null, targetTrack: trackSummary(value.targetTrack), topic: compactText(value.topic), communicativeAct: value.communicativeAct }
+}
+function decisionSummary(value) {
+  return { action: value.action, intent: value.intent, move: value.conversationMove, response: compactText(value.response), tool: value.toolCall ? { name: value.toolCall.name, arguments: value.toolCall.arguments } : null }
+}
+function trackResolutionSummary(value) {
+  return { referenceType: value.referenceType ?? null, currentTrack: trackSummary(value.currentTrack), targetTrack: trackSummary(value.targetTrack), source: value.source, resolved: value.resolved }
+}
+function playbackSummary(value) { return value ? { status: value.status, availability: value.availability, currentTrack: trackSummary(value.currentTrack), previousTrack: trackSummary(value.previousTrack) } : null }
+function trackSummary(value) { return value ? { title: value.title, artist: value.artist, uri: value.uri } : null }
+function withoutCorrelation(value) { const { requestId, exchangeId, ...rest } = value; return rest }
+function compactText(value, limit = 180) { const text = typeof value === 'string' ? safe(value) : value ?? null; return typeof text === 'string' && text.length > limit ? `${text.slice(0, limit)}…` : text }
+function quoted(value) { return `“${compactText(value, 240) ?? '—'}”` }
 function tokens(value) { return value?.total_tokens ?? value?.totalTokens ?? '—' }
 function readable(value) { try { return JSON.stringify(value) } catch { return safe(value) } }
 function safe(value) { return String(value ?? '—').replaceAll(/\s+/g, ' ').trim() }

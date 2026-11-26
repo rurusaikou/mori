@@ -28,6 +28,19 @@ test('passes all twelve normalized history messages into Conversation Understand
   assert.deepEqual(understandingInput.conversationHistory, history)
 })
 
+test('keeps twelve messages for Understanding but only four recent messages for Decision', async () => {
+  const history = Array.from({ length: 12 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', content: `消息 ${index + 1}`, playbackTrack: null, discussionTrack: null }))
+  let decisionInput
+  const runtime = createRuntimeAgent(async ({ input }) => {
+    decisionInput = input
+    return response({ action: 'respond', response: '我接着听。', toolCall: null })
+  }, { understandingLlm: understanding({ scene: 'DAILY_CHAT', meaning: '用户继续聊天' }) })
+  await runtime.execute({ ...base, conversationHistory: history })
+  assert.deepEqual(decisionInput.context.conversationHistory.map((item) => item.content), ['消息 9', '消息 10', '消息 11', '消息 12'])
+  assert.equal('understanding' in decisionInput.context, false)
+  assert.equal(decisionInput.understanding.meaning, '用户继续聊天')
+})
+
 test('prepares relevant memory once and exposes it through the shared Conversation Context', async () => {
   let decisionInput
   await agent(async ({ input }) => {
@@ -288,6 +301,27 @@ test('invalid multi-span emotion evidence does not fail the conversation underst
   assert.deepEqual(warnings, [{ description: '疲惫后转为积极', evidence: '今天工作累累的...感觉心情好了很多' }])
 })
 
+test('an interjection cannot inherit a previous correction as a new playback action', async () => {
+  const warnings = []
+  const result = await understandConversation(async () => response({
+    scene: 'DAILY_CHAT', meaning: '用户对错误播放结果表示惊讶', turnRelation: 'CORRECTION',
+    reference: { type: 'NAMED_TRACK', value: '身骑白马' },
+    listeningRequest: { type: 'CONTROL', control: 'NEXT', song: '身骑白马', artist: '徐佳瑩', preferences: [], excludeCurrentTrack: false },
+    emotion: null, topic: '音乐选择', communicativeAct: 'CORRECTION',
+    eventFrame: { subject: '用户', subjectResolution: 'EXPLICIT', predicate: '纠正播放', object: '身骑白马', relation: '目标歌曲', evidence: '不是身骑白马吗', confidence: 0.95 },
+    conversationState: { activeTopic: '音乐选择', entities: [], facts: [{ subject: '用户', relation: '当前意图', object: '身骑白马', evidence: '不是身骑白马吗', confidence: 0.98 }], unresolvedContext: null },
+    confidence: 0.95, ambiguity: null,
+  }), {
+    ...base, userMessage: '啊？',
+    conversationState: { activeTopic: '音乐选择', entities: [], facts: [{ subject: '用户', relation: '当前意图', object: '身骑白马', evidence: '不是身骑白马吗', confidence: 0.98 }], lastUserMessage: '不是身骑白马吗', lastAssistantMessage: '找到了另一首歌。', unresolvedContext: null },
+  }, { onInvalidActionGrounding: (value) => warnings.push(value) })
+
+  assert.equal(result.understanding.listeningRequest, null)
+  assert.equal(result.understanding.eventFrame, null)
+  assert.deepEqual(result.understanding.conversationState.facts, [])
+  assert.equal(warnings.length, 1)
+})
+
 test('preserves same-topic facts when an update omits them and caps inferred-subject confidence', () => {
   const previous = {
     activeTopic: '日语老师赴美与丈夫团聚',
@@ -501,6 +535,9 @@ test('allows a corrective daily-chat turn to carry a new listening request', asy
     : response({ response: '我找到几首徐佳莹的歌，正准备播放。' }), {
       scene: 'DAILY_CHAT',
       meaning: '用户纠正刚才播放了错误歌手，并要求重新选择徐佳莹的歌曲',
+      topic: '音乐选择',
+      communicativeAct: 'CORRECTION',
+      eventFrame: { subject: '用户', subjectResolution: 'EXPLICIT', predicate: '纠正选歌对象', object: '徐佳莹', relation: '目标歌手', evidence: '但是我想听徐佳莹的歌呀', confidence: 0.98 },
       listeningRequest: { type: 'RECOMMEND', song: null, artist: '徐佳瑩', preferences: [], excludeCurrentTrack: false },
     }, { musicSearchMode: 'library' }).execute({ ...base, userMessage: '但是我想听徐佳莹的歌呀' })
   assert.equal(result.success, true)

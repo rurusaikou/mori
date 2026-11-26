@@ -13,7 +13,7 @@ import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, prep
 const value = () => Annotation()
 const UnifiedState = Annotation.Root({
   input: value(), runId: value(), started: value(), agentState: value(), context: value(), messages: value(),
-  toolDefinitions: value(), firstResponse: value(), toolResult: value(), action: value(), finalResponse: value(), model: value(), tokenUsage: value(),
+  toolDefinitions: value(), firstResponse: value(), toolResult: value(), action: value(), proposal: value(), finalResponse: value(), model: value(), tokenUsage: value(),
   trace: Annotation({ reducer: (current, update) => [...current, ...update], default: () => [] }),
 })
 
@@ -37,9 +37,14 @@ const TOOL_PARAMETERS = {
       authorizationQuote: { type: 'string' },
     }, required: ['command', 'authorizationQuote'], additionalProperties: false,
   },
+  propose_music: {
+    type: 'object', properties: {
+      query: { type: 'string' }, response: { type: 'string' },
+    }, required: ['query', 'response'], additionalProperties: false,
+  },
 }
 
-const TOOL_LIMIT = '本轮最多执行一个 Tool。播放控制、搜索和推荐必须由当前用户消息明确授权；动作工具的 authorizationQuote 必须逐字引用当前用户消息中的连续片段，不能改写或引用历史。excludeCurrentTrack 仅按用户本轮表达设置。读取音乐/记忆信息不能触发播放或其他副作用。'
+const TOOL_LIMIT = '本轮最多执行一个 Tool。播放控制、搜索和推荐必须由当前用户消息明确授权；动作工具的 authorizationQuote 必须逐字引用当前用户消息中的连续片段，不能改写或引用历史。excludeCurrentTrack 仅按用户本轮表达设置。读取音乐/记忆信息不能触发播放或其他副作用。当用户没有请求听歌，但你想主动建议一类音乐并等待用户确认时，使用 propose_music；response 是当场对用户说的自然问句，该 Tool 不会播放音乐。'
 
 export function createUnifiedMoriAgent(agentLlm, options = {}) {
   if (typeof agentLlm !== 'function') throw new Error('Unified Runtime 需要 Agent LLM Transport')
@@ -63,7 +68,7 @@ export function createUnifiedMoriAgent(agentLlm, options = {}) {
           .addEdge(START, 'prepare_context')
           .addEdge('prepare_context', 'agent')
           .addConditionalEdges('agent', routeAfterAgent, ['tool', END])
-          .addEdge('tool', 'final_response')
+          .addConditionalEdges('tool', routeAfterTool, ['final_response', END])
           .addEdge('final_response', END)
           .compile()
         for await (const state of await graph.stream(latest, { streamMode: 'values' })) latest = state
@@ -116,6 +121,7 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
         description: tool.description,
         parameters: TOOL_PARAMETERS[tool.name],
       }))
+      toolDefinitions.push({ name: 'propose_music', description: '提出一个尚未执行的音乐建议，保存为待确认状态；不搜索、不播放', parameters: TOOL_PARAMETERS.propose_music })
       const built = buildMoriContext({ persona, state: agentState, relevantMemory })
       const messages = [
         { role: 'system', content: `${built.system}\n\n${TOOL_LIMIT}` },
@@ -172,12 +178,22 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
       onStreamEvent?.({ type: 'tool_start', name: calls[0]?.name ?? 'tool' })
       const observations = []
       let action = null
+      let proposal = null
       for (const call of calls) {
         const tool = safeTools[call.name]
         let args = call.arguments
         let validationError = validateToolArguments(call.name, args)
         let observation
         if (tooManyCalls) observation = { ok: false, error: '本轮最多执行一个 Tool；所有并发 Tool Call 均未执行' }
+        else if (call.name === 'propose_music') {
+          const query = typeof args?.query === 'string' ? args.query.trim() : ''
+          const response = typeof args?.response === 'string' ? args.response.trim() : ''
+          if (!query || !response) observation = { ok: false, error: 'propose_music 需要非空 query 和 response' }
+          else {
+            proposal = { type: 'RECOMMEND', query, status: 'AWAITING_CONFIRMATION' }
+            observation = { ok: true, result: { status: 'PROPOSED', proposal } }
+          }
+        }
         else if (!tool) observation = { ok: false, error: '该 Tool 未在 Unified Runtime 中开放' }
         else {
           if (!validationError && isMusicSideEffectTool(call.name)) {
@@ -205,9 +221,22 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
         ...state.messages,
         ...observations.map(({ call, observation }) => ({ role: 'tool', toolCallId: call.id, content: JSON.stringify(observation) })),
       ]
+      // 客户端音乐动作此时只是 PENDING 计划，没有可供第二次模型总结的真实结果。
+      // 直接使用确定性过渡文案结束服务端 Run，真正完成文案由 Extension
+      // 确认 Spotify 状态后回写；读取型 Tool 仍进入 final_response 让 Agent 基于观察回答。
+      const actionResult = action ? observations.findLast(({ observation }) => observation.ok)?.observation?.result : null
+      const plannedResponse = action ? safeToolResponse(actionResult, '') : null
+      const proposalResponse = proposal ? observations.find(({ call }) => call.name === 'propose_music')?.call.arguments.response.trim() : null
+      const immediateResponse = plannedResponse ?? proposalResponse
+      if (immediateResponse) onStreamEvent?.({ type: 'delta', text: immediateResponse })
       capabilityStage(logRun, 'agent_unified_tool_observed', { observations })
+      if (action) capabilityStage(logRun, 'agent_planned_response', { response: plannedResponse, plannedAction: action })
       return {
-        toolResult, messages, action,
+        toolResult, messages, action, proposal, finalResponse: immediateResponse,
+        context: (action || proposal) ? {
+          ...state.context,
+          conversationState: { ...state.context.conversationState, pendingProposal: proposal },
+        } : state.context,
         trace: [record(state, 'UNIFIED_TOOL_RESULT', { observations })],
       }
     },
@@ -236,6 +265,7 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
         tools: state.toolResult?.observations?.map(({ call }) => call.name) ?? [],
         playbackFactIssue: playbackIssue,
       })
+      if (state.action) capabilityStage(logRun, 'agent_planned_response', { response: finalResponse, plannedAction: state.action })
       return {
         finalResponse, model: response.model, tokenUsage,
         action: state.action ?? null,
@@ -247,6 +277,10 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
 
 function routeAfterAgent(state) {
   return state.firstResponse.toolCalls.length ? 'tool' : END
+}
+
+function routeAfterTool(state) {
+  return state.action || state.proposal ? END : 'final_response'
 }
 
 function validateToolArguments(name, args) {
@@ -265,6 +299,8 @@ function validateToolArguments(name, args) {
       ? null
       : 'playback_control 参数结构无效'
   }
+  if (name === 'propose_music') return typeof args.query === 'string' && args.query.trim() && typeof args.response === 'string' && args.response.trim()
+    ? null : 'propose_music 参数结构无效'
   return 'Tool 未授权'
 }
 
@@ -275,6 +311,13 @@ function isMusicSideEffectTool(name) {
 async function authorizeMusicToolCall(call, agentState, options, logRun) {
   const quote = call.arguments.authorizationQuote.trim()
   if (!quote || !agentState.userMessage.includes(quote)) throw new Error('动作授权引句必须是本轮用户原文的连续片段')
+  const deterministic = explicitMusicAuthorization(call, agentState)
+  if (deterministic) {
+    capabilityStage(logRun, 'agent_action_authorized', {
+      tool: call.name, method: 'EXPLICIT_CURRENT_MESSAGE', authorizationQuote: quote, normalizedArguments: deterministic,
+    })
+    return deterministic
+  }
   if (typeof options.actionAuthorizationLlm !== 'function') throw new Error('Unified Runtime 未配置动作授权校验器')
   const understood = await understandConversation(options.actionAuthorizationLlm, agentState, {
     onRawOutput: (data) => capabilityStage(logRun, 'agent_action_authorization_understanding', data),
@@ -292,6 +335,40 @@ async function authorizeMusicToolCall(call, agentState, options, logRun) {
     authorizationQuote: quote, normalizedArguments: decision.toolCall.arguments,
   })
   return decision.toolCall.arguments
+}
+
+function explicitMusicAuthorization(call, agentState) {
+  const message = agentState.userMessage.trim()
+  // “你可以暂停吗”是能力询问，不是当前动作授权。
+  if (/(?:可以|能不能|能否|会)否?.{0,8}(?:吗|？|\?)/u.test(message)) return null
+  if (call.name === 'playback_control') {
+    const cues = {
+      PAUSE: /(?:暂停|停一下|先停|别放了|\bpause\b)/iu,
+      RESUME: /(?:继续(?:播放|放|听)?|恢复播放|\bresume\b)/iu,
+      NEXT: /(?:下一首|切歌|换一首|跳过|\bnext\b)/iu,
+      PREVIOUS: /(?:上一首|前一首|\bprevious\b)/iu,
+    }
+    return cues[call.arguments.command]?.test(message) ? { command: call.arguments.command } : null
+  }
+  if (call.name === 'search_music') {
+    const query = call.arguments.query.trim()
+    const terms = normalizedTerms(query)
+    if (!query || !/(?:想听|要听|播放|放一下|帮我找|帮我搜|不是|是.+吗)/u.test(message)) return null
+    if (!terms.some((term) => normalizeAuthorizationText(message).includes(term))) return null
+    return { query, excludeUris: call.arguments.excludeCurrentTrack && agentState.currentTrack?.uri ? [agentState.currentTrack.uri] : [] }
+  }
+  if (call.name === 'recommend_music' && /(?:推荐|来点|来一首|随便|别的歌|其他歌|其它歌|想听|换一首)/u.test(message)) {
+    return { query: call.arguments.query.trim(), excludeUris: call.arguments.excludeCurrentTrack && agentState.currentTrack?.uri ? [agentState.currentTrack.uri] : [] }
+  }
+  return null
+}
+
+function normalizedTerms(value) {
+  return normalizeAuthorizationText(value).split(/[\s·、，,\-]+/u).filter((term) => term.length > 1)
+}
+
+function normalizeAuthorizationText(value) {
+  return String(value ?? '').normalize('NFKC').toLocaleLowerCase().replaceAll('瑩', '莹')
 }
 
 function normalizeResponse(response) {

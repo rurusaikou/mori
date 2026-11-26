@@ -8,6 +8,7 @@ import { extensionStorage } from '../storage/extension-storage'
 import type { PendingAgentActionResult } from '../storage/extension-storage'
 import { syncMoment } from './memory-client'
 import { logError, logInfo } from '../background/logger'
+import { completedActionResponse } from './action-response.mjs'
 
 const musicMoods = new Set(['calm', 'happy', 'healing', 'moved', 'nostalgic', 'low'])
 
@@ -56,19 +57,11 @@ export async function sendCompanionMessage(
     else {
       try {
         const track = await executeAction(agentResult.action) as MusicTrack | null
-        if (!track) {
-          actionStatus = 'COMPLETED'
-          reply = agentResult.action.intent === 'SEARCH'
-            ? '我查了你的完整曲库和 Spotify，暂时没有找到这首歌。'
-            : '这次没有找到合适且可播放的歌曲。'
-        }
-        else {
+        actionStatus = 'COMPLETED'
+        if (track) {
           replyTrack = track
-          actionStatus = 'COMPLETED'
-          reply = agentResult.action.intent === 'RECOMMEND'
-            ? `给你选了《${track.title}》— ${track.artist}，现在开始播放。`
-            : `找到了《${track.title}》— ${track.artist}，现在开始播放。`
         }
+        reply = completedActionResponse(agentResult.action, track)
       }
       catch (error) {
         actionStatus = 'FAILED'
@@ -84,7 +77,7 @@ export async function sendCompanionMessage(
         if (confirmedTrack) replyTrack = confirmedTrack
         switchedTrack = ['NEXT', 'PREVIOUS'].includes(agentResult.action.command)
         actionStatus = 'COMPLETED'
-        reply = ({ PAUSE: '已经暂停。', RESUME: '继续播放。', NEXT: '切到下一首。', PREVIOUS: '回到上一首。' })[agentResult.action.command]
+        reply = completedActionResponse(agentResult.action, confirmedTrack)
       } catch (error) {
         actionStatus = 'FAILED'
         logError('conversation', 'agent_playback_control_failed', error, { requestId: requestId ?? null, exchangeId: agentResult.exchangeId ?? null, agentRunId: agentResult.action.agentRunId ?? null, command: agentResult.action.command })

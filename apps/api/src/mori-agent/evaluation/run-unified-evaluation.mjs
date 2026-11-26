@@ -15,11 +15,18 @@ const agent = createUnifiedMoriAgent(createAgentLlm(), {
 const results = []
 for (const testCase of UNIFIED_CONVERSATION_CASES) {
   const result = await agent.execute(testCase.input)
+  if (!result.success && /fetch failed|ECONNREFUSED|ENOTFOUND/u.test(result.error ?? '')) {
+    console.error(`Unified conversation evaluation aborted: model endpoint unavailable (${result.error})`)
+    process.exitCode = 2
+    break
+  }
   const evaluation = evaluateConversationCase(testCase, result)
   results.push(evaluation)
   console.log(JSON.stringify({ ...evaluation, model: result.meta?.model, latencyMs: result.meta?.latency }))
 }
 
-const failed = results.filter((result) => !result.passed)
-console.log(`Unified conversation evaluation: ${results.length - failed.length}/${results.length} passed`)
-if (failed.length) process.exitCode = 1
+if (results.length) {
+  const failed = results.filter((result) => !result.passed)
+  console.log(`Unified conversation evaluation: ${results.length - failed.length}/${results.length} passed`)
+  if (failed.length) process.exitCode = 1
+}

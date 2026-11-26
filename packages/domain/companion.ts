@@ -16,6 +16,11 @@ export type ConversationMessage = {
 
 export type ConversationEntity = { id: string; label: string; kind: 'PERSON' | 'PLACE' | 'OBJECT' | 'OTHER' }
 export type ConversationFact = { subject: string; relation: string; object: string; evidence: string; confidence: number }
+export type PendingMusicProposal = {
+  type: 'RECOMMEND'
+  query: string
+  status: 'AWAITING_CONFIRMATION'
+}
 export type ConversationState = {
   activeTopic: string | null
   entities: ConversationEntity[]
@@ -23,6 +28,8 @@ export type ConversationState = {
   lastUserMessage: string | null
   lastAssistantMessage: string | null
   unresolvedContext: string | null
+  /** Mori 明确提出、尚未被用户接受或拒绝的音乐建议。 */
+  pendingProposal: PendingMusicProposal | null
 }
 
 export const EMPTY_CONVERSATION_STATE: ConversationState = {
@@ -32,6 +39,7 @@ export const EMPTY_CONVERSATION_STATE: ConversationState = {
   lastUserMessage: null,
   lastAssistantMessage: null,
   unresolvedContext: null,
+  pendingProposal: null,
 }
 
 export type MusicMemory = {

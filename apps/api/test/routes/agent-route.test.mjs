@@ -56,6 +56,9 @@ test('archives a client action as pending and replaces it with the confirmed fin
   assert.equal(actionResultLog.promptVersion, 'mori-agent-v1.1')
   assert.equal(actionResultLog.model, 'decision-model')
   assert.equal(actionResultLog.exchangeId, initial.body.exchangeId)
+  const visibleResponseLog = recentCapabilityLogs().findLast((entry) => entry.runId === 'run-1' && entry.stage === 'agent_user_visible_response')
+  assert.equal(visibleResponseLog.response, '切到下一首。')
+  assert.equal(visibleResponseLog.status, 'COMPLETED')
 })
 
 test('starts post-turn memory only after a direct final response is archived', async () => {

@@ -5,6 +5,7 @@ export const EMPTY_CONVERSATION_STATE = Object.freeze({
   lastUserMessage: null,
   lastAssistantMessage: null,
   unresolvedContext: null,
+  pendingProposal: null,
 })
 
 export function normalizeConversationState(value, fallback = EMPTY_CONVERSATION_STATE) {
@@ -20,7 +21,17 @@ export function normalizeConversationState(value, fallback = EMPTY_CONVERSATION_
     lastUserMessage: optionalText(value.lastUserMessage, 500) ?? fallback.lastUserMessage,
     lastAssistantMessage: optionalText(value.lastAssistantMessage, 500) ?? fallback.lastAssistantMessage,
     unresolvedContext: value.unresolvedContext === null ? null : optionalText(value.unresolvedContext, 240) ?? fallback.unresolvedContext,
+    pendingProposal: normalizePendingProposal(value.pendingProposal, fallback.pendingProposal),
   }
+}
+
+function normalizePendingProposal(value, fallback) {
+  if (value === null) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback ?? null
+  const query = optionalText(value.query, 160)
+  return value.type === 'RECOMMEND' && value.status === 'AWAITING_CONFIRMATION' && query
+    ? { type: 'RECOMMEND', query, status: 'AWAITING_CONFIRMATION' }
+    : fallback ?? null
 }
 
 function mergeEntities(previous, current) {
@@ -29,7 +40,10 @@ function mergeEntities(previous, current) {
 
 function mergeFacts(previous, current) {
   const key = (fact) => `${fact.subject}\u0000${fact.relation}\u0000${fact.object}`
-  return [...new Map([...previous, ...current].map((fact) => [key(fact), fact])).values()].slice(-16)
+  // 当前请求由本轮 listeningRequest 表达，不能沉淀成跨轮事实；否则下一句“啊？”也可能
+  // 从旧的“当前意图”恢复播放动作。这里只过滤明确的运行时关系，不删除稳定偏好事实。
+  const stable = [...previous, ...current].filter((fact) => !/(当前意图|本轮意图|当前请求|待执行动作)/u.test(fact.relation))
+  return [...new Map(stable.map((fact) => [key(fact), fact])).values()].slice(-16)
 }
 
 function normalizeEntities(value, fallback) {

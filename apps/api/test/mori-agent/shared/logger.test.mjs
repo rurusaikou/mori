@@ -47,6 +47,15 @@ test('formats the client playback result under the original Agent run', () => {
   assert.match(line, /Spotify 未确认歌曲已经切换/)
 })
 
+test('distinguishes a planned response from the user-visible client result', () => {
+  const base = { source: 'runtime', timestamp: '2026-11-26T12:50:35.000Z', runId: 'agent-two-phase', capability: 'conversation_agent', promptVersion: 'mori-agent-v1.1' }
+  const planned = formatCapabilityLogLine({ ...base, stage: 'agent_planned_response', response: '好，我先试着切到下一首，等播放器确认一下。', plannedAction: { type: 'playback_control', command: 'NEXT' } })
+  const visible = formatCapabilityLogLine({ ...base, stage: 'agent_user_visible_response', response: '切到下一首。', status: 'COMPLETED', currentTrack: { uri: 'spotify:track:b', title: 'B', artist: '歌手 B' } })
+  assert.match(planned, /非用户最终回复/)
+  assert.match(visible, /用户最终看到的回复/)
+  assert.match(visible, /切到下一首/)
+})
+
 test('marks runtime capability logs separately from test logs', () => {
   const line = formatCapabilityLogLine({ source: 'runtime', timestamp: '2026-11-17T12:00:00.000Z', runId: 'real-1', capability: 'conversation_agent', promptVersion: 'mori-agent-v0.6', stage: 'agent_final_response', response: '真实回复' })
   assert.match(line, /\[真实\] \[信息\]/)
@@ -84,7 +93,7 @@ test('formats context, decision, response and archive diagnostics as explicit st
     ['agent_context_preparation_started', /开始并行准备/],
     ['agent_relevant_memory_prepared', /Relevant Memory 准备完成/],
     ['agent_decision_model_call', /开始调用 Decision Model/],
-    ['agent_decision_validated', /Tool 边界校验通过/],
+    ['agent_decision_validated', /Decision 校验通过/],
     ['agent_direct_response_selected', /不进入 Tool Execution/],
     ['agent_response_quality_checked', /质量门/],
     ['agent_conversation_archived', /Conversation Store/],
@@ -94,4 +103,22 @@ test('formats context, decision, response and archive diagnostics as explicit st
     const line = formatCapabilityLogLine({ ...base, stage, passed: true })
     assert.match(line, expected)
   }
+})
+
+test('summarizes assembled context without dumping conversation history or full state facts', () => {
+  const line = formatCapabilityLogLine({
+    source: 'runtime', timestamp: '2026-11-26T01:00:00.000Z', runId: 'run-summary', capability: 'conversation_agent', promptVersion: 'mori-agent-v1.1', stage: 'agent_context_assembly',
+    latestMessage: '我很迷茫',
+    conversationHistory: [{ role: 'assistant', content: '不应重复写入摘要的长历史回复' }],
+    understanding: { scene: 'DAILY_CHAT' }, topic: '当前心情', communicativeAct: 'SHARE_UPDATE',
+    playbackState: { status: 'none', availability: 'needs-auth', currentTrack: null, previousTrack: null },
+    targetTrack: null, trackResolution: { source: 'NO_REFERENCE', resolved: false },
+    conversationState: { facts: [{ subject: '用户', relation: '喜欢', object: '某首歌', evidence: '旧事实正文' }] },
+    relevantMemory: { source: 'SERVER_MEMORY', matches: [], tasteProfile: [], associations: [] },
+  })
+  assert.match(line, /"historyCount":1/)
+  assert.match(line, /"scene":"DAILY_CHAT"/)
+  assert.match(line, /"matchCount":0/)
+  assert.doesNotMatch(line, /不应重复写入摘要/)
+  assert.doesNotMatch(line, /旧事实正文/)
 })

@@ -3,11 +3,11 @@ import { createLegacyMoriAgent } from './mori-runtime.mjs'
 import { createUnifiedMoriAgent } from './unified-runtime.mjs'
 
 /**
- * Graph 是默认正式 Runtime；设置 MORI_AGENT_RUNTIME=legacy 可无代码回退。
- * 不做“Graph 失败后自动重跑 Legacy”，因为那会重复 LLM、Tool 甚至播放计划。
+ * Unified 是默认正式 Runtime；Graph/Legacy 仅作显式人工回退。
+ * 不做 Runtime 失败后自动重跑，因为那会重复 LLM、Tool 甚至播放计划。
  */
 export function createMoriAgent(llm, options = {}) {
-  const runtime = options.runtime ?? process.env.MORI_AGENT_RUNTIME ?? 'graph'
+  const runtime = options.runtime ?? process.env.MORI_AGENT_RUNTIME ?? 'unified'
   if (runtime === 'graph') return createMoriGraphAgent(llm, options)
   if (runtime === 'legacy') return createLegacyMoriAgent(llm, options)
   if (runtime === 'unified') return createUnifiedMoriAgent(options.agentLlm ?? llm, options)

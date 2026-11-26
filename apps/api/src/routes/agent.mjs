@@ -151,18 +151,21 @@ async function storeActionResult(request, response, memory) {
       || pending.exchangeId !== input.exchangeId || pending.runId !== (input.runId ?? null)) {
       json(request, response, 400, { success: false, error: 'Invalid action result' }); return
     }
+    // 回写属于原 Agent Run 的后半段，必须沿用签发动作时的版本与关联 ID；即使没有配置
+    // Memory Repository，也要记录用户最终看到的文案，才能与 planned response 正确对照。
+    const routeLogRun = pending.runId ? {
+      runId: pending.runId,
+      capability: 'conversation_agent',
+      promptVersion: pending.promptVersion,
+      model: pending.model,
+      requestId: pending.requestId,
+      exchangeId: pending.exchangeId,
+    } : null
+    if (routeLogRun) {
+      capabilityStage(routeLogRun, 'agent_action_result_received', { exchangeId: input.exchangeId, status: input.status, currentTrack: input.currentTrack ?? null })
+      capabilityStage(routeLogRun, 'agent_user_visible_response', { exchangeId: input.exchangeId, status: input.status, response: input.finalResponse.trim(), currentTrack: input.currentTrack ?? null })
+    }
     if (memory.memoryRepository?.available && memory.memoryUserId) {
-      // 回写属于原 Agent Run 的后半段，必须沿用签发动作时的版本与关联 ID；硬编码版本会
-      // 让一条链路看起来跨了 Prompt，干扰问题归因和版本效果统计。
-      const routeLogRun = pending.runId ? {
-        runId: pending.runId,
-        capability: 'conversation_agent',
-        promptVersion: pending.promptVersion,
-        model: pending.model,
-        requestId: pending.requestId,
-        exchangeId: pending.exchangeId,
-      } : null
-      if (routeLogRun) capabilityStage(routeLogRun, 'agent_action_result_received', { exchangeId: input.exchangeId, status: input.status, currentTrack: input.currentTrack ?? null })
       const assistantMessage = await memory.memoryRepository.appendConversationMessage(conversationRecord({
         userMessage: input.finalResponse.trim(),
         currentTrack: input.currentTrack ?? null,

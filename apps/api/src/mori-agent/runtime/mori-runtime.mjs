@@ -12,7 +12,7 @@ import { playbackFactIssue, responseQualityIssue, safePlaybackFallback, safeResp
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
 import { assembleConversationContext, understandConversation } from '../perception/conversation-understanding.mjs'
-import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, prepareTargetRelevantMemory, relevantMemoryLogData, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
+import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, modelConversationContext, prepareRelevantMemory, prepareTargetRelevantMemory, relevantMemoryLogData, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
 
 export function createLegacyMoriAgent(llm, options = {}) {
   const { musicSearchMode } = validateRuntimeOptions(options)
@@ -42,6 +42,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
             onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
             onInvalidEmotionEvidence: (data) => capabilityStage(logRun, 'agent_emotion_evidence_dropped', data),
             onInvalidGrounding: (data) => capabilityStage(logRun, 'agent_grounding_evidence_dropped', data),
+            onInvalidActionGrounding: (data) => capabilityStage(logRun, 'agent_action_grounding_dropped', data),
           }),
           prepareRelevantMemory(state, options),
         ])
@@ -65,6 +66,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
           resolved: context.trackResolution.resolved,
         })
         push('CONTEXT_ASSEMBLY', context)
+        const modelContext = modelConversationContext(context)
         const tools = createRuntimeTools(state, options, musicSearchMode, context)
         capabilityStage(logRun, 'agent_tools_available', { tools: Object.values(tools).map(({ name, description }) => ({ name, description })) })
 
@@ -78,7 +80,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
         const first = await llm({
           prompt: decisionSystemPrompt(Object.values(tools)),
           input: {
-            context,
+            context: modelContext,
             understanding: conversationUnderstanding,
             availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })),
           },
@@ -96,7 +98,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
           push('DECISION_REPAIR', { issue, rejectedDecision: first.data })
           const repaired = await llm({
             prompt: DECISION_REPAIR_PROMPT,
-            input: { context, understanding: conversationUnderstanding, availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })), issue, rejectedDecision: first.data },
+            input: { context: modelContext, understanding: conversationUnderstanding, availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })), issue, rejectedDecision: first.data },
             schema: AGENT_DECISION_SCHEMA,
             schemaName: 'mori_agent_decision_repair_v0_1',
           })
@@ -124,7 +126,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
             push('RESPONSE_REPAIR', { issue: qualityIssue, rejectedResponse: response })
             const repaired = await llm({
               prompt: RESPONSE_REPAIR_PROMPT,
-              input: { context, understanding: conversationUnderstanding, issue: qualityIssue, rejectedResponse: response },
+              input: { context: modelContext, understanding: conversationUnderstanding, issue: qualityIssue, rejectedResponse: response },
               schema: FINAL_RESPONSE_SCHEMA,
               schemaName: 'mori_agent_response_repair_v0_1',
             })
@@ -170,7 +172,7 @@ export function createLegacyMoriAgent(llm, options = {}) {
         const final = await llm({
           prompt: FINAL_RESPONSE_PROMPT,
           input: {
-            context,
+            context: modelContext,
             intent: decision.intent,
             decision,
             toolResult,
@@ -186,7 +188,10 @@ export function createLegacyMoriAgent(llm, options = {}) {
         capabilityStage(logRun, 'agent_final_response_validated', { response: validated.response })
         const response = safeToolResponse(toolResult, validated.response)
         if (response !== validated.response) capabilityStage(logRun, 'agent_tool_response_safety_applied', { originalResponse: validated.response, response, tool: tool.name, toolStatus: toolResult?.status })
-        push('FINAL_RESPONSE', { response })
+        // 有客户端动作时，这只是 API 返回给 Extension 的过渡文案；用户最终看到的回复
+        // 要等 Spotify 确认后由 /agent/action-result 单独记录，不能继续叫 final response。
+        capabilityStage(logRun, 'agent_planned_response', { response, plannedAction })
+        trace.push(agentStep(runId, 'FINAL_RESPONSE', { response }))
         return completeRun(logRun, runId, started, final.model, mergeRunTokenUsage(understood.tokenUsage, decisionTokenUsage, final.tokenUsage), response, trace, plannedAction, context)
       } catch (cause) {
         const error = cause instanceof Error ? cause.message : String(cause)

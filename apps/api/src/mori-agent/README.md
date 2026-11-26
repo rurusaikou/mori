@@ -70,7 +70,9 @@ State validation
 
 每轮最多执行一个 Tool。模型不能直接操作 Spotify；Action 返回客户端动作后，Extension 仍需校验 URI、执行播放并以真实 Playback State 确认结果。
 
-正式 `/agent/run` 默认使用 LangGraph Runtime。`MORI_AGENT_RUNTIME=legacy` 只用于迁移期人工回退；`MORI_AGENT_RUNTIME=unified` 是显式启用的原生 Tool Calling/Streaming 实验入口。三者不会在单次失败后互相自动重跑，以免重复执行播放计划。`npm run test:api` 会把完整 API 测试分别跑在 Legacy 和 Graph 上，并额外覆盖 Unified 的 Tool 授权与流式契约。
+正式 `/agent/run` 默认使用 Unified Runtime。`MORI_AGENT_RUNTIME=graph` 和 `MORI_AGENT_RUNTIME=legacy` 仅用于显式人工回退。Unified 的客户端动作分支只调用一次 Conversation Model：Tool 返回 `PENDING` 后直接流式输出确定性 planned response，不再调用无真实观察可总结的 Final Response Model；读取型 Tool 仍会把真实观察返回 Agent 继续回答。明确当前句动作使用代码授权，依赖上轮提议的含糊确认仍使用语义授权。
+
+三种 Runtime 不会在单次失败后互相自动重跑，以免重复执行播放计划。`npm run test:api` 会把完整 API 测试分别跑在 Legacy 和 Graph 上，并额外覆盖 Unified 的 Tool 授权、单次模型动作分支与流式契约。`npm run eval:unified` 执行来自真实 bad case 的主链评测；模型端点不可用时会中止，不会把基础设施失败记成模型 0 分。在真实评测通过前不切换默认 Runtime。
 
 ## 专项文档
 

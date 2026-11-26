@@ -9,7 +9,7 @@ import { playbackFactIssue, responseQualityIssue, safePlaybackFallback, safeResp
 import { DECISION_REPAIR_PROMPT, decisionSystemPrompt, FINAL_RESPONSE_PROMPT, RESPONSE_REPAIR_PROMPT } from '../expression/prompts.mjs'
 import { AGENT_DECISION_SCHEMA, FINAL_RESPONSE_SCHEMA, agentStep, fallbackDecisionForUnderstanding, validateDecisionForUnderstanding, validateFinalResponse } from '../shared/agent-types.mjs'
 import { capabilityStage } from '../shared/logger.mjs'
-import { clientAction, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, prepareTargetRelevantMemory, relevantMemoryLogData, safeToolResponse } from './runtime-support.mjs'
+import { clientAction, createRuntimeTools, mergeRunTokenUsage, modelConversationContext, prepareRelevantMemory, prepareTargetRelevantMemory, relevantMemoryLogData, safeToolResponse } from './runtime-support.mjs'
 
 export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) {
   // Trace 与文件日志从同一个 record 入口产生，避免 Graph 可观测但 capability 日志缺阶段。
@@ -43,6 +43,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
           onRawOutput: (data) => capabilityStage(logRun, 'agent_conversation_understanding_raw', data),
           onInvalidEmotionEvidence: (data) => capabilityStage(logRun, 'agent_emotion_evidence_dropped', data),
           onInvalidGrounding: (data) => capabilityStage(logRun, 'agent_grounding_evidence_dropped', data),
+          onInvalidActionGrounding: (data) => capabilityStage(logRun, 'agent_action_grounding_dropped', data),
         }),
         prepareRelevantMemory(state.agentState, options),
       ])
@@ -68,6 +69,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
 
     async decision(state) {
       const tools = toolsFor(state)
+      const modelContext = modelConversationContext(state.context)
       capabilityStage(logRun, 'agent_tools_available', { tools: Object.values(tools).map(({ name, description }) => ({ name, description })) })
       capabilityStage(logRun, 'agent_decision_model_call', {
         scene: state.conversationUnderstanding.scene, listeningRequest: state.conversationUnderstanding.listeningRequest,
@@ -78,7 +80,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
       const first = await llm({
         prompt: decisionSystemPrompt(Object.values(tools)),
         input: {
-          context: state.context,
+          context: modelContext,
           understanding: state.conversationUnderstanding,
           availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })),
         },
@@ -98,7 +100,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
         trace.push(record(state, 'DECISION_REPAIR', { issue, rejectedDecision: first.data }))
         const repaired = await llm({
           prompt: DECISION_REPAIR_PROMPT,
-          input: { context: state.context, understanding: state.conversationUnderstanding, availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })), issue, rejectedDecision: first.data },
+          input: { context: modelContext, understanding: state.conversationUnderstanding, availableTools: Object.values(tools).map(({ name, description }) => ({ name, description })), issue, rejectedDecision: first.data },
           schema: AGENT_DECISION_SCHEMA,
           schemaName: 'mori_agent_decision_repair_v0_1',
         })
@@ -119,6 +121,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
     },
 
     async directResponse(state) {
+      const modelContext = modelConversationContext(state.context)
       const qualityIssue = responseQualityIssue(state.decision, state.agentState)
       capabilityStage(logRun, 'agent_direct_response_selected', { response: state.decision.response })
       capabilityStage(logRun, 'agent_response_quality_checked', { passed: !qualityIssue, issue: qualityIssue })
@@ -131,7 +134,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
         trace.push(record(state, 'RESPONSE_REPAIR', { issue: qualityIssue, rejectedResponse: finalResponse }))
         const repaired = await llm({
           prompt: RESPONSE_REPAIR_PROMPT,
-          input: { context: state.context, understanding: state.conversationUnderstanding, issue: qualityIssue, rejectedResponse: finalResponse },
+          input: { context: modelContext, understanding: state.conversationUnderstanding, issue: qualityIssue, rejectedResponse: finalResponse },
           schema: FINAL_RESPONSE_SCHEMA,
           schemaName: 'mori_agent_response_repair_v0_1',
         })
@@ -191,7 +194,7 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
       const final = await llm({
         prompt: FINAL_RESPONSE_PROMPT,
         input: {
-          context: state.context,
+          context: modelConversationContext(state.context),
           intent: state.decision.intent,
           decision: state.decision,
           toolResult: state.toolResult,
@@ -207,11 +210,12 @@ export function createMoriGraphNodes({ llm, options, musicSearchMode, logRun }) 
       capabilityStage(logRun, 'agent_final_response_validated', { response: validated.response })
       const finalResponse = safeToolResponse(state.toolResult, validated.response)
       if (finalResponse !== validated.response) capabilityStage(logRun, 'agent_tool_response_safety_applied', { originalResponse: validated.response, response: finalResponse, tool: state.toolName, toolStatus: state.toolResult?.status })
+      if (state.action) capabilityStage(logRun, 'agent_planned_response', { response: finalResponse, plannedAction: state.action })
       return {
         finalResponse,
         model: final.model,
         tokenUsage: mergeRunTokenUsage(state.understandingTokenUsage, state.firstTokenUsage, final.tokenUsage),
-        trace: [record(state, 'FINAL_RESPONSE', { response: finalResponse })],
+        trace: [state.action ? agentStep(state.runId, 'FINAL_RESPONSE', { response: finalResponse }) : record(state, 'FINAL_RESPONSE', { response: finalResponse })],
       }
     },
   }
