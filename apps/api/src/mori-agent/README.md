@@ -1,6 +1,6 @@
 # Mori Agent 模块说明
 
-Mori 的产品智能由 Conversation Intelligence、Music Intelligence 和 Personal Intelligence 组成；本目录再按 Perception、Brain、Expression、Action 四个工程主体组织实现。产品智能回答“用户为什么觉得 Mori 聪明”，工程分层回答“代码职责放在哪里”，两者不是同一套分类。完整定义见 [实现说明](../../../../docs/IMPLEMENTATION.md)，四层架构见 [系统架构](../../../../docs/ARCHITECTURE.md)，物理目录见 [代码结构](../../../../docs/CODE_STRUCTURE.md)。
+Mori 的产品智能由 Conversation Intelligence、Music Intelligence 和 Personal Intelligence 组成；本目录再按 Perception、Brain、Expression、Action 四个工程主体组织实现。产品智能回答“用户为什么觉得 Mori 聪明”，工程分层回答“代码职责放在哪里”，两者不是同一套分类。完整定义见 [实现说明](../../../../docs/02_SYSTEM_ARCHITECTURE.md)，四层架构见 [系统架构](../../../../docs/02_SYSTEM_ARCHITECTURE.md)，物理目录见 [代码结构](../../../../docs/04_CODE_REFERENCE.md)。
 
 | 产品智能 | 主要工程落点 |
 |---|---|
@@ -26,7 +26,7 @@ mori-agent/
 ├── action/                     # 行动：受控 Tool；不直接拥有产品状态
 │   └── tools/
 ├── runtime/                    # 四层编排，不承载任何一层的业务判断
-│   ├── index.mjs               # 默认 Graph / Legacy 回退 / Unified 实验入口
+│   ├── index.mjs               # 默认 Unified / Graph 与 Legacy 显式回退
 │   ├── graph-state.mjs         # MoriGraphState
 │   ├── graph-nodes.mjs         # 现有领域函数的 Node Wrapper
 │   ├── mori-graph-runtime.mjs  # LangGraph Edge 与执行
@@ -72,22 +72,24 @@ State validation
 
 正式 `/agent/run` 默认使用 Unified Runtime。`MORI_AGENT_RUNTIME=graph` 和 `MORI_AGENT_RUNTIME=legacy` 仅用于显式人工回退。Unified 的客户端动作分支只调用一次 Conversation Model：Tool 返回 `PENDING` 后直接流式输出确定性 planned response，不再调用无真实观察可总结的 Final Response Model；读取型 Tool 仍会把真实观察返回 Agent 继续回答。明确当前句动作使用代码授权，依赖上轮提议的含糊确认仍使用语义授权。
 
-三种 Runtime 不会在单次失败后互相自动重跑，以免重复执行播放计划。`npm run test:api` 会把完整 API 测试分别跑在 Legacy 和 Graph 上，并额外覆盖 Unified 的 Tool 授权、单次模型动作分支与流式契约。`npm run eval:unified` 执行来自真实 bad case 的主链评测；模型端点不可用时会中止，不会把基础设施失败记成模型 0 分。在真实评测通过前不切换默认 Runtime。
+Mori 主动建议音乐时必须使用无副作用的 `propose_music`，并写入 `conversationState.pendingProposal`。该提议只对紧邻的下一条用户回复有效：接受后转为动作，拒绝、转移话题、读取其他信息或 Tool 校验失败后均清除。`propose_music.response` 必须是等待确认的问句，不得声称已经播放。
+
+三种 Runtime 不会在单次失败后互相自动重跑，以免重复执行播放计划。`npm run test:api` 会把完整 API 测试分别跑在 Legacy 和 Graph 上，并额外覆盖默认 Unified 的 Tool 授权、`pendingProposal`、单次模型动作分支与流式契约。`npm run eval:unified` 执行来自真实 bad case 的主链评测；模型端点不可用时会中止，不会把基础设施失败记成模型 0 分。如需紧急回退，显式设置 `MORI_AGENT_RUNTIME=graph`。
 
 ## 专项文档
 
 | 主题 | 文档 |
 |---|---|
-| 主链全部问题、根因、方案和状态 | [主链问题与改进总账](../../../../docs/MORI_MAIN_CHAIN_ISSUES.md) |
-| 三个用户场景与唯一主流程 | [三场景主流程](../../../../docs/MORI_THREE_SCENES_2026-11-21.md) |
-| 四层模块完成度、证据与验收标准 | [模块成熟度](../../../../docs/MORI_MODULE_MATURITY_2026-11-19.md) |
-| Memory 契约、存储与评判标准 | [Memory V0.1](../../../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md) |
-| P0–P3 实施与缺陷复盘 | [Memory 演进记录](../../../../docs/MORI_MEMORY_EVOLUTION_2026-11-24.md) |
-| Post-turn 与 Recall 闭环复盘 | [Memory 闭环补全](../../../../docs/MORI_MEMORY_CLOSURE_2026-11-25.md) |
-| 歌曲四层证据与协作边界 | [Song Understanding V0.1](../../../../docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md) |
-| 日志来源与排查方式 | [日志说明](../../../../docs/LOGGING.md) |
-| LangGraph 迁移范围与回退策略 | [迁移记录](../../../../docs/MORI_LANGGRAPH_MIGRATION_2026-11-19.md) |
-| 每个 Tool 的实现、流程图与副作用边界 | [Tool 实现说明](../../../../docs/MORI_AGENT_TOOLS_2026-11-21.md) |
+| 主链全部问题、根因、方案和状态 | [主链问题与改进总账](../../../../docs/08_ISSUES_AND_RETROSPECTIVES.md) |
+| 三个用户场景与唯一主流程 | [三场景主流程](../../../../docs/01_PRODUCT_DESIGN.md) |
+| 四层模块完成度、证据与验收标准 | [模块成熟度](../../../../docs/03_MODULE_ARCHITECTURE.md) |
+| Memory 契约、存储与评判标准 | [Memory V0.1](../../../../docs/03_MODULE_ARCHITECTURE.md) |
+| P0–P3 实施与缺陷复盘 | [Memory 演进记录](../../../../docs/03_MODULE_ARCHITECTURE.md) |
+| Post-turn 与 Recall 闭环复盘 | [Memory 闭环补全](../../../../docs/03_MODULE_ARCHITECTURE.md) |
+| 歌曲四层证据与协作边界 | [Song Understanding V0.1](../../../../docs/03_MODULE_ARCHITECTURE.md) |
+| 日志来源与排查方式 | [日志说明](../../../../docs/07_OPERATIONS_TROUBLESHOOTING.md) |
+| LangGraph 迁移范围与回退策略 | [迁移记录](../../../../docs/09_TECHNICAL_GOVERNANCE.md) |
+| 每个 Tool 的实现、流程图与副作用边界 | [Tool 实现说明](../../../../docs/03_MODULE_ARCHITECTURE.md) |
 
 ## 开发入口
 

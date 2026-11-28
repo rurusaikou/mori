@@ -2,7 +2,7 @@
 
 Mori 是悬浮在浏览器中的 AI 音乐知音伙伴。Spotify 是当前 Music Provider；Mori 提供跨网页常驻角色、播放控制、歌单浏览、对话和经用户允许保存的音乐记忆。
 
-文档入口：主链问题、根因、方案和状态统一见 [MORI_MAIN_CHAIN_ISSUES.md](docs/MORI_MAIN_CHAIN_ISSUES.md)，三个产品场景与主流程见 [MORI_THREE_SCENES_2026-11-21.md](docs/MORI_THREE_SCENES_2026-11-21.md)，产品边界见 [PRODUCT.md](docs/PRODUCT.md)，四层系统架构见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)，代码导航见 [CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md)，运行逻辑见 [IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。Tool 的实现和流程图见 [MORI_AGENT_TOOLS_2026-11-21.md](docs/MORI_AGENT_TOOLS_2026-11-21.md)，Memory 历史设计见 [MORI_AGENT_MEMORY_V0.1_2026-11-12.md](docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md)，歌曲四层理解见 [MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md](docs/MORI_SONG_UNDERSTANDING_AGENT_V0.1_2026-11-15.md)。本轮上下文、Tool 边界与日志修复复盘见 [MORI_CONTEXT_AND_OBSERVABILITY_FIX_2026-11-26.md](docs/MORI_CONTEXT_AND_OBSERVABILITY_FIX_2026-11-26.md)。
+项目文档已经合并为九份主文档：[产品设计](docs/01_PRODUCT_DESIGN.md)、[产品与技术总架构](docs/02_SYSTEM_ARCHITECTURE.md)、[子模块架构](docs/03_MODULE_ARCHITECTURE.md)、[代码说明](docs/04_CODE_REFERENCE.md)、[开发环境与使用说明](docs/05_DEVELOPMENT_GUIDE.md)、[测试与质量保障](docs/06_QUALITY_ASSURANCE.md)、[运行、日志与排障](docs/07_OPERATIONS_TROUBLESHOOTING.md)、[问题总账与缺陷复盘](docs/08_ISSUES_AND_RETROSPECTIVES.md)、[技术决策、研究与数据安全](docs/09_TECHNICAL_GOVERNANCE.md)。
 
 本仓库按前端应用、后端边界和共享包分类，不再包含 Electron、Desktop UI、Soloist 或 Next.js 应用。
 
@@ -83,5 +83,5 @@ Content Script 不读取 Spotify DOM，也不持有 OAuth Token。Background 是
 
 ## 文档
 
-`docs/` 按三类管理：`PRODUCT / ARCHITECTURE / CODE_STRUCTURE / IMPLEMENTATION` 是入口文档；`MORI_AGENT_*` 和 `MORI_SONG_*` 是模块设计；带 `RESEARCH / AUDIT / GUIDE` 的文件是调研与历史决策。当前正在实施的模块文档进入版本控制，其余本地研究资料默认忽略。API 运行配置和调试入口集中在 [apps/api/README.md](apps/api/README.md)，避免在根 README 重复维护环境变量细节。
+`docs/` 只保留上述九份分类文档，不再按单次功能、日期或缺陷创建零散文件。新的稳定设计写入对应分类；新的问题和复盘追加到问题总账；研究与架构决策追加到技术治理。API 运行配置和调试入口集中在 [apps/api/README.md](apps/api/README.md)，避免重复维护环境变量细节。
 

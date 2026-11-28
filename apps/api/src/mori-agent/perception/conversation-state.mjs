@@ -26,6 +26,8 @@ export function normalizeConversationState(value, fallback = EMPTY_CONVERSATION_
 }
 
 function normalizePendingProposal(value, fallback) {
+  // Proposal 是短期执行协议，不是普通 Fact。严格校验固定结构，
+  // 防止旧版本的自由文本 unresolvedContext 被误当成可执行授权。
   if (value === null) return null
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback ?? null
   const query = optionalText(value.query, 160)

@@ -1,3 +1,8 @@
+/**
+ * Mori 默认对话主链：一次 Conversation Model 同时完成理解、表达和 Tool 选择。
+ * 读取型 Tool 将真实观察送回模型收尾；Spotify 副作用只生成客户端 Action Plan，
+ * 不在没有执行结果时调用第二次模型。所有音乐副作用必须通过当前轮动作授权。
+ */
 import { randomUUID } from 'node:crypto'
 import { END, START, StateGraph, Annotation } from '@langchain/langgraph'
 import { agentStep, validateDecisionForUnderstanding } from '../shared/agent-types.mjs'
@@ -8,7 +13,7 @@ import { buildMoriContext } from '../context/context-builder.mjs'
 import { loadMoriPersona } from '../persona/persona-loader.mjs'
 import { understandConversation } from '../perception/conversation-understanding.mjs'
 import { createAgentState } from '../perception/state.mjs'
-import { clientAction, completeRun, createRuntimeTools, mergeRunTokenUsage, prepareRelevantMemory, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
+import { clientAction, completeRun, createRuntimeTools, prepareRelevantMemory, safeToolResponse, validateRuntimeOptions } from './runtime-support.mjs'
 
 const value = () => Annotation()
 const UnifiedState = Annotation.Root({
@@ -134,7 +139,9 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
         contextBudget: built.budget,
       })
       return {
-        agentState, context: { ...context, messages, budget: built.budget }, messages, toolDefinitions,
+        // Prompt messages 和预算是本次模型调用资料，不是产品 Conversation Context。
+        // 分开保存可避免动作回写和客户端状态携带一份重复 Prompt。
+        agentState, context, messages, toolDefinitions,
         trace: [record(state, 'UNIFIED_CONTEXT', {
           messageRoles: messages.map(({ role }) => role), topic: agentState.conversationState.activeTopic,
           currentTrack: agentState.currentTrack, toolNames: toolDefinitions.map((tool) => tool.name),
@@ -167,6 +174,11 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
         firstResponse, model: response.model, tokenUsage: response.tokenUsage,
         finalResponse: firstResponse.toolCalls.length ? null : directResponse,
         messages: [...state.messages, assistantMessage(firstResponse)],
+        // pendingProposal 只对紧邻的下一条用户回复有效。如果该轮直接回答而没有
+        // 接受提议或创建新提议，必须消耗并清除旧提议，避免后续“嗯/好”误触发。
+        context: firstResponse.toolCalls.length || !state.context.conversationState.pendingProposal
+          ? state.context
+          : { ...state.context, conversationState: { ...state.context.conversationState, pendingProposal: null } },
         trace: [record(state, 'UNIFIED_AGENT_RESPONSE', { content: firstResponse.content, toolCalls: firstResponse.toolCalls })],
       }
     },
@@ -186,9 +198,12 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
         let observation
         if (tooManyCalls) observation = { ok: false, error: '本轮最多执行一个 Tool；所有并发 Tool Call 均未执行' }
         else if (call.name === 'propose_music') {
-          const query = typeof args?.query === 'string' ? args.query.trim() : ''
-          const response = typeof args?.response === 'string' ? args.response.trim() : ''
-          if (!query || !response) observation = { ok: false, error: 'propose_music 需要非空 query 和 response' }
+          const query = validationError ? '' : args.query.trim()
+          const response = validationError ? '' : args.response.trim()
+          const responseIssue = validationError ? null : playbackFactIssue(response, state.agentState)
+          if (validationError) observation = { ok: false, error: validationError }
+          else if (!/[?？]/u.test(response)) observation = { ok: false, error: 'propose_music.response 必须是等待用户确认的问句' }
+          else if (responseIssue) observation = { ok: false, error: `propose_music.response 不能声称未执行的播放事实：${responseIssue}` }
           else {
             proposal = { type: 'RECOMMEND', query, status: 'AWAITING_CONFIRMATION' }
             observation = { ok: true, result: { status: 'PROPOSED', proposal } }
@@ -226,7 +241,7 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
       // 确认 Spotify 状态后回写；读取型 Tool 仍进入 final_response 让 Agent 基于观察回答。
       const actionResult = action ? observations.findLast(({ observation }) => observation.ok)?.observation?.result : null
       const plannedResponse = action ? safeToolResponse(actionResult, '') : null
-      const proposalResponse = proposal ? observations.find(({ call }) => call.name === 'propose_music')?.call.arguments.response.trim() : null
+      const proposalResponse = proposal ? state.firstResponse.toolCalls.find((call) => call.name === 'propose_music')?.arguments.response.trim() : null
       const immediateResponse = plannedResponse ?? proposalResponse
       if (immediateResponse) onStreamEvent?.({ type: 'delta', text: immediateResponse })
       capabilityStage(logRun, 'agent_unified_tool_observed', { observations })
@@ -269,6 +284,11 @@ function createUnifiedNodes({ agentLlm, options, logRun, onStreamEvent, signal }
       return {
         finalResponse, model: response.model, tokenUsage,
         action: state.action ?? null,
+        // 读取型 Tool 或被拒绝的 Tool Call 已经消耗了当前轮次；旧提议不能
+        // 穿过这一轮继续等待之后的短回复。
+        context: state.context.conversationState.pendingProposal
+          ? { ...state.context, conversationState: { ...state.context.conversationState, pendingProposal: null } }
+          : state.context,
         trace: [record(state, 'UNIFIED_FINAL_RESPONSE', { response: finalResponse })],
       }
     },

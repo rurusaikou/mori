@@ -1,3 +1,7 @@
+/**
+ * 只根据 Extension 已确认的执行事实生成完成文案。这里故意不调用 LLM：
+ * 客户端动作结果必须与用户看到的文案一致，不能再让模型改写播放事实。
+ */
 export function completedActionResponse(action, track) {
   if (action.type === 'music_request') {
     if (!track) return action.intent === 'SEARCH'

@@ -305,6 +305,47 @@ test('P1 a completed music action clears the pending proposal', async () => {
   assert.equal(result.conversationContext.conversationState.pendingProposal, null)
 })
 
+test('a rejected or ignored proposal expires after the immediately following turn', async () => {
+  const runtime = createMoriAgent(async () => ({
+    content: '好，那我们先不听。', toolCalls: [], model: 'unified-test', tokenUsage: null,
+  }), { runtime: 'unified', persona: 'Mori Persona', logSource: 'test' })
+  const result = await runtime.execute({
+    ...base, userMessage: '不用了', conversationHistory: [],
+    conversationState: { activeTopic: '放松', entities: [], facts: [], lastUserMessage: null, lastAssistantMessage: '要不要听点轻快的？', unresolvedContext: null, pendingProposal: { type: 'RECOMMEND', query: '轻快', status: 'AWAITING_CONFIRMATION' } },
+  })
+
+  assert.equal(result.action, undefined)
+  assert.equal(result.conversationContext.conversationState.pendingProposal, null)
+})
+
+test('propose_music cannot claim playback completion or omit the confirmation question', async () => {
+  let calls = 0
+  const runtime = createMoriAgent(async () => {
+    calls += 1
+    if (calls === 1) return {
+      content: '', model: 'unified-test', tokenUsage: null,
+      toolCalls: [{ id: 'bad-proposal', name: 'propose_music', arguments: { query: '轻快', response: '已经给你播放轻快的歌了，要继续听吗？' } }],
+    }
+    return { content: '今晚先慢一点也好。', toolCalls: [], model: 'unified-test', tokenUsage: null }
+  }, { runtime: 'unified', persona: 'Mori Persona', logSource: 'test' })
+  const result = await runtime.execute({ ...base, userMessage: '今天有点累', conversationHistory: [] })
+
+  assert.equal(calls, 2)
+  assert.equal(result.action, undefined)
+  assert.equal(result.conversationContext.conversationState.pendingProposal, null)
+  assert.equal(result.finalResponse, '今晚先慢一点也好。')
+})
+
+test('unified direct reply cannot claim that new music has already started', async () => {
+  const runtime = createMoriAgent(async () => ({
+    content: '已经给你播放轻快的歌了。', toolCalls: [], model: 'unified-test', tokenUsage: null,
+  }), { runtime: 'unified', persona: 'Mori Persona', logSource: 'test' })
+  const result = await runtime.execute({ ...base, userMessage: '今天有点累', conversationHistory: [] })
+
+  assert.equal(result.action, undefined)
+  assert.equal(result.finalResponse, '我还没有开始新的播放。你想听什么，可以直接告诉我。')
+})
+
 test('unified runtime rejects all calls when the model returns multiple tools', async () => {
   const requests = []
   const runtime = createMoriAgent(async (value) => {

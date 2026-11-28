@@ -67,23 +67,16 @@ GET  /agent/capability-logs
 | Extension 聊天 | `POST /agent/run` | Extension 真实曲库候选 | 保留，需 Extension Origin |
 | Agent Playground | `/agent-playground`、`POST /agent/playground/run` | Mock | 关闭 |
 
-Agent 一次最多执行一个 Tool；Moment 始终是用户操作，不是 Tool。正式上下文、播放动作校验、Trace 与限制统一记录在 [`docs/IMPLEMENTATION.md`](../../docs/IMPLEMENTATION.md) 的“对话与记忆”，本 README 只保留 API 运维入口。
+Agent 一次最多执行一个 Tool；Moment 始终是用户操作，不是 Tool。正式上下文、播放动作校验、Trace 与限制统一记录在 [`docs/02_SYSTEM_ARCHITECTURE.md`](../../docs/02_SYSTEM_ARCHITECTURE.md) 的“对话与记忆”，本 README 只保留 API 运维入口。
 
-`/agent/run` 默认使用 LangGraph Runtime。迁移期需要人工回退时设置：
-
-```dotenv
-MORI_AGENT_RUNTIME=legacy
-```
-
-不要在一次失败请求中自动改用 Legacy 重跑，否则可能重复调用 Tool 或计划同一个播放动作。恢复 Graph 时删除该配置或设为 `graph`。
-
-Unified Runtime 通过以下配置显式启用：
+`/agent/run` 默认使用 Unified Runtime。需要人工回退到 Graph 或 Legacy 时设置：
 
 ```dotenv
-MORI_AGENT_RUNTIME=unified
+MORI_AGENT_RUNTIME=graph
+# 或 MORI_AGENT_RUNTIME=legacy
 ```
 
-它使用 `mori-persona.md`、分层且有字符预算的 Context Builder 和真实 role 消息；Memory 注入会保留确认状态、来源、匹配理由和证据摘要。每轮最多执行一个 Tool，playback/search/recommend 会在执行前做条件式 Structured Understanding 授权，成功后复用现有 Extension 执行、Spotify 确认和 Action Result 回写。`graph` 仍是默认正式流程。
+不要在一次失败请求中自动切换 Runtime 重跑，否则可能重复调用 Tool 或计划同一个播放动作。删除该配置即可恢复默认 Unified。Unified 使用 `mori-persona.md`、分层且有字符预算的 Context Builder 和真实 role 消息；Memory 注入会保留确认状态、来源、匹配理由和证据摘要。每轮最多执行一个 Tool，playback/search/recommend 会在执行前做条件式 Structured Understanding 授权，成功后复用现有 Extension 执行、Spotify 确认和 Action Result 回写。
 
 Unified 支持从 `/agent/stream` 获取 SSE 增量文本；旧 Runtime 也兼容该端点，但只发送最终结果。流式回复若随后转入 Tool，会先发 reset 事件，再在 Observation 后流式输出最终回复。流式播放状态仍受现有事实保护。
 
@@ -102,7 +95,7 @@ MORI_MEMORY_DATABASE_URL=postgresql://mori:password@127.0.0.1:5432/mori
 MORI_MEMORY_USER_ID=local-development-user
 ```
 
-`MORI_MEMORY_USER_ID` 只是 V0.1 本地开发身份，不能用于生产多用户隔离。Embedding 和 Schema 说明见 [`MORI_AGENT_MEMORY_V0.1_2026-11-12.md`](../../docs/MORI_AGENT_MEMORY_V0.1_2026-11-12.md)。
+`MORI_MEMORY_USER_ID` 只是 V0.1 本地开发身份，不能用于生产多用户隔离。Embedding 和 Schema 说明见 [`03_MODULE_ARCHITECTURE.md`](../../docs/03_MODULE_ARCHITECTURE.md)。
 
 ## 结构
 

@@ -27,13 +27,16 @@ export function playbackFactIssue(response, state) {
   if (claimsTrackChanged(value)) {
     return '本轮没有客户端切歌动作，回复不能声称正在切歌或已经切歌；保留原本的对话内容，只修正动作表述'
   }
+  if (claimsPlaybackStarted(value)) {
+    return '本轮没有客户端播放动作，回复不能声称已经为用户启动了新音乐'
+  }
   return null
 }
 
 export function safePlaybackFallback(issue) {
-  return issue.includes('暂停')
-    ? '音乐还在继续。你想安静一下的话，告诉我一声，我可以替你暂停。'
-    : '音乐还没有切换。你想换一首的话，告诉我你现在想听什么。'
+  if (issue.includes('暂停')) return '音乐还在继续。你想安静一下的话，告诉我一声，我可以替你暂停。'
+  if (issue.includes('启动了新音乐')) return '我还没有开始新的播放。你想听什么，可以直接告诉我。'
+  return '音乐还没有切换。你想换一首的话，告诉我你现在想听什么。'
 }
 
 export function safeResponseFallback(issue) {
@@ -57,6 +60,12 @@ function claimsTrackChanged(value) {
     || /已(?:切到|换到).{0,12}(?:下一首|上一首)/u.test(value)
     || /正在(?:为你|帮你)?(?:切歌|切换|切到|换到)/u.test(value)
     || /(?:下一首|上一首).{0,6}(?:已经|已)开始播放/u.test(value)
+}
+
+function claimsPlaybackStarted(value) {
+  if (/(?:没有|没|尚未|还未|还没|不能|无法|并未).{0,12}(?:播放|开始播放)/u.test(value)) return false
+  return /(?:已经|已|刚刚)(?:为你|给你|帮你)?(?:播放|放)(?:了|上了|.{1,16}(?:了|起来了))/u.test(value)
+    || /(?:已经|已)(?:为你|给你|帮你)?.{0,10}开始播放/u.test(value)
 }
 
 function isUnsupportedRandomRecommendationExplanation(state, response) {
